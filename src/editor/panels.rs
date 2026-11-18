@@ -299,7 +299,18 @@ impl Editor {
                             mood,
                             self.preferences.reduce_motion,
                         ) {
-                            self.hub_open = true;
+                            self.companion.open = true;
+                        }
+                        let (running, waiting) = self.companion.counts();
+                        if running + waiting > 0
+                            && ui
+                                .selectable_label(
+                                    self.companion.open,
+                                    muted(format!("{running} active · {waiting} approvals")),
+                                )
+                                .clicked()
+                        {
+                            self.companion.open = true;
                         }
                         if let Some((error, text)) = &self.notice {
                             ui.add(
@@ -313,13 +324,13 @@ impl Editor {
                             .on_hover_text(text);
                         } else if let Some(root) = &self.root {
                             let name = workspace::filename(root);
+                            let (_, project_icon) = ui.allocate_space(egui::vec2(16.0, 18.0));
                             draw_icon(
                                 ui.painter(),
-                                left.left_center() + egui::vec2(7.0, 0.0),
+                                project_icon.center(),
                                 Icon::Explorer,
                                 colors().muted,
                             );
-                            ui.add_space(18.0);
                             ui.add(egui::Label::new(muted(name)).truncate())
                                 .on_hover_text(root.display().to_string());
                         } else {

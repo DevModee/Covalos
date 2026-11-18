@@ -673,6 +673,27 @@ pub(super) fn modal_frame() -> Frame {
         .stroke(Stroke::new(1.0_f32, colors().control_border))
 }
 
+/// Short surface entry; input remains available throughout the transition.
+pub(super) fn enter(ui: &mut egui::Ui, id: egui::Id) {
+    let duration = ui.style().animation_time;
+    if duration <= 0.0 {
+        return;
+    }
+    let frame = ui.ctx().cumulative_frame_nr();
+    let now = ui.input(|i| i.time);
+    let start = ui.ctx().data_mut(|data| {
+        let (last, started) = data.get_temp::<(u64, f64)>(id).unwrap_or((frame, now));
+        let started = if frame > last + 1 { now } else { started };
+        data.insert_temp(id, (frame, started));
+        started
+    });
+    let progress = ((now - start) / f64::from(duration)).clamp(0.0, 1.0) as f32;
+    ui.multiply_opacity(egui::emath::easing::cubic_out(progress));
+    if progress < 1.0 {
+        ui.ctx().request_repaint();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

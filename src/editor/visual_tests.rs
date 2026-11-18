@@ -20,6 +20,9 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
         "file-dialog",
         "terminal",
         "source-control",
+        "companion",
+        "motion-start",
+        "motion-end",
     ];
 
     struct Review {
@@ -30,7 +33,16 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
         stage: usize,
         settle: usize,
         requested: bool,
+        hook: Option<std::process::Child>,
         deadline: Instant,
+    }
+    impl Drop for Review {
+        fn drop(&mut self) {
+            if let Some(mut child) = self.hook.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
     }
     impl Review {
         fn enter(&mut self, ctx: &egui::Context) {
@@ -61,6 +73,33 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
                 11 => {
                     self.editor.sidebar = Sidebar::Git;
                     self.editor.git_refresh(ctx, None);
+                }
+                12 => {
+                    self.editor.companion.open = true;
+                    if let Some(exe) = std::env::var_os("AEROS_TEST_EXE") {
+                        use std::io::Write;
+                        self.editor.companion.start(ctx);
+                        let mut child = std::process::Command::new(exe)
+                            .arg("--agent-hook")
+                            .stdin(std::process::Stdio::piped())
+                            .stdout(std::process::Stdio::null())
+                            .spawn()
+                            .expect("spawn test hook");
+                        let payload = serde_json::json!({"session_id":"native-contract-test","hook_event_name":"PermissionRequest","cwd":self.root,"tool_name":"Write","tool_input":{"file_path":"fixture-only.rs","content":"INTEGRATION TEST — no tool is executed"}});
+                        child
+                            .stdin
+                            .take()
+                            .unwrap()
+                            .write_all(payload.to_string().as_bytes())
+                            .unwrap();
+                        self.hook = Some(child);
+                    }
+                }
+                13 | 14 => {
+                    self.editor.companion.open = false;
+                    self.editor.documents.clear();
+                    self.editor.active = None;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                 }
                 _ => {}
             }
@@ -100,6 +139,26 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
                     image::ColorType::Rgba8,
                 )
                 .expect("write native review frame");
+                if self.stage == 12 && self.hook.is_some() {
+                    if let Some(dir) = crate::agent_bridge::directory() {
+                        for session in crate::agent_bridge::read_sessions(&dir) {
+                            if session.id == "native-contract-test" && session.approvable {
+                                crate::agent_bridge::decide(&dir, &session, false)
+                                    .expect("deny test hook");
+                            }
+                        }
+                    }
+                    if let Some(mut child) = self.hook.take() {
+                        let until = Instant::now() + Duration::from_secs(2);
+                        while child.try_wait().unwrap().is_none() && Instant::now() < until {
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                        if child.try_wait().unwrap().is_none() {
+                            let _ = child.kill();
+                        }
+                        let _ = child.wait();
+                    }
+                }
                 self.stage += 1;
                 if self.stage == SCREENS.len() {
                     self.editor.force_close = true;
@@ -110,7 +169,12 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
             }
             self.editor.render(ctx);
             self.settle += 1;
-            if self.settle > 5 && !self.requested {
+            let settle_frames = if self.stage == 12 || self.stage == 14 {
+                65
+            } else {
+                5
+            };
+            if self.settle > settle_frames && !self.requested {
                 ctx.send_viewport_cmd(ViewportCommand::Screenshot(UserData::default()));
                 self.requested = true;
             }
@@ -169,6 +233,9 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
             preferences.reduce_motion = std::env::var("AEROS_REVIEW_REDUCE").as_deref() == Ok("1");
             preferences.compact = std::env::var("AEROS_REVIEW_COMPACT").as_deref() == Ok("1");
             let mut editor = Editor::new(&cc.egui_ctx, Some(root.clone()), preferences);
+            if std::env::var_os("AEROS_TEST_EXE").is_some() {
+                editor.companion.start(&cc.egui_ctx);
+            }
             editor
                 .preferences
                 .recent
@@ -181,7 +248,8 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
                 stage: 0,
                 settle: 0,
                 requested: false,
-                deadline: Instant::now() + Duration::from_secs(45),
+                hook: None,
+                deadline: Instant::now() + Duration::from_secs(90),
             }))
         }),
     )?;

@@ -12,6 +12,8 @@ pub(super) struct Preferences {
     pub(super) font_size: f32,
     pub(super) compact: bool,
     pub(super) reduce_motion: bool,
+    pub(super) quiet_notifications: bool,
+    pub(super) notification_interval: u64,
     pub(super) high_contrast: bool,
     pub(super) assistant_open: bool,
     pub(super) tools_open: bool,
@@ -33,6 +35,8 @@ impl Default for Preferences {
             font_size: 14.0,
             compact: false,
             reduce_motion: false,
+            quiet_notifications: false,
+            notification_interval: 15,
             high_contrast: false,
             assistant_open: true,
             tools_open: false,
@@ -73,6 +77,7 @@ impl Preferences {
             Err(e) => return Err(e),
         };
         prefs.identity.sanitize();
+        prefs.notification_interval = prefs.notification_interval.clamp(5, 120);
         prefs.font_size = prefs.font_size.clamp(11.0, 26.0);
         prefs.sidebar_width = prefs.sidebar_width.clamp(155.0, 340.0);
         prefs.assistant_width = prefs.assistant_width.clamp(230.0, 520.0);

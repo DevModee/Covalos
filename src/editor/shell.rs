@@ -316,6 +316,8 @@ impl Editor {
                     ui.label(muted("A kite-shaped orbital probe. Its state follows actual agent and search activity."));
                 });
                 ui.add_space(16.0);
+                checkbox(ui,&mut self.preferences.quiet_notifications,"Quiet agent notifications");
+                ui.add(egui::Slider::new(&mut self.preferences.notification_interval,5..=120).text("Taskbar attention interval").suffix(" s"));
                 section(ui,"Agent editing","Control how proposed changes reach your editor.");
                 checkbox(ui,&mut self.preferences.allow_auto_buffer,"Allow Auto buffer edits")
                     .on_hover_text("Auto applies an eligible replacement to the active buffer. Use Save to write the file.");
@@ -338,6 +340,7 @@ impl Editor {
             .frame(modal_frame())
             .area(area)
             .show(ctx, |ui| {
+                enter(ui, Id::new("quick-access-entry"));
                 ui.set_width(palette_width);
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Quick access").strong().size(LEAD));

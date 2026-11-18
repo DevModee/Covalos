@@ -136,6 +136,7 @@ pub(super) struct Hub {
 enum HubTab {
     #[default]
     Conversations,
+    Companion,
     Tasks,
     Memory,
     Skills,
@@ -211,6 +212,72 @@ fn strip_fence(text: &str) -> Option<&str> {
 }
 
 impl Hub {
+    pub(super) fn focus_session(&mut self, id: &str) {
+        self.general = id == "general";
+        self.tab = HubTab::Conversations;
+    }
+    pub(super) fn focus_approvals(&mut self) {
+        self.tab = HubTab::Tasks;
+    }
+    pub(super) fn snapshots(
+        &self,
+        workspace: &Chat,
+        root: Option<&std::path::Path>,
+    ) -> Vec<super::companion::Snapshot> {
+        use crate::agent_bridge::State;
+        let mut sessions = Vec::new();
+        for (id, label, chat) in [
+            ("workspace", "Workspace", workspace),
+            ("general", "General", &self.general_chat),
+            ("review", "Independent review", &self.reviewer),
+        ] {
+            if chat.run.is_none() && chat.session.is_none() && chat.last_outcome.is_none() {
+                continue;
+            }
+            let state = if id == "workspace" && self.proposal.is_some() {
+                State::Waiting
+            } else if chat.run.is_some() {
+                State::Running
+            } else {
+                match chat.last_outcome {
+                    Some(Outcome::Complete) => State::Completed,
+                    Some(Outcome::Failed) => State::Failed,
+                    Some(Outcome::Stopped) => State::Idle,
+                    _ => State::Idle,
+                }
+            };
+            let file = if id == "workspace" {
+                self.proposal
+                    .as_ref()
+                    .map(|p| p.path.display().to_string())
+                    .or_else(|| match &self.workflow {
+                        Some(Workflow::Assist { path, .. }) => Some(path.display().to_string()),
+                        _ => None,
+                    })
+            } else {
+                None
+            };
+            sessions.push(super::companion::Snapshot {
+                id: id.into(),
+                label: format!("{label} · {}", chat.provider.label()),
+                state,
+                operation: if state == State::Waiting {
+                    "Apply a proposed replacement to the editor buffer".into()
+                } else {
+                    chat.activity.into()
+                },
+                scope: if id == "workspace" {
+                    root.map(|p| p.display().to_string()).unwrap_or_default()
+                } else {
+                    "Isolated conversation · workspace tools disabled".into()
+                },
+                file,
+                external: None,
+            });
+        }
+        sessions
+    }
+
     pub(super) fn approval_pending(&self) -> bool {
         self.proposal.is_some()
     }
@@ -311,6 +378,7 @@ impl Editor {
                 ui.add_space(24.0);
                 for (tab, label) in [
                     (HubTab::Conversations, "Conversations"),
+                    (HubTab::Companion, "Live agents"),
                     (HubTab::Tasks, "Tasks"),
                     (HubTab::Memory, "Project memory"),
                     (HubTab::Skills, "Skills"),
@@ -336,6 +404,9 @@ impl Editor {
             ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
                 ui.set_width(body.width());
                 match self.hub.tab {
+                    HubTab::Companion => {
+                        egui::ScrollArea::vertical().show(ui, |ui| self.companion_panel(ui));
+                    }
                     HubTab::Tasks => {
                         section(
                             ui,
@@ -1207,5 +1278,30 @@ mod tests {
             "const VALUE: u32 = 1;\n"
         );
         Ok(())
+    }
+
+    #[test]
+    fn companion_does_not_infer_connectivity_and_tracks_approval_state() {
+        let mut hub = Hub::default();
+        let mut chat = Chat::default();
+        assert!(hub.snapshots(&chat, None).is_empty());
+        chat.session = Some("observed-session".into());
+        chat.last_outcome = Some(Outcome::Failed);
+        let snapshots = hub.snapshots(&chat, None);
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].state, crate::agent_bridge::State::Failed);
+        chat.last_outcome = Some(Outcome::Complete);
+        hub.proposal = Some(Proposal {
+            task: 0,
+            path: PathBuf::from("src/value.rs"),
+            snapshot: "before".into(),
+            edit: Replacement {
+                before: "before".into(),
+                after: "after".into(),
+            },
+        });
+        let snapshots = hub.snapshots(&chat, None);
+        assert_eq!(snapshots[0].state, crate::agent_bridge::State::Waiting);
+        assert_eq!(snapshots[0].file.as_deref(), Some("src/value.rs"));
     }
 }
