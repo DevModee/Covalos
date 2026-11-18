@@ -1,0 +1,12 @@
+{
+  "base": "391fe4c0739b1c1e65b236025e3f2c10ce8749c4",
+  "branch": "improvement/autonomous-quality",
+  "path": "E:\\workspace\\aeros-quality-build\\release\\aeros-editor.exe",
+  "bytes": 13079040,
+  "sha256": "bb014540499224ea830e85a8f0cecd742a5c553793ec4b7c862425e2801b0be4",
+  "regressions_passed": 18,
+  "strict_clippy": "passed",
+  "codex_assist": "authenticated test passed",
+  "hook_protocol": "actual Release subprocess tested",
+  "native_capture_images": 144
+}

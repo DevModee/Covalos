@@ -76,3 +76,9 @@ The V3 validation includes 12 local regression tests, the authenticated two-turn
 - Gemini CLI documents headless JSON streaming and Antigravity has the official `agy` headless interface. Each adapter needs its own permission policy and authenticated verification. [Gemini CLI headless mode](https://geminicli.com/docs/cli/headless/) · [Antigravity CLI headless mode](https://antigravity.google/docs/cli/headless/)
 - The current task runner handles a plan followed by review or a single-buffer edit. Multi-file approval, dependency graphs, background task queues, and automatic command execution remain pending.
 - The terminal panel lacks PTY support. Split editors, a full Markdown renderer, additional interface themes, recursive deletion, and a VS Code extension host remain outside the current build.
+
+## Autonomous quality checkpoint
+
+This branch restores complete themes, configurable native backgrounds and ASCII motion, the original Luma companion, live agent supervision, scoped approval hooks, and allocation-free cursor position counting. See [improvement log](docs/AUTONOMOUS_IMPROVEMENTS.md), [companion integration](docs/AGENT_COMPANION.md), and [V4/V5 integration guide](docs/INTEGRATION_V4_V5.md).
+
+Windows Release: E:/workspace/aeros-quality-build/release/aeros-editor.exe. The main V3 checkout and its artifacts are preserved.

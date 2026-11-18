@@ -354,12 +354,7 @@ impl Editor {
                         }
                         if let Some(doc) = self.active.map(|index| &self.documents[index]) {
                             ui.label(muted("UTF-8"));
-                            let before: String = doc.text.chars().take(self.cursor).collect();
-                            let line = before.bytes().filter(|&b| b == b'\n').count() + 1;
-                            let col = before
-                                .rsplit('\n')
-                                .next()
-                                .map_or(1, |s| s.chars().count() + 1);
+                            let (line, col) = workspace::cursor_position(&doc.text, self.cursor);
                             ui.label(muted(format!("Ln {line}, Col {col}")));
                         }
                     },

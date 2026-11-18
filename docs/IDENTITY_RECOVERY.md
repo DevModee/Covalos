@@ -22,4 +22,4 @@ Luma usa estados de solicitudes reales, búsquedas y propuestas pendientes. No c
 
 Las capturas están en design/quality-captures. Se generan desde el framebuffer de ventanas eframe reales; los datos de conversación de los tests se identifican como fixtures reproducibles, no respuestas en vivo. La escala 125/150 % usa egui en una ventana nativa; no equivale a cambiar globalmente el DPI de Windows.
 
-Falta completar la comprobación manual entre monitores, lector de pantalla y Snap. La prueba de rendimiento final y la guía de integración se registran al cerrar el checkpoint.
+Falta completar la comprobación manual entre monitores, lector de pantalla y Snap. Los resultados de rendimiento están en AUTONOMOUS_IMPROVEMENTS.md y la guía de integración en INTEGRATION_V4_V5.md.

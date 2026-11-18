@@ -42,3 +42,44 @@ Verificación: pruebas de estados, decisiones duplicadas, tickets cambiados y ve
 
 Límites: otros proveedores conservan sus aprobaciones en el terminal. Las sesiones externas muestran el último evento recibido. No hay detección de sesiones sin hooks ni activación exacta de terminal externo. Ver AGENT_COMPANION.md.
 
+## Ciclo 4 — Coste de la barra de estado en buffers grandes
+
+Evidencia: cada frame construía un String con todo el contenido anterior al cursor, y después lo recorría dos veces para contar línea y columna. Cerca del final de un buffer de 1 MiB esto asignaba casi 1 MiB por frame.
+
+Solución: contar posiciones Unicode en una única pasada sin construir el prefijo. Archivos: src/workspace.rs y src/editor/panels.rs.
+
+Validación: Unicode, nuevas líneas y cursor fuera de rango; 18 regresiones finales aprobadas y Clippy estricto aprobado. Microbenchmark Release, 810.000 bytes y 200 iteraciones: 258,039 ms con copia frente a 90,747 ms con conteo directo. Es una medición de esta función, no de latencia total de escritura.
+
+Próximas mejoras: persistencia y recuperación de conversaciones; validación interactiva de hooks Claude; comparación de DPI global entre monitores.
+
+## Rendimiento observado
+
+El primer benchmark se descartó para conclusiones porque no distinguía bien la ventana principal y hubo cambios de foco. Se conservó como first-pass. El benchmark corregido filtra las muestras por foco o minimización comprobados. Los resultados y las muestras completas están en [performance-quality-windows.json](../design/performance-quality-windows.json).
+
+| Home del workspace | Muestras válidas | RAM MiB | CPU % de un núcleo |
+| --- | --- | --- | --- |
+| V3 estático | 1 | 83,50 | 0 |
+| Orbital a 20 FPS | 1 | 88,45 | 13,22 |
+| Orbital a 10 FPS | 1 | 87,47 | 8,41 |
+| Orbital estático | 1 | 83,65 | 0 |
+| Efectos desactivados | 2 | 83,68 | 0 |
+| Ventana minimizada | 2 | 84,19 | 0 |
+
+Las configuraciones activas solo conservaron una muestra válida: sirven para detectar coste, no para afirmar una mejora estadística. Se eligieron 10 FPS por defecto por el menor coste observado; se puede elegir entre 5 y 30. El tiempo hasta WaitForInputIdle fue aproximadamente 0,24 s en la muestra válida de V3 y 0,30–0,32 s en las configuraciones nuevas. No se afirma una mejora de arranque.
+
+La CPU es porcentaje de un núcleo durante 1,3 segundos y no porcentaje total del equipo. El 0 representa la ventana de medición. No se midió latencia física de teclado, tiempo GPU, VRAM ni un escenario autenticado con varios agentes simultáneos.
+
+Revisión visual final: se detectó que el icono del proyecto usaba una posición absoluta y se superponía a Luma. Ahora ocupa una celda propia después del companion y los contadores.
+
+## Evidencia visual final
+
+La carpeta final contiene las pantallas vigentes; las carpetas de temas y de identidad documentan los ciclos previos. Los PNG son capturas de ventanas nativas.
+
+- [Home Orbital 1920×1080](../design/quality-captures/final/orbital-1920x1080-100/home.png)
+- [Editor 1920×1080](../design/quality-captures/final/orbital-1920x1080-100/editor.png)
+- [ASCII 1366×768 al 125 %](../design/quality-captures/final/ascii-1366x768-125/home.png)
+- [Settings claro 1366×768 al 150 %](../design/quality-captures/final/light-1366x768-150/settings.png)
+- [Aprobación del hook de prueba](../design/quality-captures/final/orbital-1920x1080-100/companion.png)
+- [Home V3 anterior](../design/captures/after/1920x1080-100/home.png)
+
+El 125/150 % usa escalado de egui en Windows; queda pendiente cambiar el DPI global y mover la ventana entre monitores. Las capturas motion-start/end registran dos instantes reales del motor.

@@ -1,0 +1,208 @@
+{
+  "method": "warmup + two interleaved samples; actual foreground checked; CPU is percent of one core over 1.3 seconds; workspace Home at native default size",
+  "results": {
+    "V3_static": {
+      "valid_samples": 1,
+      "input_idle_ms": 239.51,
+      "working_set_mib": 83.5,
+      "private_mib": 93.63,
+      "cpu_pct_of_one_core": 0
+    },
+    "Quality_orbital": {
+      "valid_samples": 1,
+      "input_idle_ms": 302.98,
+      "working_set_mib": 88.45,
+      "private_mib": 93.9,
+      "cpu_pct_of_one_core": 13.22
+    },
+    "Quality_10fps": {
+      "valid_samples": 1,
+      "input_idle_ms": 315.68,
+      "working_set_mib": 87.47,
+      "private_mib": 93.84,
+      "cpu_pct_of_one_core": 8.41
+    },
+    "Quality_static": {
+      "valid_samples": 1,
+      "input_idle_ms": 306.77,
+      "working_set_mib": 83.65,
+      "private_mib": 93.44,
+      "cpu_pct_of_one_core": 0
+    },
+    "Quality_off": {
+      "valid_samples": 2,
+      "input_idle_ms": 321.88,
+      "working_set_mib": 83.68,
+      "private_mib": 93.67,
+      "cpu_pct_of_one_core": 0
+    },
+    "Quality_minimized": {
+      "valid_samples": 2,
+      "input_idle_ms": 314.31,
+      "working_set_mib": 84.19,
+      "private_mib": 93.8,
+      "cpu_pct_of_one_core": 0
+    }
+  },
+  "samples": {
+    "V3_static": [
+      {
+        "foreground_observed": true,
+        "minimized_observed": false,
+        "input_idle_ms": 239.51260000103503,
+        "working_set_mib": 83.49609375,
+        "private_mib": 93.625,
+        "cpu_pct_of_one_core": 0
+      },
+      {
+        "foreground_observed": false,
+        "minimized_observed": false,
+        "input_idle_ms": 241.18319999979576,
+        "working_set_mib": 87.41796875,
+        "private_mib": 93.7734375,
+        "cpu_pct_of_one_core": 20.423588100493713
+      }
+    ],
+    "Quality_orbital": [
+      {
+        "foreground_observed": true,
+        "minimized_observed": false,
+        "input_idle_ms": 302.9781000004732,
+        "working_set_mib": 88.44921875,
+        "private_mib": 93.8984375,
+        "cpu_pct_of_one_core": 13.21632988574721
+      },
+      {
+        "foreground_observed": false,
+        "minimized_observed": false,
+        "input_idle_ms": 387.926300001709,
+        "working_set_mib": 88.22265625,
+        "private_mib": 94.15625,
+        "cpu_pct_of_one_core": 0
+      }
+    ],
+    "Quality_10fps": [
+      {
+        "foreground_observed": true,
+        "minimized_observed": false,
+        "input_idle_ms": 315.6833999964874,
+        "working_set_mib": 87.46875,
+        "private_mib": 93.84375,
+        "cpu_pct_of_one_core": 8.41188786836583
+      },
+      {
+        "foreground_observed": false,
+        "minimized_observed": false,
+        "input_idle_ms": 312.92620000022,
+        "working_set_mib": 89.1015625,
+        "private_mib": 93.953125,
+        "cpu_pct_of_one_core": 0
+      }
+    ],
+    "Quality_static": [
+      {
+        "foreground_observed": true,
+        "minimized_observed": false,
+        "input_idle_ms": 306.7674999983865,
+        "working_set_mib": 83.65234375,
+        "private_mib": 93.4375,
+        "cpu_pct_of_one_core": 0
+      },
+      {
+        "foreground_observed": false,
+        "minimized_observed": false,
+        "input_idle_ms": 327.33229999939795,
+        "working_set_mib": 88.3671875,
+        "private_mib": 93.9140625,
+        "cpu_pct_of_one_core": 0
+      }
+    ],
+    "Quality_off": [
+      {
+        "foreground_observed": true,
+        "minimized_observed": false,
+        "input_idle_ms": 300.8604999995441,
+        "working_set_mib": 83.66796875,
+        "private_mib": 93.60546875,
+        "cpu_pct_of_one_core": 0
+      },
+      {
+        "foreground_observed": true,
+        "minimized_observed": false,
+        "input_idle_ms": 342.89450000142097,
+        "working_set_mib": 83.69140625,
+        "private_mib": 93.7265625,
+        "cpu_pct_of_one_core": 0
+      }
+    ],
+    "Quality_minimized": [
+      {
+        "foreground_observed": true,
+        "minimized_observed": true,
+        "input_idle_ms": 320.1467999970191,
+        "working_set_mib": 84.25390625,
+        "private_mib": 93.84375,
+        "cpu_pct_of_one_core": 0
+      },
+      {
+        "foreground_observed": true,
+        "minimized_observed": true,
+        "input_idle_ms": 308.4744000007049,
+        "working_set_mib": 84.12890625,
+        "private_mib": 93.75390625,
+        "cpu_pct_of_one_core": 0
+      }
+    ]
+  },
+  "unfiltered_medians": {
+    "V3_static": {
+      "foreground_observed": false,
+      "minimized_observed": false,
+      "input_idle_ms": 240.35,
+      "working_set_mib": 85.46,
+      "private_mib": 93.7,
+      "cpu_pct_of_one_core": 10.21
+    },
+    "Quality_orbital": {
+      "foreground_observed": false,
+      "minimized_observed": false,
+      "input_idle_ms": 345.45,
+      "working_set_mib": 88.34,
+      "private_mib": 94.03,
+      "cpu_pct_of_one_core": 6.61
+    },
+    "Quality_10fps": {
+      "foreground_observed": false,
+      "minimized_observed": false,
+      "input_idle_ms": 314.3,
+      "working_set_mib": 88.29,
+      "private_mib": 93.9,
+      "cpu_pct_of_one_core": 4.21
+    },
+    "Quality_static": {
+      "foreground_observed": false,
+      "minimized_observed": false,
+      "input_idle_ms": 317.05,
+      "working_set_mib": 86.01,
+      "private_mib": 93.68,
+      "cpu_pct_of_one_core": 0
+    },
+    "Quality_off": {
+      "foreground_observed": true,
+      "minimized_observed": false,
+      "input_idle_ms": 321.88,
+      "working_set_mib": 83.68,
+      "private_mib": 93.67,
+      "cpu_pct_of_one_core": 0
+    },
+    "Quality_minimized": {
+      "foreground_observed": true,
+      "minimized_observed": true,
+      "input_idle_ms": 314.31,
+      "working_set_mib": 84.19,
+      "private_mib": 93.8,
+      "cpu_pct_of_one_core": 0
+    }
+  },
+  "note": "Only samples with verified focus (or verified minimization) enter the controlled results. Active configurations each have only one valid sample; do not claim a statistically reliable speedup."
+}

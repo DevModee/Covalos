@@ -1,0 +1,157 @@
+{
+  "method": "warmup + three interleaved samples; actual foreground checked; CPU is percent of one core over 1.3 seconds; workspace Home at native default size",
+  "results": {
+    "V3_static": {
+      "foreground_observed": false,
+      "input_idle_ms": 252.43,
+      "working_set_mib": 89.95,
+      "private_mib": 93.94,
+      "cpu_pct_of_one_core": 0.0
+    },
+    "Quality_orbital": {
+      "foreground_observed": false,
+      "input_idle_ms": 563.19,
+      "working_set_mib": 91.32,
+      "private_mib": 93.93,
+      "cpu_pct_of_one_core": 21.63
+    },
+    "Quality_static": {
+      "foreground_observed": false,
+      "input_idle_ms": 588.55,
+      "working_set_mib": 89.2,
+      "private_mib": 94.07,
+      "cpu_pct_of_one_core": 0.0
+    },
+    "Quality_off": {
+      "foreground_observed": false,
+      "input_idle_ms": 340.46,
+      "working_set_mib": 83.65,
+      "private_mib": 93.66,
+      "cpu_pct_of_one_core": 0.0
+    },
+    "Quality_minimized": {
+      "foreground_observed": false,
+      "input_idle_ms": 520.66,
+      "working_set_mib": 87.66,
+      "private_mib": 93.79,
+      "cpu_pct_of_one_core": 0.0
+    }
+  },
+  "samples": {
+    "V3_static": [
+      {
+        "foreground_observed": true,
+        "input_idle_ms": 252.43399999999383,
+        "working_set_mib": 91.06640625,
+        "private_mib": 93.953125,
+        "cpu_pct_of_one_core": 73.30035275682884
+      },
+      {
+        "foreground_observed": false,
+        "input_idle_ms": 361.6103000003932,
+        "working_set_mib": 89.953125,
+        "private_mib": 93.9375,
+        "cpu_pct_of_one_core": 0.0
+      },
+      {
+        "foreground_observed": true,
+        "input_idle_ms": 245.1762000000599,
+        "working_set_mib": 83.41015625,
+        "private_mib": 93.47265625,
+        "cpu_pct_of_one_core": 0.0
+      }
+    ],
+    "Quality_orbital": [
+      {
+        "foreground_observed": false,
+        "input_idle_ms": 563.1895999995322,
+        "working_set_mib": 88.6875,
+        "private_mib": 93.875,
+        "cpu_pct_of_one_core": 0.0
+      },
+      {
+        "foreground_observed": false,
+        "input_idle_ms": 623.226199999408,
+        "working_set_mib": 91.32421875,
+        "private_mib": 93.93359375,
+        "cpu_pct_of_one_core": 21.63231736691027
+      },
+      {
+        "foreground_observed": true,
+        "input_idle_ms": 314.57419999969716,
+        "working_set_mib": 91.671875,
+        "private_mib": 93.93359375,
+        "cpu_pct_of_one_core": 55.275527065127115
+      }
+    ],
+    "Quality_static": [
+      {
+        "foreground_observed": false,
+        "input_idle_ms": 588.5467000007338,
+        "working_set_mib": 89.19921875,
+        "private_mib": 94.0703125,
+        "cpu_pct_of_one_core": 0.0
+      },
+      {
+        "foreground_observed": false,
+        "input_idle_ms": 757.6128000000608,
+        "working_set_mib": 90.1953125,
+        "private_mib": 94.1015625,
+        "cpu_pct_of_one_core": 0.0
+      },
+      {
+        "foreground_observed": true,
+        "input_idle_ms": 315.96150000041234,
+        "working_set_mib": 87.25390625,
+        "private_mib": 93.76953125,
+        "cpu_pct_of_one_core": 2.4029287895700038
+      }
+    ],
+    "Quality_off": [
+      {
+        "foreground_observed": false,
+        "input_idle_ms": 634.7439000001032,
+        "working_set_mib": 89.88671875,
+        "private_mib": 94.125,
+        "cpu_pct_of_one_core": 0.0
+      },
+      {
+        "foreground_observed": true,
+        "input_idle_ms": 340.45510000032664,
+        "working_set_mib": 83.65234375,
+        "private_mib": 93.66015625,
+        "cpu_pct_of_one_core": 0.0
+      },
+      {
+        "foreground_observed": true,
+        "input_idle_ms": 295.69530000117084,
+        "working_set_mib": 83.3359375,
+        "private_mib": 93.54296875,
+        "cpu_pct_of_one_core": 0.0
+      }
+    ],
+    "Quality_minimized": [
+      {
+        "foreground_observed": false,
+        "input_idle_ms": 520.6600999990769,
+        "working_set_mib": 87.66015625,
+        "private_mib": 93.96875,
+        "cpu_pct_of_one_core": 0.0
+      },
+      {
+        "foreground_observed": true,
+        "input_idle_ms": 316.69739999961166,
+        "working_set_mib": 84.296875,
+        "private_mib": 93.6015625,
+        "cpu_pct_of_one_core": 0.0
+      },
+      {
+        "foreground_observed": false,
+        "input_idle_ms": 737.0158000012452,
+        "working_set_mib": 87.9765625,
+        "private_mib": 93.7890625,
+        "cpu_pct_of_one_core": 0.0
+      }
+    ]
+  }
+}
