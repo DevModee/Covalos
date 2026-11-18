@@ -391,6 +391,19 @@ pub fn search(
     }
 }
 
+/// egui cursors count Unicode scalar values. Count directly without allocating a prefix on every frame.
+pub fn cursor_position(text: &str, cursor: usize) -> (usize, usize) {
+    text.chars()
+        .take(cursor)
+        .fold((1, 1), |(line, column), ch| {
+            if ch == '\n' {
+                (line + 1, 1)
+            } else {
+                (line, column + 1)
+            }
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -435,5 +448,45 @@ mod tests {
         delete_entry(&root, &dir)?;
         delete_entry(&root, &moved)?;
         Ok(())
+    }
+
+    #[test]
+    fn cursor_positions_handle_unicode_newlines_and_out_of_range_indices() {
+        assert_eq!(cursor_position("", 0), (1, 1));
+        assert_eq!(cursor_position("a\ncafé😀\n", 2), (2, 1));
+        assert_eq!(cursor_position("a\ncafé😀\n", 7), (2, 6));
+        assert_eq!(cursor_position("a\ncafé😀\n", 99), (3, 1));
+    }
+    #[test]
+    #[ignore = "measures large-buffer status position calculation; run in release"]
+    fn benchmark_cursor_positions() {
+        use std::{hint::black_box, time::Instant};
+        let text = "let value = café; // 😀\n".repeat(30_000);
+        let cursor = text.chars().count();
+        let iterations = 200;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let before: String = black_box(&text).chars().take(black_box(cursor)).collect();
+            black_box((
+                before.bytes().filter(|&b| b == b'\n').count() + 1,
+                before
+                    .rsplit('\n')
+                    .next()
+                    .map_or(1, |s| s.chars().count() + 1),
+            ));
+        }
+        let original = start.elapsed();
+        let start = Instant::now();
+        for _ in 0..iterations {
+            black_box(cursor_position(black_box(&text), black_box(cursor)));
+        }
+        let improved = start.elapsed();
+        println!(
+            "cursor benchmark: bytes={} iterations={} original_ms={:.3} direct_ms={:.3}",
+            text.len(),
+            iterations,
+            original.as_secs_f64() * 1000.0,
+            improved.as_secs_f64() * 1000.0
+        );
     }
 }
