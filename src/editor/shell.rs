@@ -94,7 +94,7 @@ impl Editor {
             .as_deref()
             .map(workspace::filename)
             .unwrap_or_else(|| "Projects".into());
-        ui.menu_button(RichText::new(label).color(MUTED), |ui| {
+        ui.menu_button(RichText::new(label).color(colors().muted), |ui| {
             if ui.button("Open folder…").clicked() {
                 ui.close();
                 self.pick_workspace(ui.ctx());
@@ -215,13 +215,13 @@ impl Editor {
                         );
                         let painter = ui.painter_at(response.rect);
                         if response.hovered() {
-                            painter.rect_filled(response.rect, CONTROL_RADIUS, HOVER);
+                            painter.rect_filled(response.rect, CONTROL_RADIUS, colors().hover);
                         }
                         draw_icon(
                             &painter,
                             response.rect.left_center() + egui::vec2(16.0, 0.0),
                             Icon::Explorer,
-                            MUTED,
+                            colors().muted,
                         );
                         let text_rect = response.rect.shrink2(egui::vec2(40.0, 4.0));
                         let painter = painter.with_clip_rect(text_rect);
@@ -230,7 +230,7 @@ impl Editor {
                             egui::Align2::LEFT_TOP,
                             workspace::filename(&root),
                             egui::FontId::proportional(BODY),
-                            TEXT,
+                            colors().text,
                         );
                         let displayed = root.display().to_string();
                         let displayed = displayed.strip_prefix(r"\\?\").unwrap_or(&displayed);
@@ -239,7 +239,7 @@ impl Editor {
                             egui::Align2::LEFT_TOP,
                             displayed,
                             egui::FontId::proportional(SMALL),
-                            MUTED,
+                            colors().muted,
                         );
                         if response.clicked() {
                             self.request(Pending::OpenWorkspace(root.clone()), ui.ctx());
@@ -261,10 +261,11 @@ impl Editor {
             .constrain_to(ctx.content_rect().shrink(16.0))
             .show(ctx,|ui| {
                 ui.set_max_width(440.0);
+                let previous_theme = self.preferences.theme;
                 section(ui,"Appearance","Tune the workspace for long editing sessions.");
                 ui.horizontal(|ui| {
                     ui.label(secondary("Theme"));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui|{ui.label(RichText::new(THEME_NAME).color(ACCENT));});
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui|{egui::ComboBox::from_id_salt("appearance-theme").selected_text(self.preferences.theme.name()).show_ui(ui, |ui| { for theme in Theme::ALL { ui.selectable_value(&mut self.preferences.theme, theme, theme.name()); } });});
                 });
                 ui.add_space(12.0);
                 ui.label(secondary("Editor font size"));
@@ -277,7 +278,10 @@ impl Editor {
                 section(ui,"Agent editing","Control how proposed changes reach your editor.");
                 checkbox(ui,&mut self.preferences.allow_auto_buffer,"Allow Auto buffer edits")
                     .on_hover_text("Auto applies an eligible replacement to the active buffer. Use Save to write the file.");
-                if font_changed || contrast_changed {install(ctx,self.preferences.font_size,self.preferences.high_contrast);}
+                if font_changed || contrast_changed || previous_theme != self.preferences.theme {
+                    install(ctx,self.preferences.font_size,self.preferences.high_contrast,self.preferences.theme);
+                    self.syntax = egui_extras::syntax_highlighting::CodeTheme::dark(self.preferences.font_size);
+                }
                 ui.add_space(8.0);
             });
     }
@@ -466,12 +470,12 @@ fn constellation(ui: &mut Ui, width: f32, height: f32) {
             .collect();
         painter.add(egui::Shape::line(
             points,
-            Stroke::new(1.0_f32, ACCENT.gamma_multiply(0.28)),
+            Stroke::new(1.0_f32, colors().accent.gamma_multiply(0.28)),
         ));
     }
-    painter.circle_filled(center, 19.0, CANVAS);
-    draw_icon(&painter, center, Icon::Brand, ACCENT);
-    painter.circle_filled(center + egui::vec2(43.0, -16.0), 2.5, ACCENT);
+    painter.circle_filled(center, 19.0, colors().canvas);
+    draw_icon(&painter, center, Icon::Brand, colors().accent);
+    painter.circle_filled(center + egui::vec2(43.0, -16.0), 2.5, colors().accent);
 }
 
 #[cfg(test)]

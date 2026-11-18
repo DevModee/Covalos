@@ -7,6 +7,7 @@ use std::{
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub(super) struct Preferences {
+    pub(super) theme: super::theme::Theme,
     pub(super) font_size: f32,
     pub(super) compact: bool,
     pub(super) reduce_motion: bool,
@@ -26,6 +27,7 @@ pub(super) struct Preferences {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
+            theme: super::theme::Theme::Dark,
             font_size: 14.0,
             compact: false,
             reduce_motion: false,
@@ -140,6 +142,7 @@ mod tests {
         let dir = tempfile::tempdir()?;
         let path = dir.path().join("nested/editor.json");
         let mut prefs = Preferences {
+            theme: super::super::theme::Theme::Light,
             high_contrast: true,
             compact: true,
             reduce_motion: true,

@@ -119,7 +119,12 @@ impl Editor {
 
     fn new(ctx: &egui::Context, root: Option<PathBuf>, preferences: Preferences) -> Self {
         theme::install_fonts(ctx);
-        theme::install(ctx, preferences.font_size, preferences.high_contrast);
+        theme::install(
+            ctx,
+            preferences.font_size,
+            preferences.high_contrast,
+            preferences.theme,
+        );
         let mut editor = Self {
             root: None,
             directories: HashMap::new(),
@@ -157,7 +162,9 @@ impl Editor {
             file_change: None,
             pending_delete: None,
             focus_new_file: false,
-            syntax: egui_extras::syntax_highlighting::CodeTheme::from_style(&ctx.style()),
+            syntax: egui_extras::syntax_highlighting::CodeTheme::dark(
+                egui::TextStyle::Monospace.resolve(&ctx.style()).size,
+            ),
         };
         if let Some(root) = root {
             editor.open_workspace(root);
@@ -542,7 +549,7 @@ impl Editor {
                 self.assistant_panel(ctx);
             }
             egui::CentralPanel::default()
-                .frame(egui::Frame::new().fill(theme::CANVAS))
+                .frame(egui::Frame::new().fill(theme::colors().canvas))
                 .show(ctx, |ui| self.editor_panel(ui));
         }
         self.settings_window(ctx);

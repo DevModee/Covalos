@@ -107,7 +107,7 @@ impl Editor {
                 .show(ctx, |ui| {
                     ui.heading(header);
                     if let Some((true, message)) = &self.notice {
-                        ui.label(RichText::new(message).color(ERROR));
+                        ui.label(RichText::new(message).color(colors().error));
                     }
                     let input = ui.add(
                         TextEdit::singleline(&mut name)
@@ -155,7 +155,10 @@ impl Editor {
                         if ui.button("Cancel").clicked() {
                             return Some(false);
                         }
-                        if ui.button(RichText::new("Delete").color(ERROR)).clicked() {
+                        if ui
+                            .button(RichText::new("Delete").color(colors().error))
+                            .clicked()
+                        {
                             return Some(true);
                         }
                         None
