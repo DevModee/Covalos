@@ -2,26 +2,6 @@ use eframe::egui::{self, Color32, Context, FontId, Frame, Margin, RichText, Stro
 
 pub(crate) const BRAND: &str = "AEROS";
 pub(crate) const TITLE: &str = "AEROS Editor";
-pub(super) const THEME_NAME: &str = "Orbital";
-pub(super) const CANVAS: Color32 = Color32::from_rgb(16, 19, 24);
-pub(super) const SURFACE: Color32 = Color32::from_rgb(21, 24, 30);
-pub(super) const INSET: Color32 = Color32::from_rgb(18, 21, 27);
-pub(super) const ELEVATED: Color32 = Color32::from_rgb(29, 34, 43);
-pub(super) const HOVER: Color32 = Color32::from_rgb(35, 40, 51);
-pub(super) const BORDER: Color32 = Color32::from_rgb(41, 47, 57);
-pub(super) const CONTROL_BORDER: Color32 = Color32::from_rgb(65, 73, 89);
-pub(super) const TEXT: Color32 = Color32::from_rgb(229, 233, 240);
-pub(super) const SECONDARY: Color32 = Color32::from_rgb(162, 172, 186);
-pub(super) const MUTED: Color32 = Color32::from_rgb(135, 147, 164);
-pub(super) const DISABLED: Color32 = Color32::from_rgb(103, 113, 128);
-pub(super) const ACCENT: Color32 = Color32::from_rgb(176, 154, 250);
-pub(super) const ACCENT_HOVER: Color32 = Color32::from_rgb(199, 183, 255);
-pub(super) const ACCENT_BG: Color32 = Color32::from_rgb(41, 38, 60);
-pub(super) const SUCCESS: Color32 = Color32::from_rgb(137, 202, 171);
-pub(super) const ERROR: Color32 = Color32::from_rgb(239, 147, 154);
-pub(super) const WARNING: Color32 = Color32::from_rgb(224, 187, 128);
-pub(super) const SYNTAX_STRING: Color32 = Color32::from_rgb(173, 204, 164);
-pub(super) const SYNTAX_NUMBER: Color32 = Color32::from_rgb(224, 183, 144);
 
 pub(super) const UNIT: f32 = 4.0;
 pub(super) const SMALL: f32 = 12.0;
@@ -44,6 +24,178 @@ pub(super) const MIN_EDITOR_WIDTH: f32 = 320.0;
 pub(super) const CHAT_COMPOSER_HEIGHT: f32 = 132.0;
 pub(super) const CODE_LINE_HEIGHT: f32 = 1.4;
 pub(super) const COMPACT_CODE_LINE_HEIGHT: f32 = 1.25;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum Theme {
+    #[default]
+    Dark,
+    Midnight,
+    Violet,
+    Light,
+    HighContrast,
+}
+impl Theme {
+    pub(super) const ALL: [Self; 5] = [
+        Self::Dark,
+        Self::Midnight,
+        Self::Violet,
+        Self::Light,
+        Self::HighContrast,
+    ];
+    pub(super) fn name(self) -> &'static str {
+        match self {
+            Self::Dark => "AEROS Dark",
+            Self::Midnight => "AEROS Midnight",
+            Self::Violet => "AEROS Violet",
+            Self::Light => "AEROS Light",
+            Self::HighContrast => "High Contrast",
+        }
+    }
+    pub(super) fn is_dark(self) -> bool {
+        self != Self::Light
+    }
+}
+#[derive(Clone, Copy)]
+pub(super) struct Palette {
+    pub(super) canvas: Color32,
+    pub(super) surface: Color32,
+    pub(super) inset: Color32,
+    pub(super) elevated: Color32,
+    pub(super) hover: Color32,
+    pub(super) border: Color32,
+    pub(super) control_border: Color32,
+    pub(super) text: Color32,
+    pub(super) secondary: Color32,
+    pub(super) muted: Color32,
+    pub(super) disabled: Color32,
+    pub(super) accent: Color32,
+    pub(super) accent_hover: Color32,
+    pub(super) accent_bg: Color32,
+    pub(super) success: Color32,
+    pub(super) error: Color32,
+    pub(super) warning: Color32,
+    pub(super) syntax_string: Color32,
+    pub(super) syntax_number: Color32,
+}
+impl Theme {
+    pub(super) fn colors(self) -> Palette {
+        match self {
+            Self::Dark => Palette {
+                canvas: Color32::from_rgb(16, 19, 24),
+                surface: Color32::from_rgb(21, 24, 30),
+                inset: Color32::from_rgb(18, 21, 27),
+                elevated: Color32::from_rgb(29, 34, 43),
+                hover: Color32::from_rgb(35, 40, 51),
+                border: Color32::from_rgb(41, 47, 57),
+                control_border: Color32::from_rgb(65, 73, 89),
+                text: Color32::from_rgb(229, 233, 240),
+                secondary: Color32::from_rgb(162, 172, 186),
+                muted: Color32::from_rgb(135, 147, 164),
+                disabled: Color32::from_rgb(103, 113, 128),
+                accent: Color32::from_rgb(176, 154, 250),
+                accent_hover: Color32::from_rgb(199, 183, 255),
+                accent_bg: Color32::from_rgb(41, 38, 60),
+                success: Color32::from_rgb(137, 202, 171),
+                error: Color32::from_rgb(239, 147, 154),
+                warning: Color32::from_rgb(224, 187, 128),
+                syntax_string: Color32::from_rgb(173, 204, 164),
+                syntax_number: Color32::from_rgb(224, 183, 144),
+            },
+            Self::Midnight => Palette {
+                canvas: Color32::from_rgb(10, 15, 24),
+                surface: Color32::from_rgb(15, 22, 34),
+                inset: Color32::from_rgb(11, 18, 29),
+                elevated: Color32::from_rgb(23, 32, 48),
+                hover: Color32::from_rgb(29, 41, 60),
+                border: Color32::from_rgb(34, 45, 63),
+                control_border: Color32::from_rgb(59, 74, 96),
+                text: Color32::from_rgb(229, 233, 240),
+                secondary: Color32::from_rgb(162, 172, 186),
+                muted: Color32::from_rgb(135, 147, 164),
+                disabled: Color32::from_rgb(103, 113, 128),
+                accent: Color32::from_rgb(145, 187, 255),
+                accent_hover: Color32::from_rgb(181, 208, 255),
+                accent_bg: Color32::from_rgb(28, 46, 72),
+                success: Color32::from_rgb(137, 202, 171),
+                error: Color32::from_rgb(239, 147, 154),
+                warning: Color32::from_rgb(224, 187, 128),
+                syntax_string: Color32::from_rgb(173, 204, 164),
+                syntax_number: Color32::from_rgb(224, 183, 144),
+            },
+            Self::Violet => Palette {
+                canvas: Color32::from_rgb(20, 16, 27),
+                surface: Color32::from_rgb(27, 22, 35),
+                inset: Color32::from_rgb(23, 19, 31),
+                elevated: Color32::from_rgb(37, 30, 47),
+                hover: Color32::from_rgb(46, 37, 59),
+                border: Color32::from_rgb(51, 43, 63),
+                control_border: Color32::from_rgb(77, 64, 94),
+                text: Color32::from_rgb(229, 233, 240),
+                secondary: Color32::from_rgb(162, 172, 186),
+                muted: Color32::from_rgb(135, 147, 164),
+                disabled: Color32::from_rgb(103, 113, 128),
+                accent: Color32::from_rgb(195, 167, 253),
+                accent_hover: Color32::from_rgb(199, 183, 255),
+                accent_bg: Color32::from_rgb(49, 36, 67),
+                success: Color32::from_rgb(137, 202, 171),
+                error: Color32::from_rgb(239, 147, 154),
+                warning: Color32::from_rgb(224, 187, 128),
+                syntax_string: Color32::from_rgb(173, 204, 164),
+                syntax_number: Color32::from_rgb(224, 183, 144),
+            },
+            Self::Light => Palette {
+                canvas: Color32::from_rgb(247, 248, 250),
+                surface: Color32::from_rgb(237, 240, 244),
+                inset: Color32::from_rgb(255, 255, 255),
+                elevated: Color32::from_rgb(255, 255, 255),
+                hover: Color32::from_rgb(222, 226, 234),
+                border: Color32::from_rgb(202, 208, 219),
+                control_border: Color32::from_rgb(135, 145, 160),
+                text: Color32::from_rgb(28, 34, 44),
+                secondary: Color32::from_rgb(65, 77, 93),
+                muted: Color32::from_rgb(79, 91, 107),
+                disabled: Color32::from_rgb(110, 120, 133),
+                accent: Color32::from_rgb(98, 66, 166),
+                accent_hover: Color32::from_rgb(79, 48, 144),
+                accent_bg: Color32::from_rgb(224, 215, 243),
+                success: Color32::from_rgb(34, 111, 76),
+                error: Color32::from_rgb(175, 43, 59),
+                warning: Color32::from_rgb(135, 88, 13),
+                syntax_string: Color32::from_rgb(44, 103, 60),
+                syntax_number: Color32::from_rgb(145, 76, 25),
+            },
+            Self::HighContrast => Palette {
+                canvas: Color32::from_rgb(0, 0, 0),
+                surface: Color32::from_rgb(6, 6, 6),
+                inset: Color32::from_rgb(0, 0, 0),
+                elevated: Color32::from_rgb(16, 16, 16),
+                hover: Color32::from_rgb(37, 37, 37),
+                border: Color32::from_rgb(154, 154, 154),
+                control_border: Color32::from_rgb(210, 210, 210),
+                text: Color32::from_rgb(255, 255, 255),
+                secondary: Color32::from_rgb(235, 235, 235),
+                muted: Color32::from_rgb(194, 194, 194),
+                disabled: Color32::from_rgb(150, 150, 150),
+                accent: Color32::from_rgb(218, 202, 255),
+                accent_hover: Color32::from_rgb(243, 235, 255),
+                accent_bg: Color32::from_rgb(47, 31, 67),
+                success: Color32::from_rgb(153, 255, 190),
+                error: Color32::from_rgb(255, 168, 175),
+                warning: Color32::from_rgb(255, 224, 135),
+                syntax_string: Color32::from_rgb(183, 240, 169),
+                syntax_number: Color32::from_rgb(255, 208, 152),
+            },
+        }
+    }
+}
+thread_local! {
+    // egui renders on its UI thread. Each test and viewport installs its palette before drawing.
+    static ACTIVE_THEME: std::cell::Cell<Theme> = const { std::cell::Cell::new(Theme::Dark) };
+}
+pub(super) fn colors() -> Palette {
+    ACTIVE_THEME.with(|theme| theme.get().colors())
+}
 
 pub(super) fn install_fonts(ctx: &Context) {
     let mut definitions = egui::FontDefinitions::default();
@@ -72,7 +224,8 @@ pub(super) fn install_fonts(ctx: &Context) {
     ctx.set_fonts(definitions);
 }
 
-pub(super) fn install(ctx: &Context, font_size: f32, high_contrast: bool) {
+pub(super) fn install(ctx: &Context, font_size: f32, high_contrast: bool, theme: Theme) {
+    ACTIVE_THEME.with(|active| active.set(theme));
     let mut style = egui::Style::default();
     style.spacing.item_spacing = egui::vec2(8.0, 4.0);
     style.spacing.button_padding = egui::vec2(10.0, 5.0);
@@ -99,31 +252,39 @@ pub(super) fn install(ctx: &Context, font_size: f32, high_contrast: bool) {
         .text_styles
         .insert(TextStyle::Monospace, FontId::monospace(font_size));
     let visuals = &mut style.visuals;
-    *visuals = egui::Visuals::dark();
-    let border = if high_contrast { SECONDARY } else { BORDER };
-    visuals.override_text_color = Some(TEXT);
-    visuals.weak_text_color = Some(MUTED);
-    visuals.panel_fill = CANVAS;
-    visuals.window_fill = SURFACE;
+    *visuals = if theme.is_dark() {
+        egui::Visuals::dark()
+    } else {
+        egui::Visuals::light()
+    };
+    let border = if high_contrast {
+        colors().secondary
+    } else {
+        colors().border
+    };
+    visuals.override_text_color = Some(colors().text);
+    visuals.weak_text_color = Some(colors().muted);
+    visuals.panel_fill = colors().canvas;
+    visuals.window_fill = colors().surface;
     visuals.window_stroke = Stroke::new(
         1.0_f32,
         if high_contrast {
-            SECONDARY
+            colors().secondary
         } else {
-            CONTROL_BORDER
+            colors().control_border
         },
     );
     visuals.window_corner_radius = MODAL_RADIUS.into();
     visuals.window_highlight_topmost = false;
     visuals.menu_corner_radius = CONTROL_RADIUS.into();
-    visuals.extreme_bg_color = INSET;
-    visuals.faint_bg_color = SURFACE;
-    visuals.selection.bg_fill = ACCENT_BG;
-    visuals.selection.stroke = Stroke::new(1.0_f32, ACCENT);
-    visuals.hyperlink_color = ACCENT_HOVER;
+    visuals.extreme_bg_color = colors().inset;
+    visuals.faint_bg_color = colors().surface;
+    visuals.selection.bg_fill = colors().accent_bg;
+    visuals.selection.stroke = Stroke::new(1.0_f32, colors().accent);
+    visuals.hyperlink_color = colors().accent_hover;
     visuals.indent_has_left_vline = true;
     visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, border);
-    visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, TEXT);
+    visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, colors().text);
     visuals.disabled_alpha = 0.5;
     for widget in [
         &mut visuals.widgets.inactive,
@@ -135,40 +296,40 @@ pub(super) fn install(ctx: &Context, font_size: f32, high_contrast: bool) {
         widget.bg_stroke = Stroke::new(
             1.0_f32,
             if high_contrast {
-                SECONDARY
+                colors().secondary
             } else {
-                CONTROL_BORDER
+                colors().control_border
             },
         );
-        widget.fg_stroke = Stroke::new(1.0_f32, TEXT);
-        widget.bg_fill = ELEVATED;
+        widget.fg_stroke = Stroke::new(1.0_f32, colors().text);
+        widget.bg_fill = colors().elevated;
         widget.weak_bg_fill = Color32::TRANSPARENT;
     }
-    visuals.widgets.hovered.bg_fill = HOVER;
-    visuals.widgets.hovered.weak_bg_fill = HOVER;
-    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, MUTED);
-    visuals.widgets.active.bg_fill = ACCENT_BG;
-    visuals.widgets.active.weak_bg_fill = ACCENT_BG;
-    visuals.widgets.active.bg_stroke = Stroke::new(1.0_f32, ACCENT);
-    visuals.widgets.open.weak_bg_fill = ACCENT_BG;
+    visuals.widgets.hovered.bg_fill = colors().hover;
+    visuals.widgets.hovered.weak_bg_fill = colors().hover;
+    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, colors().muted);
+    visuals.widgets.active.bg_fill = colors().accent_bg;
+    visuals.widgets.active.weak_bg_fill = colors().accent_bg;
+    visuals.widgets.active.bg_stroke = Stroke::new(1.0_f32, colors().accent);
+    visuals.widgets.open.weak_bg_fill = colors().accent_bg;
     ctx.set_style(style);
 }
 
 pub(super) fn panel_frame(margin: Margin) -> Frame {
-    Frame::new().fill(SURFACE).inner_margin(margin)
+    Frame::new().fill(colors().surface).inner_margin(margin)
 }
 
 pub(super) fn muted(text: impl Into<String>) -> RichText {
-    RichText::new(text).size(SMALL).color(MUTED)
+    RichText::new(text).size(SMALL).color(colors().muted)
 }
 
 pub(super) fn secondary(text: impl Into<String>) -> RichText {
-    RichText::new(text).size(BODY).color(SECONDARY)
+    RichText::new(text).size(BODY).color(colors().secondary)
 }
 
 pub(super) fn primary(text: &str) -> egui::Button<'_> {
-    egui::Button::new(RichText::new(text).strong().color(CANVAS))
-        .fill(ACCENT)
+    egui::Button::new(RichText::new(text).strong().color(colors().canvas))
+        .fill(colors().accent)
         .stroke(Stroke::NONE)
         .corner_radius(CONTROL_RADIUS)
 }
@@ -195,11 +356,11 @@ pub(super) fn checkbox(
 
 pub(super) fn busy_indicator(ui: &mut egui::Ui) -> egui::Response {
     if ui.input(|input| input.focused) && ui.style().animation_time > 0.0 {
-        return ui.add(egui::Spinner::new().color(ACCENT).size(14.0));
+        return ui.add(egui::Spinner::new().color(colors().accent).size(14.0));
     }
     let (rect, response) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
     ui.painter()
-        .circle_stroke(rect.center(), 4.0, Stroke::new(1.5_f32, MUTED));
+        .circle_stroke(rect.center(), 4.0, Stroke::new(1.5_f32, colors().muted));
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, false, "Working"));
     response
 }
@@ -222,9 +383,9 @@ pub(super) fn row(ui: &mut egui::Ui, label: &str, detail: &str, selected: bool) 
         .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::SelectableLabel, true, label));
     let painter = ui.painter_at(response.rect);
     let fill = if selected {
-        ACCENT_BG
+        colors().accent_bg
     } else if response.hovered() {
-        HOVER
+        colors().hover
     } else {
         Color32::TRANSPARENT
     };
@@ -236,7 +397,7 @@ pub(super) fn row(ui: &mut egui::Ui, label: &str, detail: &str, selected: bool) 
                 egui::vec2(2.0, height - 8.0),
             ),
             1,
-            ACCENT,
+            colors().accent,
         );
     }
     let detail_width = if detail.is_empty() { 0.0 } else { 104.0 };
@@ -252,7 +413,11 @@ pub(super) fn row(ui: &mut egui::Ui, label: &str, detail: &str, selected: bool) 
             ..egui::text::LayoutJob::simple(
                 label.to_owned(),
                 FontId::proportional(BODY),
-                if selected { TEXT } else { SECONDARY },
+                if selected {
+                    colors().text
+                } else {
+                    colors().secondary
+                },
                 max_width,
             )
         })
@@ -260,7 +425,7 @@ pub(super) fn row(ui: &mut egui::Ui, label: &str, detail: &str, selected: bool) 
     painter.galley(
         response.rect.left_center() + egui::vec2(12.0, -galley.size().y / 2.0),
         galley,
-        TEXT,
+        colors().text,
     );
     if !detail.is_empty() {
         painter.text(
@@ -268,14 +433,14 @@ pub(super) fn row(ui: &mut egui::Ui, label: &str, detail: &str, selected: bool) 
             egui::Align2::RIGHT_CENTER,
             detail,
             FontId::proportional(SMALL),
-            MUTED,
+            colors().muted,
         );
     }
     if response.has_focus() {
         painter.rect_stroke(
             response.rect,
             4,
-            Stroke::new(1.0_f32, ACCENT),
+            Stroke::new(1.0_f32, colors().accent),
             egui::StrokeKind::Inside,
         );
     }
@@ -316,9 +481,9 @@ pub(super) fn icon_button(
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
     let hover = response.hovered() || response.has_focus();
     let color = if selected || hover {
-        ACCENT_HOVER
+        colors().accent_hover
     } else {
-        MUTED
+        colors().muted
     };
     let progress = ui.ctx().animate_bool_with_easing(
         response.id.with("hover"),
@@ -330,9 +495,9 @@ pub(super) fn icon_button(
             response.rect.shrink(1.0),
             CONTROL_RADIUS,
             if selected {
-                ACCENT_BG
+                colors().accent_bg
             } else {
-                HOVER.gamma_multiply(progress)
+                colors().hover.gamma_multiply(progress)
             },
         );
     }
@@ -343,14 +508,14 @@ pub(super) fn icon_button(
                 egui::vec2(2.0, 14.0),
             ),
             1,
-            ACCENT,
+            colors().accent,
         );
     }
     if response.has_focus() {
         ui.painter().rect_stroke(
             response.rect,
             CONTROL_RADIUS,
-            Stroke::new(1.0_f32, ACCENT),
+            Stroke::new(1.0_f32, colors().accent),
             egui::StrokeKind::Inside,
         );
     }
@@ -478,34 +643,34 @@ pub(super) fn draw_icon(painter: &egui::Painter, center: egui::Pos2, icon: Icon,
 
 pub(super) fn file_color(path: &std::path::Path) -> Color32 {
     match path.extension().and_then(|e| e.to_str()) {
-        Some("rs" | "toml") => SYNTAX_NUMBER,
-        Some("js" | "ts" | "tsx") => WARNING,
-        Some("md") => SECONDARY,
-        _ => MUTED,
+        Some("rs" | "toml") => colors().syntax_number,
+        Some("js" | "ts" | "tsx") => colors().warning,
+        Some("md") => colors().secondary,
+        _ => colors().muted,
     }
 }
 
 pub(super) fn syntax_color(color: Color32, italic: bool) -> Color32 {
     let [r, g, b, _] = color.to_array();
     if italic || r.max(g).max(b) < 145 {
-        MUTED
+        colors().muted
     } else if r.abs_diff(g) < 20 && g.abs_diff(b) < 20 {
-        TEXT
+        colors().text
     } else if b > r || (b > g && r > g) {
-        ACCENT_HOVER
+        colors().accent_hover
     } else if g > r && g > b {
-        SYNTAX_STRING
+        colors().syntax_string
     } else {
-        SYNTAX_NUMBER
+        colors().syntax_number
     }
 }
 
 pub(super) fn modal_frame() -> Frame {
     Frame::new()
-        .fill(SURFACE)
+        .fill(colors().surface)
         .inner_margin(Margin::same(20))
         .corner_radius(MODAL_RADIUS)
-        .stroke(Stroke::new(1.0_f32, CONTROL_BORDER))
+        .stroke(Stroke::new(1.0_f32, colors().control_border))
 }
 
 #[cfg(test)]
@@ -526,19 +691,27 @@ mod tests {
 
     #[test]
     fn normal_text_tokens_keep_readable_contrast() {
-        for (foreground, background) in [
-            (TEXT, CANVAS),
-            (TEXT, SURFACE),
-            (SECONDARY, SURFACE),
-            (MUTED, SURFACE),
-            (ACCENT, ACCENT_BG),
-            (SYNTAX_STRING, CANVAS),
-            (SYNTAX_NUMBER, CANVAS),
-        ] {
-            let a = luminance(foreground);
-            let b = luminance(background);
-            let ratio = (a.max(b) + 0.05) / (a.min(b) + 0.05);
-            assert!(ratio >= 4.5, "Insufficient text contrast: {ratio:.2}");
+        for theme in Theme::ALL {
+            ACTIVE_THEME.with(|active| active.set(theme));
+            for (foreground, background) in [
+                (colors().text, colors().canvas),
+                (colors().text, colors().surface),
+                (colors().secondary, colors().surface),
+                (colors().muted, colors().surface),
+                (colors().accent, colors().accent_bg),
+                (colors().syntax_string, colors().canvas),
+                (colors().syntax_number, colors().canvas),
+            ] {
+                let a = luminance(foreground);
+                let b = luminance(background);
+                let ratio = (a.max(b) + 0.05) / (a.min(b) + 0.05);
+                assert!(
+                    ratio >= 4.5,
+                    "{}: insufficient contrast {ratio:.2}",
+                    theme.name()
+                );
+            }
         }
+        ACTIVE_THEME.with(|active| active.set(Theme::Dark));
     }
 }

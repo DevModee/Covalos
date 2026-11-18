@@ -215,7 +215,7 @@ impl Editor {
                 busy_indicator(ui);
             }
             if let Some(error) = &self.skills.error {
-                ui.label(RichText::new(error).color(ERROR));
+                ui.label(RichText::new(error).color(colors().error));
             }
             if let Some(skill) = &self.skills.preview {
                 ui.separator();

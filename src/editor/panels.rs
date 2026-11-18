@@ -94,7 +94,7 @@ impl Editor {
                     |ui| {
                         ui.set_clip_rect(left);
                         let (_, mark) = ui.allocate_space(egui::vec2(22.0, 28.0));
-                        draw_icon(ui.painter(), mark.center(), Icon::Brand, ACCENT);
+                        draw_icon(ui.painter(), mark.center(), Icon::Brand, colors().accent);
                         ui.label(RichText::new(BRAND).size(LEAD).strong());
                         ui.add_space(8.0);
                         ui.menu_button("File", |ui| {
@@ -158,14 +158,14 @@ impl Editor {
                     let response = ui.add_sized(
                         command.size(),
                         egui::Button::new("")
-                            .fill(INSET)
-                            .stroke(egui::Stroke::new(1.0_f32, BORDER)),
+                            .fill(colors().inset)
+                            .stroke(egui::Stroke::new(1.0_f32, colors().border)),
                     );
                     draw_icon(
                         ui.painter(),
                         response.rect.left_center() + egui::vec2(16.0, 0.0),
                         Icon::Search,
-                        MUTED,
+                        colors().muted,
                     );
                     ui.painter().text(
                         response.rect.left_center() + egui::vec2(32.0, 0.0),
@@ -176,7 +176,7 @@ impl Editor {
                             "Quick access"
                         },
                         egui::FontId::proportional(BODY),
-                        SECONDARY,
+                        colors().secondary,
                     );
                     ui.painter().text(
                         response.rect.right_center() - egui::vec2(12.0, 0.0),
@@ -187,7 +187,7 @@ impl Editor {
                             "Ctrl P"
                         },
                         egui::FontId::proportional(SMALL),
-                        MUTED,
+                        colors().muted,
                     );
                     response.widget_info(|| {
                         egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Quick access")
@@ -266,7 +266,7 @@ impl Editor {
                 ui.painter().hline(
                     rect.x_range(),
                     rect.bottom() + 6.0,
-                    egui::Stroke::new(1.0_f32, BORDER),
+                    egui::Stroke::new(1.0_f32, colors().border),
                 );
             });
     }
@@ -291,9 +291,9 @@ impl Editor {
                         if let Some((error, text)) = &self.notice {
                             ui.add(
                                 egui::Label::new(muted(text).color(if *error {
-                                    ERROR
+                                    colors().error
                                 } else {
-                                    SECONDARY
+                                    colors().secondary
                                 }))
                                 .truncate(),
                             )
@@ -304,7 +304,7 @@ impl Editor {
                                 ui.painter(),
                                 left.left_center() + egui::vec2(7.0, 0.0),
                                 Icon::Explorer,
-                                MUTED,
+                                colors().muted,
                             );
                             ui.add_space(18.0);
                             ui.add(egui::Label::new(muted(name)).truncate())
@@ -343,7 +343,7 @@ impl Editor {
                 ui.painter().hline(
                     rect.x_range(),
                     rect.top() - 2.0,
-                    egui::Stroke::new(1.0_f32, BORDER),
+                    egui::Stroke::new(1.0_f32, colors().border),
                 );
             });
     }
@@ -399,8 +399,10 @@ impl Editor {
                         |ui| {
                             ui.set_min_width(ui.available_width());
                             ui.add(
-                                egui::Label::new(RichText::new(label).strong().color(SECONDARY))
-                                    .truncate(),
+                                egui::Label::new(
+                                    RichText::new(label).strong().color(colors().secondary),
+                                )
+                                .truncate(),
                             );
                         },
                     );
@@ -469,7 +471,7 @@ impl Editor {
         ctx.layer_painter(egui::LayerId::background()).vline(
             panel.response.rect.right(),
             panel.response.rect.y_range(),
-            egui::Stroke::new(1.0_f32, BORDER),
+            egui::Stroke::new(1.0_f32, colors().border),
         );
     }
 
@@ -590,7 +592,7 @@ impl Editor {
                             LayoutJob::simple(
                                 text.to_owned(),
                                 TextStyle::Monospace.resolve(ui.style()),
-                                TEXT,
+                                colors().text,
                                 f32::INFINITY,
                             )
                         } else {
@@ -653,7 +655,7 @@ impl Editor {
                         let end = output.galley.pos_from_cursor(CCursor::new(end));
                         let rect = start.union(end).translate(output.galley_pos.to_vec2());
                         ui.painter()
-                            .rect_filled(rect, 2, ACCENT.gamma_multiply(0.30));
+                            .rect_filled(rect, 2, colors().accent.gamma_multiply(0.30));
                     }
                     let clip = ui.clip_rect();
                     let rows = &output.galley.rows;
@@ -670,7 +672,7 @@ impl Editor {
                             egui::Align2::RIGHT_TOP,
                             (index + 1).to_string(),
                             TextStyle::Monospace.resolve(ui.style()),
-                            DISABLED,
+                            colors().disabled,
                         );
                     }
                 });
@@ -680,7 +682,7 @@ impl Editor {
     fn tabs(&mut self, ui: &mut Ui) {
         let mut active = None;
         let mut close = None;
-        egui::Frame::new().fill(SURFACE).show(ui, |ui| {
+        egui::Frame::new().fill(colors().surface).show(ui, |ui| {
             ScrollArea::horizontal()
                 .id_salt("tabs")
                 .auto_shrink([false, true])
@@ -695,7 +697,7 @@ impl Editor {
                                     .layout_no_wrap(
                                         name.clone(),
                                         egui::FontId::proportional(BODY),
-                                        TEXT,
+                                        colors().text,
                                     )
                                     .size()
                                     .x
@@ -705,9 +707,9 @@ impl Editor {
                                 .add_sized([width, TAB_HEIGHT], egui::Button::new("").frame(false));
                             let painter = ui.painter_at(response.rect);
                             if selected {
-                                painter.rect_filled(response.rect, 0, CANVAS);
+                                painter.rect_filled(response.rect, 0, colors().canvas);
                             } else if response.hovered() {
-                                painter.rect_filled(response.rect, 0, HOVER);
+                                painter.rect_filled(response.rect, 0, colors().hover);
                             }
                             draw_icon(
                                 &painter,
@@ -724,13 +726,17 @@ impl Editor {
                                 egui::Align2::LEFT_CENTER,
                                 &name,
                                 egui::FontId::proportional(BODY),
-                                if selected { TEXT } else { MUTED },
+                                if selected {
+                                    colors().text
+                                } else {
+                                    colors().muted
+                                },
                             );
                             if selected {
                                 painter.hline(
                                     response.rect.x_range().shrink(14.0),
                                     response.rect.bottom() - 1.0,
-                                    egui::Stroke::new(2.0_f32, ACCENT),
+                                    egui::Stroke::new(2.0_f32, colors().accent),
                                 );
                             }
                             let close_rect = egui::Rect::from_center_size(
@@ -743,12 +749,22 @@ impl Editor {
                                 egui::Sense::click(),
                             );
                             if close_response.hovered() {
-                                painter.rect_filled(close_rect, 4, HOVER);
-                                draw_icon(&painter, close_rect.center(), Icon::Close, TEXT);
+                                painter.rect_filled(close_rect, 4, colors().hover);
+                                draw_icon(
+                                    &painter,
+                                    close_rect.center(),
+                                    Icon::Close,
+                                    colors().text,
+                                );
                             } else if document.dirty {
-                                painter.circle_filled(close_rect.center(), 3.0, ACCENT);
+                                painter.circle_filled(close_rect.center(), 3.0, colors().accent);
                             } else if selected || response.hovered() {
-                                draw_icon(&painter, close_rect.center(), Icon::Close, MUTED);
+                                draw_icon(
+                                    &painter,
+                                    close_rect.center(),
+                                    Icon::Close,
+                                    colors().muted,
+                                );
                             }
                             response.widget_info(|| {
                                 egui::WidgetInfo::labeled(
@@ -840,7 +856,7 @@ impl Editor {
         ctx.layer_painter(egui::LayerId::background()).vline(
             panel.response.rect.left(),
             panel.response.rect.y_range(),
-            egui::Stroke::new(1.0_f32, BORDER),
+            egui::Stroke::new(1.0_f32, colors().border),
         );
         if width + 1.0 < max_width {
             self.preferences.assistant_width = width;
@@ -904,7 +920,7 @@ impl Editor {
                 .show(ctx, |ui| {
                     ui.heading("New file");
                     if let Some((true, message)) = &self.notice {
-                        ui.label(RichText::new(message).color(ERROR));
+                        ui.label(RichText::new(message).color(colors().error));
                     }
                     let input = ui.add(
                         TextEdit::singleline(&mut name)
@@ -988,9 +1004,10 @@ fn tree(
             for entry in entries {
                 let name = workspace::filename(&entry.path);
                 if entry.directory {
-                    let response = egui::CollapsingHeader::new(RichText::new(name).color(TEXT))
-                        .id_salt(&entry.path)
-                        .show(ui, |ui| tree(ui, root, &entry.path, active, directories));
+                    let response =
+                        egui::CollapsingHeader::new(RichText::new(name).color(colors().text))
+                            .id_salt(&entry.path)
+                            .show(ui, |ui| tree(ui, root, &entry.path, active, directories));
                     response.header_response.context_menu(|ui| {
                         if let Some(action) = tree_menu(ui, root, &entry.path, true) {
                             selected = Some(action);
@@ -1025,7 +1042,7 @@ fn tree(
             }
         }
         Err(error) => {
-            ui.label(RichText::new(error).small().color(ERROR));
+            ui.label(RichText::new(error).small().color(colors().error));
         }
     }
     directories.insert(path.to_owned(), super::DirectoryLoad::Ready(entries));

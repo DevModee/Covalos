@@ -157,7 +157,12 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
         "AEROS visual review",
         options,
         Box::new(move |cc| {
-            let mut editor = Editor::new(&cc.egui_ctx, Some(root.clone()), Preferences::default());
+            let requested_theme =
+                std::env::var("AEROS_REVIEW_THEME").unwrap_or_else(|_| "dark".into());
+            let mut preferences = Preferences::default();
+            preferences.theme =
+                serde_json::from_str(&format!("\"{requested_theme}\"")).unwrap_or_default();
+            let mut editor = Editor::new(&cc.egui_ctx, Some(root.clone()), preferences);
             editor
                 .preferences
                 .recent

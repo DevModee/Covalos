@@ -287,7 +287,7 @@ impl Editor {
             ui.painter().vline(
                 nav.right() + 12.0,
                 content.y_range(),
-                egui::Stroke::new(1.0_f32, BORDER),
+                egui::Stroke::new(1.0_f32, colors().border),
             );
             let body = egui::Rect::from_min_max(
                 egui::pos2(nav.right() + 40.0, content.top()),
@@ -364,7 +364,7 @@ impl Editor {
             self.hub.providers = Some(Provider::ALL.map(|provider| provider.discover().is_some()));
         }
         Frame::new()
-            .fill(SURFACE)
+            .fill(colors().surface)
             .inner_margin(Margin::same(16))
             .corner_radius(PANEL_RADIUS)
             .show(ui, |ui| {
@@ -883,11 +883,12 @@ fn chat_box(
 ) -> bool {
     ui.horizontal(|ui| {
         let (_, mark) = ui.allocate_space(egui::vec2(20.0, 28.0));
-        draw_icon(ui.painter(), mark.center(), Icon::Hub, ACCENT);
+        draw_icon(ui.painter(), mark.center(), Icon::Hub, colors().accent);
         ui.label(RichText::new(chat.provider.label()).size(LEAD).strong());
         if chat.connected {
             let (_, dot) = ui.allocate_space(egui::vec2(10.0, 10.0));
-            ui.painter().circle_filled(dot.center(), 2.5, SUCCESS);
+            ui.painter()
+                .circle_filled(dot.center(), 2.5, colors().success);
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if ui
@@ -925,7 +926,7 @@ fn chat_box(
                         "Open a workspace"
                     })
                     .size(LEAD)
-                    .color(TEXT),
+                    .color(colors().text),
                 );
                 ui.add_space(8.0);
                 ui.add(
@@ -941,15 +942,15 @@ fn chat_box(
                 ui.push_id(index, |ui| {
                     let is_user = message.author == "You";
                     let color = if message.author == "Error" {
-                        ERROR
+                        colors().error
                     } else if is_user {
-                        SECONDARY
+                        colors().secondary
                     } else {
-                        ACCENT_HOVER
+                        colors().accent_hover
                     };
                     let frame = Frame::new()
                         .fill(if is_user {
-                            ELEVATED
+                            colors().elevated
                         } else {
                             egui::Color32::TRANSPARENT
                         })
@@ -996,10 +997,10 @@ fn chat_box(
         });
     ui.add_space(8.0);
     Frame::new()
-        .fill(ELEVATED)
+        .fill(colors().elevated)
         .inner_margin(Margin::same(12))
         .corner_radius(PANEL_RADIUS)
-        .stroke(egui::Stroke::new(1.0_f32, CONTROL_BORDER))
+        .stroke(egui::Stroke::new(1.0_f32, colors().control_border))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.add_enabled(
@@ -1074,7 +1075,7 @@ fn markdown(ui: &mut Ui, text: &str) {
 
 fn code_block(ui: &mut Ui, text: &str, language: &str) {
     Frame::new()
-        .fill(CANVAS)
+        .fill(colors().canvas)
         .inner_margin(Margin::same(8))
         .corner_radius(8)
         .show(ui, |ui| {
