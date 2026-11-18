@@ -20,6 +20,8 @@ pub(super) struct Chat {
     usage: Option<(u64, u64)>,
     partial: String,
     connected: bool,
+    last_outcome: Option<Outcome>,
+    finished: Option<std::time::Instant>,
 }
 
 pub(super) struct Message {
@@ -30,6 +32,7 @@ pub(super) struct Message {
 impl Chat {
     pub(super) fn start(&mut self, scope: Scope, root: PathBuf, input: String, ctx: &Context) {
         self.activity = "Waiting for response";
+        self.last_outcome = None;
         self.partial.clear();
         let ctx = ctx.clone();
         self.run = Some(assistant::start_provider(
@@ -89,6 +92,8 @@ impl Chat {
         if outcome == Outcome::Running {
             self.run = Some(run);
         } else {
+            self.last_outcome = Some(outcome);
+            self.finished = Some(std::time::Instant::now());
             self.activity = "";
             self.partial.clear();
         }
@@ -206,6 +211,34 @@ fn strip_fence(text: &str) -> Option<&str> {
 }
 
 impl Hub {
+    pub(super) fn approval_pending(&self) -> bool {
+        self.proposal.is_some()
+    }
+    pub(super) fn mood(&self, workspace: &Chat) -> super::identity::Mood {
+        use super::identity::Mood;
+        for chat in [workspace, &self.general_chat, &self.reviewer] {
+            if chat.run.is_some() {
+                return if chat.activity == "Inspecting workspace" {
+                    Mood::Searching
+                } else if matches!(self.workflow, Some(Workflow::Assist { .. })) {
+                    Mood::Coding
+                } else {
+                    Mood::Thinking
+                };
+            }
+        }
+        for chat in [workspace, &self.general_chat, &self.reviewer] {
+            if chat.finished.is_some_and(|t| t.elapsed().as_secs() < 8) {
+                return if chat.last_outcome == Some(Outcome::Failed) {
+                    Mood::Error
+                } else {
+                    Mood::Success
+                };
+            }
+        }
+        Mood::Idle
+    }
+
     pub(super) fn change_workspace(&mut self, note: String, mut tasks: Vec<Task>) {
         self.general = false;
         self.workflow = None;
@@ -254,6 +287,13 @@ impl Hub {
 
 impl Editor {
     pub(super) fn agent_hub(&mut self, ui: &mut Ui) {
+        let mood = self.agent_mood(ui.input(|i| i.focused));
+        self.identity.paint(
+            ui,
+            ui.available_rect_before_wrap(),
+            &self.preferences.identity,
+            mood,
+        );
         let ctx = ui.ctx().clone();
         let width = ui.available_width().min(1280.0);
         let rect = ui.available_rect_before_wrap();

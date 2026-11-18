@@ -3,6 +3,7 @@ mod visual_tests;
 
 mod files;
 mod hub;
+mod identity;
 mod panels;
 mod preferences;
 mod shell;
@@ -84,6 +85,7 @@ pub struct Editor {
     preferences_path: Option<PathBuf>,
     settings_open: bool,
     hub_open: bool,
+    identity: identity::Identity,
     tools: tools::Tools,
     palette: Option<shell::Palette>,
     chat: hub::Chat,
@@ -148,6 +150,7 @@ impl Editor {
             preferences_path: None,
             settings_open: false,
             hub_open: false,
+            identity: identity::Identity::default(),
             tools: tools::Tools::default(),
             palette: None,
             chat: hub::Chat::default(),
@@ -509,6 +512,19 @@ impl Editor {
 }
 
 impl Editor {
+    fn agent_mood(&self, focused: bool) -> identity::Mood {
+        if !focused {
+            return identity::Mood::Sleeping;
+        }
+        if self.hub.approval_pending() {
+            return identity::Mood::Approval;
+        }
+        if self.search_job.is_some() {
+            return identity::Mood::Searching;
+        }
+        self.hub.mood(&self.chat)
+    }
+
     fn render(&mut self, ctx: &egui::Context) {
         let focused = ctx.input(|input| input.focused);
         ctx.style_mut(|style| {
@@ -522,6 +538,17 @@ impl Editor {
         self.poll();
         self.poll_chats(ctx);
         self.tools.poll();
+        let mood = self.agent_mood(focused);
+        self.identity.begin(
+            ctx,
+            &self.preferences.identity,
+            self.preferences.reduce_motion,
+            self.hub_open
+                || self.documents.is_empty()
+                || self.preferences.identity.behind_code
+                || self.settings_open,
+            mood,
+        );
         if ctx.input(|input| input.viewport().close_requested()) && !self.force_close {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.request(Pending::Exit, ctx);

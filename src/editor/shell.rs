@@ -121,6 +121,9 @@ impl Editor {
 
     pub(super) fn welcome(&mut self, ui: &mut Ui) {
         let area = ui.available_rect_before_wrap();
+        let mood = self.agent_mood(ui.input(|i| i.focused));
+        self.identity
+            .paint(ui, area, &self.preferences.identity, mood);
         let width = (area.width() - 64.0).clamp(240.0, 640.0).min(area.width());
         let top = if area.height() < 560.0 {
             24.0
@@ -256,33 +259,66 @@ impl Editor {
             return;
         }
         egui::Window::new("Settings").open(&mut self.settings_open)
-            .collapsible(false).resizable(false).fixed_size(egui::vec2(440.0,(ctx.content_rect().height()-140.0).clamp(260.0,440.0)))
-            .vscroll(true)
-            .constrain_to(ctx.content_rect().shrink(16.0))
-            .show(ctx,|ui| {
-                ui.set_max_width(440.0);
-                let previous_theme = self.preferences.theme;
+            .collapsible(false).resizable(false)
+            .fixed_size(egui::vec2(470.0,(ctx.content_rect().height()-140.0).clamp(240.0,560.0)))
+            .vscroll(true).constrain_to(ctx.content_rect().shrink(16.0))
+            .show(ctx, |ui| {
+                ui.set_max_width(470.0);
+                let old = (self.preferences.theme,self.preferences.font_size,self.preferences.high_contrast);
                 section(ui,"Appearance","Tune the workspace for long editing sessions.");
                 ui.horizontal(|ui| {
                     ui.label(secondary("Theme"));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui|{egui::ComboBox::from_id_salt("appearance-theme").selected_text(self.preferences.theme.name()).show_ui(ui, |ui| { for theme in Theme::ALL { ui.selectable_value(&mut self.preferences.theme, theme, theme.name()); } });});
+                    egui::ComboBox::from_id_salt("appearance-theme").selected_text(self.preferences.theme.name())
+                        .show_ui(ui, |ui| {for theme in Theme::ALL {ui.selectable_value(&mut self.preferences.theme,theme,theme.name());}});
                 });
-                ui.add_space(12.0);
-                ui.label(secondary("Editor font size"));
-                let font_changed=ui.add(egui::Slider::new(&mut self.preferences.font_size,11.0..=26.0).step_by(1.0).suffix(" pt")).changed();
-                ui.add_space(12.0);
-                let contrast_changed=checkbox(ui,&mut self.preferences.high_contrast,"High contrast controls").changed();
+                ui.add_space(8.0);
+                ui.add(egui::Slider::new(&mut self.preferences.font_size,11.0..=26.0).step_by(1.0).text("Editor font size").suffix(" pt"));
+                checkbox(ui,&mut self.preferences.high_contrast,"High contrast controls");
                 checkbox(ui,&mut self.preferences.compact,"Compact interface");
                 checkbox(ui,&mut self.preferences.reduce_motion,"Reduce motion");
-                ui.add_space(20.0);
+                if old != (self.preferences.theme,self.preferences.font_size,self.preferences.high_contrast) {
+                    install(ctx,self.preferences.font_size,self.preferences.high_contrast,self.preferences.theme);
+                    self.syntax=egui_extras::syntax_highlighting::CodeTheme::dark(self.preferences.font_size);
+                }
+                ui.add_space(16.0);
+                egui::CollapsingHeader::new("Background & ASCII").default_open(true).show(ui, |ui| {
+                    let prefs=&mut self.preferences.identity;
+                    ui.horizontal(|ui| {
+                        ui.label(secondary("Preset"));
+                        egui::ComboBox::from_id_salt("background-preset").selected_text(prefs.background.name()).show_ui(ui, |ui| {
+                            for preset in super::identity::Background::ALL {ui.selectable_value(&mut prefs.background,preset,preset.name());}
+                        });
+                    });
+                    let (_,preview)=ui.allocate_space(egui::vec2(ui.available_width(),100.0));
+                    ui.painter().rect_filled(preview,6,colors().canvas);
+                    self.identity.paint(ui,preview,prefs,super::identity::Mood::Idle);
+                    checkbox(ui,&mut prefs.animated,"Animate backgrounds");
+                    ui.add(egui::Slider::new(&mut prefs.fps,5..=30).text("Maximum FPS"));
+                    ui.add(egui::Slider::new(&mut prefs.speed,0.1..=2.0).text("Speed"));
+                    ui.add(egui::Slider::new(&mut prefs.density,0.1..=1.0).text("Density"));
+                    ui.add(egui::Slider::new(&mut prefs.intensity,0.02..=0.4).text("Intensity"));
+                    ui.horizontal(|ui| { checkbox(ui,&mut prefs.custom_tint,"Custom color");if prefs.custom_tint {ui.color_edit_button_srgb(&mut prefs.tint);} });
+                    if prefs.background==super::identity::Background::Ascii {
+                        egui::ComboBox::from_id_salt("ascii-pattern").selected_text(prefs.pattern.name()).show_ui(ui,|ui| {
+                            for pattern in super::identity::Pattern::ALL {ui.selectable_value(&mut prefs.pattern,pattern,pattern.name());}
+                        });
+                    }
+                    checkbox(ui,&mut prefs.behind_code,"Also show behind code").on_hover_text("Off by default. Keep the code area quiet.");
+                    ui.label(muted("Animation pauses without focus, when minimized, or with Reduce motion."));
+                });
+                ui.add_space(12.0);
+                egui::CollapsingHeader::new("Luma companion").show(ui, |ui| {
+                    let prefs=&mut self.preferences.identity;
+                    checkbox(ui,&mut prefs.mascot,"Show Luma");
+                    checkbox(ui,&mut prefs.mascot_motion,"Animate activity");
+                    checkbox(ui,&mut prefs.interactive,"Follow pointer and open companion");
+                    ui.add(egui::Slider::new(&mut prefs.mascot_size,18.0..=32.0).text("Size").suffix(" pt"));
+                    ui.label(muted("A kite-shaped orbital probe. Its state follows actual agent and search activity."));
+                });
+                ui.add_space(16.0);
                 section(ui,"Agent editing","Control how proposed changes reach your editor.");
                 checkbox(ui,&mut self.preferences.allow_auto_buffer,"Allow Auto buffer edits")
                     .on_hover_text("Auto applies an eligible replacement to the active buffer. Use Save to write the file.");
-                if font_changed || contrast_changed || previous_theme != self.preferences.theme {
-                    install(ctx,self.preferences.font_size,self.preferences.high_contrast,self.preferences.theme);
-                    self.syntax = egui_extras::syntax_highlighting::CodeTheme::dark(self.preferences.font_size);
-                }
-                ui.add_space(8.0);
             });
     }
 

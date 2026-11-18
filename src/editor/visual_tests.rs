@@ -162,6 +162,12 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
             let mut preferences = Preferences::default();
             preferences.theme =
                 serde_json::from_str(&format!("\"{requested_theme}\"")).unwrap_or_default();
+            if let Ok(background) = std::env::var("AEROS_REVIEW_BACKGROUND") {
+                preferences.identity.background =
+                    serde_json::from_str(&format!("\"{background}\"")).unwrap_or_default();
+            }
+            preferences.reduce_motion = std::env::var("AEROS_REVIEW_REDUCE").as_deref() == Ok("1");
+            preferences.compact = std::env::var("AEROS_REVIEW_COMPACT").as_deref() == Ok("1");
             let mut editor = Editor::new(&cc.egui_ctx, Some(root.clone()), preferences);
             editor
                 .preferences
