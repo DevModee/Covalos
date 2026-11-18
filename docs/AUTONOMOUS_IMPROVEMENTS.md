@@ -29,3 +29,16 @@ Archivos: src/editor/identity.rs, editor.rs, shell.rs, panels.rs, hub.rs y prefe
 Pruebas: 14 regresiones aprobadas; reloj de pausa/reanudación y límites de preferencias. Clippy estricto aprobado. Capturas nativas Orbital, ASCII, Neural y Void, incluida ventana 1366×768 a 150 % en modo compacto y movimiento reducido.
 
 Próxima mejora: companion de sesiones y aprobaciones basado en eventos reales.
+
+## Ciclo 3 — Supervisión y decisiones observables
+
+Problema: V3 no tenía una vista compacta de sesiones ni un puente para eventos externos. Los estados no estaban disponibles fuera del chat.
+
+Solución: Agent companion y Live agents, snapshots de ejecuciones internas, mensajes de ciclo de vida, contador compacto, notificaciones y atención en la barra de tareas. Puente local de hooks compatible con nombres canónicos; decisiones Claude de una sola acción, tickets, caducidad y auditoría. Ningún ajuste de proveedor se instala automáticamente.
+
+Archivos: src/agent_bridge.rs, src/editor/companion.rs, main.rs, editor.rs, hub.rs, panels.rs, shell.rs y preferences.rs.
+
+Verificación: pruebas de estados, decisiones duplicadas, tickets cambiados y vencimiento. Assist autenticado de Codex aprobado: propuesta pendiente y archivo en disco conservado. Captura nativa del hook del ejecutable con payload de prueba explícito y rechazo posterior.
+
+Límites: otros proveedores conservan sus aprobaciones en el terminal. Las sesiones externas muestran el último evento recibido. No hay detección de sesiones sin hooks ni activación exacta de terminal externo. Ver AGENT_COMPANION.md.
+

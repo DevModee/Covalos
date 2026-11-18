@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod visual_tests;
 
+mod companion;
 mod files;
 mod hub;
 mod identity;
@@ -85,6 +86,7 @@ pub struct Editor {
     preferences_path: Option<PathBuf>,
     settings_open: bool,
     hub_open: bool,
+    companion: companion::Companion,
     identity: identity::Identity,
     tools: tools::Tools,
     palette: Option<shell::Palette>,
@@ -113,6 +115,7 @@ impl Editor {
         };
         let mut editor = Self::new(ctx, root, preferences);
         editor.preferences_path = path;
+        editor.companion.start(ctx);
         if let Some(error) = error {
             editor.error(format!("Could not read settings. {error}"));
         }
@@ -150,6 +153,7 @@ impl Editor {
             preferences_path: None,
             settings_open: false,
             hub_open: false,
+            companion: companion::Companion::default(),
             identity: identity::Identity::default(),
             tools: tools::Tools::default(),
             palette: None,
@@ -516,13 +520,18 @@ impl Editor {
         if !focused {
             return identity::Mood::Sleeping;
         }
-        if self.hub.approval_pending() {
+        if self.hub.approval_pending() || self.companion.counts().1 > 0 {
             return identity::Mood::Approval;
         }
         if self.search_job.is_some() {
             return identity::Mood::Searching;
         }
-        self.hub.mood(&self.chat)
+        let mood = self.hub.mood(&self.chat);
+        if mood == identity::Mood::Idle {
+            self.companion.reported_mood()
+        } else {
+            mood
+        }
     }
 
     fn render(&mut self, ctx: &egui::Context) {
@@ -538,6 +547,13 @@ impl Editor {
         self.poll();
         self.poll_chats(ctx);
         self.tools.poll();
+        let snapshots = self.hub.snapshots(&self.chat, self.root.as_deref());
+        self.companion.sync(
+            snapshots,
+            ctx,
+            self.preferences.quiet_notifications,
+            self.preferences.notification_interval,
+        );
         let mood = self.agent_mood(focused);
         self.identity.begin(
             ctx,
@@ -583,6 +599,7 @@ impl Editor {
         self.palette_modal(ctx);
         self.modals(ctx);
         self.file_dialogs(ctx);
+        self.companion_surface(ctx);
     }
 }
 impl eframe::App for Editor {

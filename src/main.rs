@@ -1,5 +1,6 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod agent_bridge;
 mod assistant;
 mod editor;
 mod process;
@@ -8,6 +9,12 @@ mod workspace;
 use eframe::egui;
 
 fn main() -> eframe::Result {
+    if std::env::args().nth(1).as_deref() == Some("--agent-hook") {
+        if let Err(error) = agent_bridge::hook_entry() {
+            eprintln!("AEROS hook: {error}");
+        }
+        return Ok(());
+    }
     let root = std::env::args_os().nth(1).map(std::path::PathBuf::from);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

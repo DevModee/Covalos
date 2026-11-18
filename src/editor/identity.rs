@@ -92,7 +92,7 @@ impl Default for IdentityPreferences {
             background: Background::Orbital,
             pattern: Pattern::Waves,
             animated: true,
-            fps: 20,
+            fps: 10,
             speed: 0.6,
             density: 0.45,
             intensity: 0.16,
