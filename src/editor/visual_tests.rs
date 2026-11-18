@@ -288,3 +288,117 @@ fn workspace_label(root: Option<&PathBuf>) -> String {
         .unwrap_or_else(|| "Open a workspace".into())
 }
 "#;
+
+#[test]
+#[ignore = "opens a native window to inspect a persisted recovery fixture; no provider is called"]
+#[cfg(windows)]
+fn capture_recovered_conversation() -> Result<(), Box<dyn std::error::Error>> {
+    use eframe::egui::{Event, UserData, ViewportBuilder, ViewportCommand};
+    use winit::platform::windows::EventLoopBuilderExtWindows;
+    struct Recovery {
+        editor: Editor,
+        output: PathBuf,
+        frames: usize,
+        requested: bool,
+        deadline: Instant,
+    }
+    impl eframe::App for Recovery {
+        fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+            assert!(
+                Instant::now() < self.deadline,
+                "recovery screenshot timed out"
+            );
+            let image = ctx.input(|i| {
+                i.events.iter().find_map(|event| match event {
+                    Event::Screenshot { image, .. } => Some(image.clone()),
+                    _ => None,
+                })
+            });
+            if let Some(image) = image {
+                let bytes: Vec<_> = image
+                    .pixels
+                    .iter()
+                    .flat_map(|pixel| pixel.to_array())
+                    .collect();
+                image::save_buffer(
+                    &self.output,
+                    &bytes,
+                    image.size[0] as u32,
+                    image.size[1] as u32,
+                    image::ColorType::Rgba8,
+                )
+                .expect("save recovery screenshot");
+                self.editor.force_close = true;
+                ctx.send_viewport_cmd(ViewportCommand::Close);
+                return;
+            }
+            self.editor.render(ctx);
+            self.frames += 1;
+            if self.frames > 6 && !self.requested {
+                self.requested = true;
+                ctx.send_viewport_cmd(ViewportCommand::Screenshot(UserData::default()));
+            }
+            ctx.request_repaint_after(Duration::from_millis(60));
+        }
+    }
+    let output = PathBuf::from(
+        std::env::var_os("AEROS_RECOVERY_CAPTURE").ok_or("set AEROS_RECOVERY_CAPTURE")?,
+    );
+    std::fs::create_dir_all(output.parent().unwrap())?;
+    let fixture = tempfile::tempdir()?;
+    let root = fixture.path().join("recovery-workspace");
+    std::fs::create_dir_all(&root)?;
+    let root = root.canonicalize()?;
+    let config = fixture.path().join("profile/editor.json");
+    let options = eframe::NativeOptions {
+        viewport: ViewportBuilder::default()
+            .with_inner_size([1366.0, 768.0])
+            .with_decorations(false)
+            .with_title("AEROS recovery verification"),
+        event_loop_builder: Some(Box::new(|b| {
+            b.with_any_thread(true);
+        })),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "AEROS recovery verification",
+        options,
+        Box::new(move |cc| {
+            let mut original =
+                Editor::new(&cc.egui_ctx, Some(root.clone()), Preferences::default());
+            original.preferences_path = Some(config.clone());
+            original.chat.push(
+                "You",
+                "Keep my workspace conversation after restarting the editor.".into(),
+            );
+            original.chat.push(
+                "System",
+                "Recovery verification fixture. No AI provider was called.".into(),
+            );
+            original.chat.prompt = "Continue from this conversation".into();
+            assert!(original.save_conversation());
+            drop(original);
+            let mut saved = sessions::Conversation::load(&config, &root)
+                .unwrap()
+                .unwrap();
+            saved.interrupted = true;
+            saved.save(&config).unwrap();
+            let mut editor = Editor::new(&cc.egui_ctx, Some(root), Preferences::default());
+            editor.preferences_path = Some(config);
+            editor.restore_conversation();
+            assert_eq!(editor.chat.messages.len(), 3);
+            assert!(editor.chat.run.is_none());
+            assert!(!editor.hub.approval_pending());
+            assert!(editor.hub.workflow.is_none());
+            editor.hub_open = true;
+            Ok(Box::new(Recovery {
+                editor,
+                output,
+                frames: 0,
+                requested: false,
+                deadline: Instant::now() + Duration::from_secs(30),
+            }))
+        }),
+    )?;
+    Ok(())
+}

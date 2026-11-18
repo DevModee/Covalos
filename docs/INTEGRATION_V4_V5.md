@@ -27,6 +27,8 @@ Las zonas con más probabilidad de conflicto son Preferences, Editor::new/render
 
 Implementados: temas, fondos vectoriales y ASCII configurables, Luma, monitor de eventos, superficies de aprobación, notificaciones, pausa por foco/minimización y optimización de la barra de estado.
 
-Pendiente: conversación persistente y recuperación de sesiones; adaptadores sin hooks; aprobación oficial de otros proveedores; prueba interactiva autenticada de Claude; activación de terminal externo; navegador Obscura; themes externos importables; lector de pantalla, DPI global y movimiento entre monitores; medición de latencia física y carga con varios agentes reales.
+Implementado en la continuación: conversación de Workspace persistente por proyecto, borradores, recuperación sin reiniciar tareas y descarte de aprobaciones al crear New chat. Ver ciclo 5 en AUTONOMOUS_IMPROVEMENTS.md. Build de continuación: E:/workspace/aeros-quality-resumed-build.
+
+Pendiente: conversaciones General persistentes y recuperación de streaming; adaptadores sin hooks; aprobación oficial de otros proveedores; prueba interactiva autenticada de Claude; activación de terminal externo; navegador Obscura; themes externos importables; lector de pantalla, DPI global y movimiento entre monitores; medición de latencia física y carga con varios agentes reales.
 
 Las capturas del contrato de aprobación están identificadas como fixtures. El test autenticado de Codex es independiente. Las mediciones de rendimiento tienen pocos controles válidos de foco y no justifican afirmar una mejora global de velocidad. Ver AUTONOMOUS_IMPROVEMENTS.md.

@@ -7,6 +7,7 @@ mod hub;
 mod identity;
 mod panels;
 mod preferences;
+mod sessions;
 mod shell;
 mod skills;
 mod theme;
@@ -91,6 +92,11 @@ pub struct Editor {
     tools: tools::Tools,
     palette: Option<shell::Palette>,
     chat: hub::Chat,
+    chat_saved_revision: u64,
+    chat_observed_revision: u64,
+    chat_save_due: Option<std::time::Instant>,
+    conversation_writable: bool,
+    conversation_exit_warning: bool,
     hub: hub::Hub,
     skills: skills::Skills,
     include_active_file: bool,
@@ -115,6 +121,7 @@ impl Editor {
         };
         let mut editor = Self::new(ctx, root, preferences);
         editor.preferences_path = path;
+        editor.restore_conversation();
         editor.companion.start(ctx);
         if let Some(error) = error {
             editor.error(format!("Could not read settings. {error}"));
@@ -158,6 +165,11 @@ impl Editor {
             tools: tools::Tools::default(),
             palette: None,
             chat: hub::Chat::default(),
+            chat_saved_revision: 0,
+            chat_observed_revision: 0,
+            chat_save_due: None,
+            conversation_writable: true,
+            conversation_exit_warning: false,
             hub: hub::Hub::default(),
             skills: skills::Skills::default(),
             include_active_file: false,
@@ -198,6 +210,9 @@ impl Editor {
         if self.root.as_ref() == Some(&root) {
             return;
         }
+        if !self.save_conversation() {
+            return;
+        }
         self.preferences.remember(&root);
         self.reset_chat();
         self.hub.change_workspace(
@@ -217,6 +232,7 @@ impl Editor {
         self.search_job = None;
         self.find_open = false;
         self.notice = None;
+        self.restore_conversation();
     }
 
     fn pick_file(&mut self) {
@@ -337,6 +353,10 @@ impl Editor {
                 self.focus_editor = self.active.is_some();
             }
             Pending::Exit => {
+                if !self.save_conversation() {
+                    self.conversation_exit_warning = true;
+                    return;
+                }
                 self.force_close = true;
                 self.chat.run.take();
                 self.hub.general_chat.run.take();
@@ -465,8 +485,104 @@ impl Editor {
         self.selection = Some((index, index));
     }
 
+    fn conversation_close_modal(&mut self, ctx: &egui::Context) {
+        if !self.conversation_exit_warning {
+            return;
+        }
+        egui::Window::new("Conversation could not be saved")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.label("Your latest chat changes are still in memory.");
+                ui.horizontal(|ui| {
+                    if ui.button("Retry save and close").clicked() {
+                        self.conversation_exit_warning = false;
+                        self.perform(Pending::Exit, ctx);
+                    }
+                    if ui.button("Close without saving chat").clicked() {
+                        self.conversation_exit_warning = false;
+                        self.chat_saved_revision = self.chat.revision;
+                        self.perform(Pending::Exit, ctx);
+                    }
+                    if ui.button("Keep editing").clicked() {
+                        self.conversation_exit_warning = false;
+                    }
+                });
+            });
+    }
+
+    fn restore_conversation(&mut self) {
+        self.chat_saved_revision = 0;
+        self.chat_observed_revision = 0;
+        self.chat_save_due = None;
+        self.conversation_writable = true;
+        let Some((config, root)) = self.preferences_path.as_deref().zip(self.root.as_deref())
+        else {
+            return;
+        };
+        match sessions::Conversation::load(config, root) {
+            Ok(Some(value)) => self.chat = hub::Chat::restore(value),
+            Ok(None) => {}
+            Err(error) => {
+                self.conversation_writable = false;
+                self.chat_saved_revision = self.chat.revision;
+                self.error(format!("Could not restore the conversation. Its stored file has been preserved. {error}"));
+            }
+        }
+    }
+
+    fn save_conversation(&mut self) -> bool {
+        self.chat_save_due = None;
+        if self.chat_saved_revision == self.chat.revision {
+            return true;
+        }
+        let Some((config, root)) = self.preferences_path.as_deref().zip(self.root.as_deref())
+        else {
+            return true;
+        };
+        let result = if self.conversation_writable {
+            self.chat.snapshot(root).save(config)
+        } else {
+            Err(std::io::Error::other(
+                "Repair or move the unreadable conversation file before saving this workspace's chat.",
+            ))
+        };
+        match result {
+            Ok(()) => {
+                self.chat_saved_revision = self.chat.revision;
+                true
+            }
+            Err(error) => {
+                self.error(format!("Could not save the conversation. {error}"));
+                false
+            }
+        }
+    }
+
+    fn autosave_conversation(&mut self, ctx: &egui::Context) {
+        if self.preferences_path.is_none() || self.root.is_none() {
+            return;
+        }
+        if self.chat_observed_revision != self.chat.revision {
+            self.chat_observed_revision = self.chat.revision;
+            self.chat_save_due =
+                Some(std::time::Instant::now() + std::time::Duration::from_millis(750));
+        }
+        if let Some(due) = self.chat_save_due {
+            let remaining = due.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                self.save_conversation();
+            } else {
+                ctx.request_repaint_after(remaining);
+            }
+        }
+    }
+
     fn reset_chat(&mut self) {
+        let revision = self.chat.revision.wrapping_add(1);
         self.chat = hub::Chat::default();
+        self.chat.revision = revision;
         self.hub.discard_workflow();
         self.save_task_history();
         self.include_active_file = false;
@@ -575,6 +691,7 @@ impl Editor {
             && self.palette.is_none()
             && self.file_change.is_none()
             && self.pending_delete.is_none()
+            && !self.conversation_exit_warning
         {
             self.shortcuts(ctx);
         }
@@ -598,6 +715,7 @@ impl Editor {
         self.settings_window(ctx);
         self.palette_modal(ctx);
         self.modals(ctx);
+        self.conversation_close_modal(ctx);
         self.file_dialogs(ctx);
         self.companion_surface(ctx);
     }
@@ -605,6 +723,7 @@ impl Editor {
 impl eframe::App for Editor {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.render(ctx);
+        self.autosave_conversation(ctx);
         if self.preferences != self.saved_preferences
             && !ctx.input(|input| input.pointer.any_down())
         {
@@ -621,6 +740,83 @@ impl eframe::App for Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unreadable_history_is_preserved_and_failed_exit_can_be_cancelled() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let root = dir.path().canonicalize()?;
+        let config = dir.path().join("settings/editor.json");
+        let ctx = egui::Context::default();
+        sessions::Conversation::new(
+            &root,
+            assistant::Provider::Codex,
+            None,
+            "",
+            std::iter::empty(),
+            false,
+        )
+        .save(&config)?;
+        let file = std::fs::read_dir(config.parent().unwrap().join("conversations"))?
+            .next()
+            .unwrap()?
+            .path();
+        std::fs::write(&file, "{corrupted history")?;
+        let mut editor = Editor::new(&ctx, Some(root), Preferences::default());
+        editor.preferences_path = Some(config);
+        editor.restore_conversation();
+        assert!(!editor.conversation_writable);
+        assert!(editor.notice.as_ref().is_some_and(|(error, _)| *error));
+        editor.chat.push("You", "New message".into());
+        editor.perform(Pending::Exit, &ctx);
+        assert!(editor.conversation_exit_warning);
+        assert!(!editor.force_close);
+        assert_eq!(std::fs::read_to_string(file)?, "{corrupted history");
+        Ok(())
+    }
+
+    #[test]
+    fn conversations_survive_restart_switching_and_new_chat() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let a = dir.path().join("project-a");
+        let b = dir.path().join("project-b");
+        std::fs::create_dir_all(&a)?;
+        std::fs::create_dir_all(&b)?;
+        let config = dir.path().join("settings/editor.json");
+        let ctx = egui::Context::default();
+        let mut first = Editor::new(&ctx, Some(a.clone()), Preferences::default());
+        first.preferences_path = Some(config.clone());
+        first.chat.push("You", "¿Dónde quedamos?".into());
+        first.chat.session = Some("session-recovery-test".into());
+        first.chat.prompt = "Continuar mañana".into();
+        first.open_workspace(b);
+        assert!(first.chat.messages.is_empty());
+        first.chat.push("You", "Independent project".into());
+        first.open_workspace(a.clone());
+        assert_eq!(first.chat.messages[0].text, "¿Dónde quedamos?");
+        assert_eq!(first.chat.prompt, "Continuar mañana");
+        assert!(first.save_conversation());
+        drop(first);
+        let mut second = Editor::new(&ctx, Some(a.clone()), Preferences::default());
+        second.preferences_path = Some(config.clone());
+        second.restore_conversation();
+        assert_eq!(
+            second.chat.session.as_deref(),
+            Some("session-recovery-test")
+        );
+        assert_eq!(second.chat.prompt, "Continuar mañana");
+        assert!(second.chat.run.is_none());
+        assert!(second.hub.workflow.is_none());
+        assert!(!second.hub.approval_pending());
+        second.reset_chat();
+        assert!(second.save_conversation());
+        drop(second);
+        let mut third = Editor::new(&ctx, Some(a), Preferences::default());
+        third.preferences_path = Some(config);
+        third.restore_conversation();
+        assert!(third.chat.messages.is_empty());
+        assert!(third.chat.session.is_none());
+        Ok(())
+    }
 
     #[test]
     fn workspace_editing_and_find_render_in_the_normal_view() -> std::io::Result<()> {

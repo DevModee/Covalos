@@ -83,3 +83,24 @@ La carpeta final contiene las pantallas vigentes; las carpetas de temas y de ide
 - [Home V3 anterior](../design/captures/after/1920x1080-100/home.png)
 
 El 125/150 % usa escalado de egui en Windows; queda pendiente cambiar el DPI global y mover la ventana entre monitores. Las capturas motion-start/end registran dos instantes reales del motor.
+
+
+## Ciclo 5 — Continuación: conversación recuperable por proyecto
+
+Retomado el 18 de noviembre de 2026 desde 7dbd2d5. Se verificaron los tres worktrees: principal en design/aeros-v3, visual-identity-recovery sin cambios y esta rama limpia. Continúa la implementación en improvement/autonomous-quality. El Release de esta continuación se genera en E:/workspace/aeros-quality-resumed-build para conservar el ejecutable anterior que estaba abierto.
+
+Problema: el historial, borrador e ID de sesión solo vivían en memoria. Cambiar de proyecto o reiniciar el editor descartaba la conversación de Workspace. Además, New chat conservaba una propuesta anterior pendiente de aprobación.
+
+Solución: historial local separado por ruta canónica de proyecto, guardado atómico junto a la configuración, autoguardado tras 750 ms sin modificaciones y guardado inmediato al cambiar de proyecto o cerrar. Conserva hasta 100 mensajes, 1 MiB de texto y un borrador de hasta 48 KB; rechaza archivos mayores de 2 MiB, versiones incompatibles y rutas que no corresponden. Los IDs de sesión se validan antes de recuperarlos. No se guarda ni ejecuta una aprobación o workflow. Una solicitud interrumpida muestra un aviso; el proveedor permanece desconectado hasta que el usuario envía otro mensaje. New chat limpia el historial persistido y rechaza propuestas pendientes.
+
+Errores de lectura: el archivo original se conserva y no se sobrescribe automáticamente. Si falla un guardado al cerrar, se puede reintentar, seguir editando o cerrar descartando explícitamente los cambios del chat. Un cambio de proyecto con fallo de guardado conserva el proyecto y conversación actuales.
+
+Archivos: src/editor/sessions.rs, editor.rs, hub.rs, visual_tests.rs y assistant/providers.rs.
+
+Validación: 23 pruebas de regresión aprobadas (incluyen reinicio de Editor, cambio A→B→A, New chat, aislamiento, Unicode, corrupción, límite de tamaño, recuperación sin ejecución y descarte de propuestas); Clippy --all-targets -D warnings y Release aprobados. La captura nativa de recuperación también pasó y se inspeccionó: [history-restored.png](../design/quality-captures/recovery/history-restored.png). Es un fixture identificado, sin llamada a un proveedor real; no demuestra una nueva autenticación o un resume remoto.
+
+Límites: esta fase conserva la conversación de Workspace. General sigue usando un directorio temporal y no se persiste. No se recuperan respuestas parciales que solo estaban en streaming; un cierre forzado puede perder los últimos 750 ms de cambios del historial o borrador. La disponibilidad del ID remoto depende del proveedor y su cuenta. No se repitieron las pruebas autenticadas de pago ni se atribuye una mejora de rendimiento global a este ciclo.
+
+Checkpoint: continuar desde esta rama, no fusionada, para recuperación de conversaciones General con aislamiento persistente, hooks Claude autenticados, DPI entre monitores y activos de marca/referencias visuales todavía pendientes. Ejecutable de la continuación: E:/workspace/aeros-quality-resumed-build/release/aeros-editor.exe.
+
+Prueba del ejecutable: apertura nativa y cierre limpio con código 0, usando un proyecto y perfil temporales propios. Reproducible con design/smoke_recovery_windows.py <ruta-del-exe>. La prueba espera la inicialización de la ventana antes de solicitar el cierre; no cierra otras instancias.

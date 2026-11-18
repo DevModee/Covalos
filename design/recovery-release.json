@@ -1,0 +1,14 @@
+{
+  "base": "7dbd2d5db851128d07b750d28dd1c9f2ddc1e641",
+  "branch": "improvement/autonomous-quality",
+  "path": "E:/workspace/aeros-quality-resumed-build/release/aeros-editor.exe",
+  "bytes": 13121024,
+  "sha256": "270d0f1b48ab0d7bdbe4f811702e0a84343101847e75a761d5d90dacf71b4763",
+  "regressions_passed": 23,
+  "strict_clippy": "passed",
+  "format_check": "passed",
+  "release_launch_and_graceful_close": "passed",
+  "native_recovery_capture": "passed, explicit fixture without provider calls",
+  "authenticated_resume": "not rerun",
+  "general_chat_persistence": "pending"
+}

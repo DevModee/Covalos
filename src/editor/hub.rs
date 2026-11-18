@@ -15,11 +15,13 @@ pub(super) struct Chat {
     pub(super) session: Option<String>,
     pub(super) run: Option<assistant::Run>,
     pub(super) activity: &'static str,
+    pub(super) revision: u64,
     provider: Provider,
     model: Option<String>,
     usage: Option<(u64, u64)>,
     partial: String,
     connected: bool,
+    restored: bool,
     last_outcome: Option<Outcome>,
     finished: Option<std::time::Instant>,
 }
@@ -30,7 +32,50 @@ pub(super) struct Message {
 }
 
 impl Chat {
+    pub(super) fn snapshot(&self, root: &std::path::Path) -> super::sessions::Conversation {
+        super::sessions::Conversation::new(
+            root,
+            self.provider,
+            self.session.clone(),
+            &self.prompt,
+            self.messages
+                .iter()
+                .map(|m| (m.author.to_owned(), m.text.clone())),
+            self.run.is_some(),
+        )
+    }
+
+    pub(super) fn restore(value: super::sessions::Conversation) -> Self {
+        let mut chat = Self {
+            provider: value.provider,
+            session: value.session,
+            prompt: value.draft,
+            restored: true,
+            ..Default::default()
+        };
+        for (author, text) in value.messages {
+            let author = match author.as_str() {
+                "You" => "You",
+                "Error" => "Error",
+                "System" => "System",
+                "Codex" => "Codex",
+                "Claude Code" => "Claude Code",
+                "Gemini CLI" => "Gemini CLI",
+                "Antigravity" => "Antigravity",
+                _ => "System",
+            };
+            chat.push(author, text);
+        }
+        if value.interrupted {
+            chat.push("System", "The previous request was interrupted. Your conversation is restored. Send a message to continue; no task or approval was restarted.".into());
+        }
+        chat.revision = chat.revision.wrapping_add(1);
+        chat
+    }
+
     pub(super) fn start(&mut self, scope: Scope, root: PathBuf, input: String, ctx: &Context) {
+        self.revision = self.revision.wrapping_add(1);
+        self.restored = false;
         self.activity = "Waiting for response";
         self.last_outcome = None;
         self.partial.clear();
@@ -46,6 +91,7 @@ impl Chat {
     }
 
     pub(super) fn push(&mut self, author: &'static str, text: String) {
+        self.revision = self.revision.wrapping_add(1);
         self.messages.push(Message { author, text });
         // Bound the UI history; the provider's session id carries earlier context.
         if self.messages.len() > 100 {
@@ -61,6 +107,7 @@ impl Chat {
         for event in run.events.try_iter().take(512) {
             match event {
                 Event::Session(id) => {
+                    self.revision = self.revision.wrapping_add(1);
                     self.session = Some(id);
                     self.connected = true;
                 }
@@ -92,6 +139,7 @@ impl Chat {
         if outcome == Outcome::Running {
             self.run = Some(run);
         } else {
+            self.revision = self.revision.wrapping_add(1);
             self.last_outcome = Some(outcome);
             self.finished = Some(std::time::Instant::now());
             self.activity = "";
@@ -340,6 +388,9 @@ impl Hub {
 
     pub(super) fn discard_workflow(&mut self) {
         self.reviewer.run.take();
+        if let Some(proposal) = self.proposal.take() {
+            self.status(proposal.task, "Rejected");
+        }
         if let Some(workflow) = self.workflow.take() {
             let task = match workflow {
                 Workflow::Plan { task, .. }
@@ -1014,6 +1065,9 @@ fn chat_box(
         });
     });
     ui.label(muted(label));
+    if chat.restored {
+        ui.label(muted("Restored conversation · Send to reconnect"));
+    }
     if let Some(model) = &chat.model {
         ui.label(muted(model));
     }
@@ -1114,7 +1168,7 @@ fn chat_box(
         .stroke(egui::Stroke::new(1.0_f32, colors().control_border))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.add_enabled(
+            let response = ui.add_enabled(
                 available,
                 TextEdit::multiline(&mut chat.prompt)
                     .frame(false)
@@ -1124,6 +1178,9 @@ fn chat_box(
                     .desired_width(f32::INFINITY)
                     .margin(Margin::ZERO),
             );
+            if response.changed() {
+                chat.revision = chat.revision.wrapping_add(1);
+            }
             ui.add_space(8.0);
             let footer = ui.available_rect_before_wrap();
             let context_width = (footer.width() - 72.0).max(80.0);
@@ -1232,6 +1289,42 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recovery_is_disconnected_and_new_chat_revokes_pending_proposal() {
+        let root = std::path::Path::new("project");
+        let value = super::super::sessions::Conversation::new(
+            root,
+            Provider::Codex,
+            Some("session-123".into()),
+            "draft",
+            [("You".into(), "Question".into())].into_iter(),
+            true,
+        );
+        let chat = Chat::restore(value);
+        assert!(chat.run.is_none());
+        assert!(!chat.connected);
+        assert!(chat.restored);
+        assert_eq!(chat.messages.last().unwrap().author, "System");
+        let mut hub = Hub::default();
+        assert_eq!(
+            hub.snapshots(&chat, Some(root))[0].state,
+            crate::agent_bridge::State::Idle
+        );
+        let task = hub.begin("Old proposal");
+        hub.proposal = Some(Proposal {
+            task,
+            path: root.join("file.rs"),
+            snapshot: "before".into(),
+            edit: Replacement {
+                before: "before".into(),
+                after: "after".into(),
+            },
+        });
+        hub.discard_workflow();
+        assert!(!hub.approval_pending());
+        assert_eq!(hub.tasks[task].status, "Rejected");
+    }
 
     #[test]
     fn proposal_requires_one_exact_match_and_rejects_ambiguous_change() {
