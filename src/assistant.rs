@@ -1,7 +1,7 @@
 use std::{
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Stdio,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -12,6 +12,9 @@ use std::{
 };
 
 use serde_json::Value;
+
+mod providers;
+pub use providers::{Provider, Scope};
 
 const MAX_FILE_CONTEXT_BYTES: usize = 24_000;
 
@@ -36,6 +39,9 @@ pub fn with_file_context(prompt: &str, path: &Path, buffer: Option<&str>) -> Str
 pub enum Event {
     Session(String),
     Activity,
+    Delta(String),
+    Usage { input: u64, output: u64 },
+    Model(String),
     Message(String),
     Done,
     Error(String),
@@ -59,7 +65,26 @@ impl Drop for Run {
     }
 }
 
-pub fn start(
+#[cfg(test)]
+fn start(
+    root: PathBuf,
+    session: Option<String>,
+    prompt: String,
+    wake: impl Fn() + Send + Sync + 'static,
+) -> Run {
+    start_provider(
+        Provider::Codex,
+        Scope::Workspace,
+        root,
+        session,
+        prompt,
+        wake,
+    )
+}
+
+pub fn start_provider(
+    provider: Provider,
+    scope: Scope,
     root: PathBuf,
     session: Option<String>,
     prompt: String,
@@ -71,6 +96,8 @@ pub fn start(
     let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(wake);
     thread::spawn(move || {
         let result = execute(
+            provider,
+            scope,
             &root,
             session.as_deref(),
             &prompt,
@@ -85,6 +112,8 @@ pub fn start(
 }
 
 fn execute(
+    provider: Provider,
+    scope: Scope,
     root: &Path,
     session: Option<&str>,
     prompt: &str,
@@ -92,28 +121,15 @@ fn execute(
     events: &Sender<Event>,
     wake: &Arc<dyn Fn() + Send + Sync>,
 ) -> Result<Event, String> {
-    let program = std::env::var_os("AEROS_CODEX_BIN").unwrap_or_else(|| {
-        if cfg!(windows) {
-            "codex.exe".into()
-        } else {
-            "codex".into()
-        }
-    });
-    let mut command = Command::new(program);
-    command.current_dir(root).args([
-        "exec",
-        "--sandbox",
-        "read-only",
-        "--color",
-        "never",
-        "--json",
-        "--skip-git-repo-check",
-    ]);
-    if let Some(session) = session {
-        command.args(["resume", session]);
-    }
+    let program = provider.discover().ok_or_else(|| {
+        format!(
+            "Could not find the {} CLI. Install it or configure its executable.",
+            provider.label()
+        )
+    })?;
+    let mut command = provider.command(program.as_os_str(), scope, session)?;
     command
-        .arg("-")
+        .current_dir(root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -125,9 +141,9 @@ fn execute(
         command.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let mut child = command.spawn().map_err(|error| {
-        format!("Could not start Codex CLI. Install it or set AEROS_CODEX_BIN to its executable. {error}")
-    })?;
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("Could not start {}. {error}", provider.label()))?;
     let mut stdin = child.stdin.take().expect("piped child stdin");
     let stdout = child.stdout.take().expect("piped child stdout");
     let stderr = child.stderr.take().expect("piped child stderr");
@@ -135,47 +151,33 @@ fn execute(
     let response_events = events.clone();
     let response_wake = wake.clone();
     let response = thread::spawn(move || {
-        let mut seen_message = false;
-        let mut failure = None;
+        let mut responses = Responses::default();
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
             let Ok(json) = serde_json::from_str::<Value>(&line) else {
                 continue;
             };
-            match json["type"].as_str() {
-                Some("thread.started") => {
-                    if let Some(id) = json["thread_id"].as_str() {
-                        publish(
-                            &response_events,
-                            &response_wake,
-                            Event::Session(id.to_owned()),
-                        );
-                    }
-                }
-                Some("item.started") if json["item"]["type"] == "command_execution" => {
-                    publish(&response_events, &response_wake, Event::Activity);
-                }
-                Some("item.completed") if json["item"]["type"] == "agent_message" => {
-                    if let Some(message) = json["item"]["text"].as_str() {
-                        seen_message = true;
-                        publish(
-                            &response_events,
-                            &response_wake,
-                            Event::Message(message.to_owned()),
-                        );
-                    }
-                }
-                Some("error") | Some("turn.failed") => {
-                    if let Some(message) = json["message"]
-                        .as_str()
-                        .or_else(|| json["error"]["message"].as_str())
-                    {
-                        failure = Some(message.to_owned());
-                    }
-                }
-                _ => {}
+            if provider == Provider::Claude
+                && json["type"] == "system"
+                && json["subtype"] == "init"
+                && let Some(model) = json["model"].as_str()
+            {
+                publish(
+                    &response_events,
+                    &response_wake,
+                    Event::Model(model.to_owned()),
+                );
+            }
+            if provider == Provider::Claude
+                && json["type"] == "result"
+                && let Some(event) = usage(&json["usage"])
+            {
+                publish(&response_events, &response_wake, event);
+            }
+            if let Some(event) = responses.event(provider, &json) {
+                publish(&response_events, &response_wake, event);
             }
         }
-        (seen_message, failure)
+        responses
     });
     let diagnostics = thread::spawn(move || {
         let mut last = String::new();
@@ -187,8 +189,8 @@ fn execute(
         last
     });
 
-    let input_error = stdin.write_all(prompt.as_bytes()).err();
-    drop(stdin);
+    let input = prompt.to_owned();
+    let input_writer = thread::spawn(move || stdin.write_all(input.as_bytes()).err());
     let status = loop {
         if cancelled.load(Ordering::Relaxed) {
             let _ = child.kill();
@@ -201,18 +203,80 @@ fn execute(
         thread::sleep(Duration::from_millis(40));
     };
 
-    let (seen_message, failure) = response.join().unwrap_or_default();
+    let responses = response.join().unwrap_or_default();
+    let input_error = input_writer.join().ok().flatten();
     let diagnostics = diagnostics.join().unwrap_or_default();
-    if status.success() && seen_message {
+    if status.success() && responses.seen_message && responses.failure.is_none() {
         return Ok(Event::Done);
     }
-    let detail = failure
+    let detail = responses
+        .failure
         .or_else(|| (!diagnostics.is_empty()).then_some(diagnostics))
         .or_else(|| input_error.map(|error| error.to_string()))
-        .unwrap_or_else(|| "Sign in with codex login and try again.".into());
+        .unwrap_or_else(|| "Check the CLI sign-in and try again.".into());
     Err(format!(
-        "Codex finished without a response ({status}). {detail}"
+        "{} finished without a response ({status}). {detail}",
+        provider.label()
     ))
+}
+
+#[derive(Default)]
+struct Responses {
+    seen_message: bool,
+    failure: Option<String>,
+}
+
+impl Responses {
+    fn event(&mut self, provider: Provider, json: &Value) -> Option<Event> {
+        let kind = json["type"].as_str()?;
+        match (provider, kind) {
+            (Provider::Codex, "thread.started") => json["thread_id"]
+                .as_str()
+                .map(|id| Event::Session(id.to_owned())),
+            (Provider::Codex, "item.started") if json["item"]["type"] == "command_execution" => {
+                Some(Event::Activity)
+            }
+            (Provider::Codex, "item.completed") if json["item"]["type"] == "agent_message" => {
+                self.message(json["item"]["text"].as_str()?)
+            }
+            (Provider::Codex, "turn.completed") => usage(&json["usage"]),
+            (Provider::Codex, "error" | "turn.failed") => {
+                self.failure = json["message"]
+                    .as_str()
+                    .or_else(|| json["error"]["message"].as_str())
+                    .map(str::to_owned);
+                None
+            }
+            (Provider::Claude, "system") if json["subtype"] == "init" => json["session_id"]
+                .as_str()
+                .map(|id| Event::Session(id.to_owned())),
+            (Provider::Claude, "stream_event")
+                if json["event"]["type"] == "content_block_delta" =>
+            {
+                json["event"]["delta"]["text"]
+                    .as_str()
+                    .map(|text| Event::Delta(text.to_owned()))
+            }
+            (Provider::Claude, "result") if json["is_error"] == true => {
+                self.failure = json["result"].as_str().map(str::to_owned);
+                None
+            }
+            (Provider::Claude, "result") => self.message(json["result"].as_str()?),
+            _ => None,
+        }
+    }
+
+    fn message(&mut self, text: &str) -> Option<Event> {
+        self.seen_message = !text.trim().is_empty() || self.seen_message;
+        Some(Event::Message(text.to_owned()))
+    }
+}
+
+fn usage(data: &Value) -> Option<Event> {
+    Some(Event::Usage {
+        input: data["input_tokens"].as_u64()?,
+        output: data["output_tokens"].as_u64()?,
+    })
 }
 
 fn publish(events: &Sender<Event>, wake: &Arc<dyn Fn() + Send + Sync>, event: Event) {
@@ -243,7 +307,11 @@ mod tests {
                 Event::Message(message) => text = message,
                 Event::Done => break,
                 Event::Error(error) => panic!("{error}"),
-                Event::Activity | Event::Cancelled => {}
+                Event::Activity
+                | Event::Cancelled
+                | Event::Delta(_)
+                | Event::Usage { .. }
+                | Event::Model(_) => {}
             }
         }
         assert_eq!(text.trim(), "AEROS_OK");
@@ -259,7 +327,12 @@ mod tests {
                 Event::Message(message) => repeated = message,
                 Event::Done => break,
                 Event::Error(error) => panic!("{error}"),
-                Event::Session(_) | Event::Activity | Event::Cancelled => {}
+                Event::Session(_)
+                | Event::Activity
+                | Event::Cancelled
+                | Event::Delta(_)
+                | Event::Usage { .. }
+                | Event::Model(_) => {}
             }
         }
         assert_eq!(repeated.trim(), "AEROS_OK");

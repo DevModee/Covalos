@@ -1,65 +1,30 @@
 use std::path::Path;
 
 use eframe::egui::{
-    self, Align, Color32, Context, FontId, Frame, Id, Key, KeyboardShortcut, Layout, Margin,
-    Modifiers, RichText, ScrollArea, SidePanel, TextEdit, TextStyle, TopBottomPanel, Ui,
+    self, Align, Context, Id, Key, KeyboardShortcut, Layout, Margin, Modifiers, RichText,
+    ScrollArea, SidePanel, TextEdit, TextStyle, TopBottomPanel, Ui,
     text::{CCursor, CCursorRange, LayoutJob},
 };
 
 use super::{Editor, Pending, Sidebar};
 use crate::workspace::{self, MAX_SEARCH_HITS};
 
-const SURFACE: Color32 = Color32::from_rgb(25, 26, 32);
-const CANVAS: Color32 = Color32::from_rgb(19, 20, 25);
-const BORDER: Color32 = Color32::from_rgb(48, 49, 59);
-const TEXT: Color32 = Color32::from_rgb(222, 223, 231);
-const MUTED: Color32 = Color32::from_rgb(154, 157, 172);
-const ACCENT: Color32 = Color32::from_rgb(181, 168, 246);
-const ERROR: Color32 = Color32::from_rgb(247, 156, 160);
-
-pub(super) fn install_theme(ctx: &Context) {
-    let mut style = egui::Style::default();
-    style.spacing.item_spacing = egui::vec2(8.0, 6.0);
-    style.spacing.button_padding = egui::vec2(9.0, 4.0);
-    style
-        .text_styles
-        .insert(TextStyle::Body, FontId::proportional(14.0));
-    style
-        .text_styles
-        .insert(TextStyle::Small, FontId::proportional(12.0));
-    style
-        .text_styles
-        .insert(TextStyle::Monospace, FontId::monospace(14.0));
-    style.visuals = egui::Visuals::dark();
-    style.visuals.override_text_color = Some(TEXT);
-    style.visuals.panel_fill = CANVAS;
-    style.visuals.window_fill = SURFACE;
-    style.visuals.extreme_bg_color = CANVAS;
-    style.visuals.faint_bg_color = SURFACE;
-    style.visuals.widgets.inactive.bg_fill = Color32::from_rgb(38, 39, 49);
-    style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(56, 54, 72);
-    style.visuals.selection.bg_fill = Color32::from_rgb(67, 59, 102);
-    style.visuals.hyperlink_color = ACCENT;
-    ctx.set_style(style);
-}
-
-fn panel_frame(margin: Margin) -> Frame {
-    Frame::new()
-        .fill(SURFACE)
-        .inner_margin(margin)
-        .stroke(egui::Stroke::new(1.0_f32, BORDER))
-}
-
-fn muted(text: impl Into<String>) -> RichText {
-    RichText::new(text).small().color(MUTED)
-}
+use super::theme::*;
 
 impl Editor {
     pub(super) fn shortcuts(&mut self, ctx: &Context) {
         let shortcut = |modifiers, key| {
             ctx.input_mut(|input| input.consume_shortcut(&KeyboardShortcut::new(modifiers, key)))
         };
-        if shortcut(Modifiers::COMMAND, Key::O) {
+        if shortcut(Modifiers::COMMAND, Key::Backtick) {
+            self.preferences.tools_open = !self.preferences.tools_open;
+        }
+        if shortcut(Modifiers::COMMAND, Key::P) {
+            self.open_palette(ctx);
+        }
+        if shortcut(Modifiers::COMMAND.plus(Modifiers::SHIFT), Key::O) {
+            self.pick_file();
+        } else if shortcut(Modifiers::COMMAND, Key::O) {
             self.pick_workspace(ctx);
         }
         if shortcut(Modifiers::COMMAND, Key::N) {
@@ -99,88 +64,132 @@ impl Editor {
         }
     }
 
-    fn show_workspace_search(&mut self) {
+    pub(super) fn show_workspace_search(&mut self) {
         self.sidebar = Sidebar::Search;
         self.search_focus = true;
     }
 
     pub(super) fn top_bar(&mut self, ctx: &Context) {
         TopBottomPanel::top("menu")
-            .frame(panel_frame(Margin::symmetric(14, 6)))
+            .frame(panel_frame(Margin::symmetric(14, 8)))
             .show(ctx, |ui| {
-                egui::MenuBar::new().ui(ui, |ui| {
-                    ui.label(RichText::new("AEROS").strong().color(ACCENT).size(15.0));
-                    ui.separator();
-                    ui.menu_button("File", |ui| {
-                        if ui.button("Open Folder…").clicked() {
-                            ui.close();
-                            self.pick_workspace(ctx);
-                        }
-                        if ui
-                            .add_enabled(self.root.is_some(), egui::Button::new("New File…"))
-                            .clicked()
-                        {
-                            ui.close();
-                            self.show_new_file();
-                        }
-                        if ui
-                            .add_enabled(self.active.is_some(), egui::Button::new("Save"))
-                            .clicked()
-                        {
-                            ui.close();
-                            self.save_active();
-                        }
-                        if ui
-                            .add_enabled(!self.documents.is_empty(), egui::Button::new("Save All"))
-                            .clicked()
-                        {
-                            ui.close();
-                            if self.save_all() {
-                                self.notice = Some((false, "Saved all files".into()));
+                let ctx = ui.ctx().clone();
+                let available = ui.available_width();
+                let height = 31.0;
+                let bar = ui.available_rect_before_wrap();
+                let sides = (available * 0.32).min(380.0);
+                let center = (available - 2.0 * sides - 20.0).clamp(155.0, 490.0);
+                ui.allocate_ui_with_layout(
+                    egui::vec2(available, height),
+                    Layout::left_to_right(Align::Center),
+                    |ui| {
+                        let (_, mark) = ui.allocate_space(egui::vec2(21.0, 26.0));
+                        draw_icon(ui.painter(), mark.center(), Icon::Brand, ACCENT);
+                        ui.label(RichText::new(BRAND).strong().size(16.0));
+                        ui.separator();
+                        ui.menu_button("File", |ui| {
+                            if ui.button("Open folder…").clicked() {
+                                ui.close();
+                                self.pick_workspace(&ctx);
                             }
-                        }
-                        if ui
-                            .add_enabled(self.active.is_some(), egui::Button::new("Close Tab"))
-                            .clicked()
-                        {
-                            ui.close();
-                            if let Some(index) = self.active {
-                                self.request(Pending::CloseTab(index), ctx);
+                            if ui.button("Open file…").clicked() {
+                                ui.close();
+                                self.pick_file();
                             }
+                            if ui
+                                .add_enabled(self.root.is_some(), egui::Button::new("New file…"))
+                                .clicked()
+                            {
+                                ui.close();
+                                self.show_new_file();
+                            }
+                            if ui
+                                .add_enabled(self.active.is_some(), egui::Button::new("Save"))
+                                .clicked()
+                            {
+                                ui.close();
+                                self.save_active();
+                            }
+                            if ui
+                                .add_enabled(
+                                    !self.documents.is_empty(),
+                                    egui::Button::new("Save all"),
+                                )
+                                .clicked()
+                            {
+                                ui.close();
+                                if self.save_all() {
+                                    self.notice = Some((false, "Saved all files".into()));
+                                }
+                            }
+                            if ui
+                                .add_enabled(self.active.is_some(), egui::Button::new("Close tab"))
+                                .clicked()
+                                && let Some(index) = self.active
+                            {
+                                ui.close();
+                                self.request(Pending::CloseTab(index), &ctx);
+                            }
+                        });
+                        if available >= 1020.0 {
+                            self.workspace_picker(ui);
                         }
-                    });
-                    ui.menu_button("Edit", |ui| {
+                    },
+                );
+                let command_rect = egui::Rect::from_center_size(
+                    egui::pos2(bar.center().x, bar.top() + height / 2.0),
+                    egui::vec2(center, height),
+                );
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(command_rect)
+                        .layout(Layout::centered_and_justified(egui::Direction::LeftToRight)),
+                    |ui| {
                         if ui
-                            .add_enabled(self.active.is_some(), egui::Button::new("Find in File"))
-                            .clicked()
-                        {
-                            ui.close();
-                            self.show_find();
-                        }
-                        if ui
-                            .add_enabled(
-                                self.root.is_some(),
-                                egui::Button::new("Find in Workspace"),
+                            .add(
+                                egui::Button::new(muted("Quick access     Ctrl / ⌘ P")).fill(INSET),
                             )
                             .clicked()
                         {
-                            ui.close();
-                            self.show_workspace_search();
+                            self.open_palette(&ctx);
                         }
-                    });
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.selectable_label(self.ai_open, "Codex").clicked() {
-                            self.ai_open = !self.ai_open;
+                    },
+                );
+                let actions = egui::Rect::from_min_max(
+                    egui::pos2(bar.right() - sides, bar.top()),
+                    egui::pos2(bar.right(), bar.top() + height),
+                );
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(actions)
+                        .layout(Layout::right_to_left(Align::Center)),
+                    |ui| {
+                        if ui.button("Settings").clicked() {
+                            self.settings_open = true;
                         }
-                        if ui.button("Open Folder").clicked() {
-                            self.pick_workspace(ctx);
+                        if ui.selectable_label(self.hub_open, "Agent Hub").clicked() {
+                            self.hub_open = !self.hub_open;
                         }
-                    });
-                });
+                        if ui
+                            .selectable_label(
+                                !self.hub_open && self.preferences.assistant_open,
+                                "Codex",
+                            )
+                            .clicked()
+                        {
+                            if self.hub_open {
+                                self.hub_open = false;
+                                self.preferences.assistant_open = true;
+                            } else {
+                                self.preferences.assistant_open = !self.preferences.assistant_open;
+                            }
+                        }
+                    },
+                );
             });
     }
 
-    pub(super) fn status_bar(&self, ctx: &Context) {
+    pub(super) fn status_bar(&mut self, ctx: &Context) {
         TopBottomPanel::bottom("status")
             .frame(panel_frame(Margin::symmetric(12, 3)))
             .show(ctx, |ui| {
@@ -192,12 +201,20 @@ impl Editor {
                             TEXT
                         }));
                     } else if let Some(root) = &self.root {
-                        ui.label(muted(root.display().to_string()))
-                            .on_hover_text(root.display().to_string());
+                        let text = root.to_string_lossy();
+                        let display = text.strip_prefix(r"\\?\").unwrap_or(&text);
+                        ui.add(egui::Label::new(muted(display)).truncate())
+                            .on_hover_text(display);
                     } else {
                         ui.label(muted("No workspace open"));
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui
+                            .selectable_label(self.preferences.tools_open, "Terminal")
+                            .clicked()
+                        {
+                            self.preferences.tools_open = !self.preferences.tools_open;
+                        }
                         if let Some(doc) = self.active.map(|index| &self.documents[index]) {
                             let mut line = 1;
                             let mut column = 1;
@@ -217,25 +234,52 @@ impl Editor {
             });
     }
 
+    pub(super) fn activity_rail(&mut self, ctx: &Context) {
+        SidePanel::left("activity")
+            .exact_width(49.0)
+            .resizable(false)
+            .frame(panel_frame(Margin::symmetric(5, 10)))
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    for (tab, icon, label) in [
+                        (Sidebar::Files, Icon::Explorer, "Explorer"),
+                        (Sidebar::Search, Icon::Search, "Search"),
+                        (Sidebar::Git, Icon::Git, "Source control"),
+                    ] {
+                        if icon_button(ui, icon, label, self.sidebar == tab).clicked() {
+                            self.sidebar = tab;
+                            if tab == Sidebar::Search {
+                                self.search_focus = true;
+                            }
+                            if tab == Sidebar::Git {
+                                self.git_refresh(ctx, None);
+                            }
+                        }
+                    }
+                    ui.separator();
+                    if icon_button(ui, Icon::Hub, "Agent Hub", false).clicked() {
+                        self.hub_open = true;
+                    }
+                    if icon_button(ui, Icon::Settings, "Settings", self.settings_open).clicked() {
+                        self.settings_open = true;
+                    }
+                });
+            });
+    }
+
     pub(super) fn sidebar(&mut self, ctx: &Context) {
-        SidePanel::left("workspace")
-            .default_width(235.0)
-            .width_range(170.0..=360.0)
+        let panel = SidePanel::left("workspace")
+            .default_width(self.preferences.sidebar_width)
+            .width_range(155.0..=340.0)
             .frame(panel_frame(Margin::same(10)))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    if ui
-                        .selectable_label(self.sidebar == Sidebar::Files, "Explorer")
-                        .clicked()
-                    {
-                        self.sidebar = Sidebar::Files;
-                    }
-                    if ui
-                        .selectable_label(self.sidebar == Sidebar::Search, "Search")
-                        .clicked()
-                    {
-                        self.show_workspace_search();
-                    }
+                    let label = match self.sidebar {
+                        Sidebar::Files => "Explorer",
+                        Sidebar::Search => "Search",
+                        Sidebar::Git => "Git",
+                    };
+                    ui.label(RichText::new(label).strong().color(TEXT));
                     if self.sidebar == Sidebar::Files && self.root.is_some() {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if ui.small_button("+").on_hover_text("New file").clicked() {
@@ -253,8 +297,19 @@ impl Editor {
                 };
                 match self.sidebar {
                     Sidebar::Files => {
+                        let mut selected = None;
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new(workspace::filename(&root)).strong());
+                            let root_label = ui
+                                .add(
+                                    egui::Label::new(
+                                        RichText::new(workspace::filename(&root)).strong(),
+                                    )
+                                    .truncate(),
+                                )
+                                .on_hover_text(root.display().to_string());
+                            root_label.context_menu(|ui| {
+                                selected = super::files::tree_menu(ui, &root, &root, true);
+                            });
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 if ui
                                     .small_button("↻")
@@ -269,17 +324,21 @@ impl Editor {
                         let active = self
                             .active
                             .map(|index| self.documents[index].path.as_path());
-                        let selected = ScrollArea::vertical()
+                        let from_tree = ScrollArea::vertical()
                             .id_salt("files")
-                            .show(ui, |ui| tree(ui, &root, active, &mut self.directories))
+                            .show(ui, |ui| {
+                                tree(ui, &root, &root, active, &mut self.directories)
+                            })
                             .inner;
-                        if let Some(path) = selected {
-                            self.open_file(path);
+                        if let Some(action) = selected.or(from_tree) {
+                            self.tree_action(action);
                         }
                     }
                     Sidebar::Search => self.search_panel(ui, &root),
+                    Sidebar::Git => self.git_panel(ui),
                 }
             });
+        self.preferences.sidebar_width = panel.response.rect.width();
     }
 
     fn search_panel(&mut self, ui: &mut Ui, root: &Path) {
@@ -336,26 +395,7 @@ impl Editor {
 
     pub(super) fn editor_panel(&mut self, ui: &mut Ui) {
         if self.documents.is_empty() {
-            ui.centered_and_justified(|ui| {
-                ui.vertical_centered(|ui| {
-                    ui.add_space((ui.available_height() * 0.34).max(32.0));
-                    ui.heading(if self.root.is_some() {
-                        "Open a file"
-                    } else {
-                        "Open a workspace"
-                    });
-                    ui.add_space(4.0);
-                    if self.root.is_some() {
-                        ui.label(muted("Choose a file from the Explorer to start editing."));
-                    } else {
-                        ui.label(muted("Choose a local project folder to start editing."));
-                        ui.add_space(12.0);
-                        if ui.button("Open Folder").clicked() {
-                            self.pick_workspace(ui.ctx());
-                        }
-                    }
-                });
-            });
+            self.welcome(ui);
             return;
         }
         self.tabs(ui);
@@ -366,6 +406,19 @@ impl Editor {
         }
         let Some(index) = self.active else { return };
         let doc = &mut self.documents[index];
+        let breadcrumb = self
+            .root
+            .as_ref()
+            .and_then(|root| doc.path.strip_prefix(root).ok())
+            .unwrap_or(&doc.path);
+        ui.label(muted(
+            breadcrumb
+                .components()
+                .map(|part| part.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("  /  "),
+        ));
+        ui.add_space(2.0);
         let id = Id::new(("document", &doc.path));
         let selection = self.selection.take();
         if let Some((start, end)) = selection {
@@ -408,6 +461,10 @@ impl Editor {
                                 &language,
                             )
                         };
+                        let font_size = TextStyle::Monospace.resolve(ui.style()).size;
+                        for section in &mut job.sections {
+                            section.format.font_id.size = font_size;
+                        }
                         job.wrap.max_width = f32::INFINITY;
                         ui.fonts_mut(|fonts| fonts.layout_job(job))
                     };
@@ -444,11 +501,8 @@ impl Editor {
                         let start = output.galley.pos_from_cursor(CCursor::new(start));
                         let end = output.galley.pos_from_cursor(CCursor::new(end));
                         let rect = start.union(end).translate(output.galley_pos.to_vec2());
-                        ui.painter().rect_filled(
-                            rect,
-                            2,
-                            Color32::from_rgba_unmultiplied(181, 168, 246, 76),
-                        );
+                        ui.painter()
+                            .rect_filled(rect, 2, ACCENT.gamma_multiply(0.30));
                     }
                     let clip = ui.clip_rect();
                     let rows = &output.galley.rows;
@@ -497,7 +551,6 @@ impl Editor {
                             close = Some(index);
                         }
                     });
-                    ui.separator();
                 }
             });
         });
@@ -553,73 +606,15 @@ impl Editor {
     }
 
     pub(super) fn assistant_panel(&mut self, ctx: &Context) {
-        SidePanel::right("assistant").default_width(335.0).width_range(260.0..=520.0)
+        let panel = SidePanel::right("assistant")
+            .default_width(self.preferences.assistant_width)
+            .width_range(230.0..=(ctx.content_rect().width() * 0.42).clamp(260.0, 520.0))
             .frame(panel_frame(Margin::same(12)))
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Codex").strong().size(17.0));
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.add_enabled(!self.messages.is_empty(), egui::Button::new("New chat")).clicked() {
-                            self.reset_chat();
-                        }
-                    });
-                });
-                ui.label(muted("Workspace access · Read only"));
-                ui.add_space(6.0);
-                ui.separator();
-                let composer_height = if self.active.is_some() { 143.0 } else { 115.0 };
-                let chat_height = (ui.available_height() - composer_height).max(80.0);
-                ui.scope(|ui| {
-                    ui.set_height(chat_height);
-                    ScrollArea::vertical().id_salt("chat").stick_to_bottom(true).show(ui, |ui| {
-                        if self.messages.is_empty() {
-                            ui.add_space(12.0);
-                            ui.label(muted(if self.root.is_some() {
-                                "Ask about the workspace, request a code review, or get help tracing a bug."
-                            } else {
-                                "Open a workspace to ask Codex about your project."
-                            }));
-                        }
-                        for message in &self.messages {
-                            ui.add_space(8.0);
-                            ui.horizontal(|ui| {
-                                let color = if message.author == "Error" { ERROR } else { ACCENT };
-                                ui.label(RichText::new(message.author).strong().color(color));
-                                if message.author == "Codex" && ui.small_button("Copy").clicked() {
-                                    ui.ctx().copy_text(message.text.clone());
-                                }
-                            });
-                            ui.add(egui::Label::new(&message.text).wrap().selectable(true));
-                            ui.add_space(5.0);
-                        }
-                        if self.run.is_some() {
-                            ui.horizontal(|ui| {
-                                ui.spinner();
-                                ui.label(muted(self.activity));
-                            });
-                        }
-                    });
-                });
-                ui.separator();
-                ui.add_enabled(self.root.is_some(), TextEdit::multiline(&mut self.prompt)
-                    .hint_text("Ask Codex…").desired_rows(3).char_limit(12_000).desired_width(f32::INFINITY));
-                if self.active.is_some() {
-                    ui.checkbox(&mut self.include_active_file, "Include active file")
-                        .on_hover_text("Send up to 24 KB from the current buffer with this message, including unsaved edits.");
-                }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if let Some(run) = &self.run {
-                        if ui.button("Stop").clicked() {
-                            run.cancel();
-                            self.activity = "Stopping";
-                        }
-                    } else if ui.add_enabled(self.root.is_some() && !self.prompt.trim().is_empty(),
-                        egui::Button::new(RichText::new("Send").strong().color(ACCENT))).clicked()
-                    {
-                        self.send_prompt(ctx);
-                    }
-                });
-            });
+            .show(ctx, |ui| self.workspace_chat(ui));
+        let width = panel.response.rect.width();
+        if width < (ctx.content_rect().width() * 0.42).clamp(260.0, 520.0) {
+            self.preferences.assistant_width = width;
+        }
     }
 
     pub(super) fn modals(&mut self, ctx: &Context) {
@@ -714,36 +709,73 @@ impl Editor {
 
 fn tree(
     ui: &mut Ui,
+    root: &Path,
     path: &Path,
     active: Option<&Path>,
-    directories: &mut std::collections::HashMap<
-        std::path::PathBuf,
-        Result<Vec<workspace::Entry>, String>,
-    >,
-) -> Option<std::path::PathBuf> {
-    let entries = directories
-        .remove(path)
-        .unwrap_or_else(|| workspace::read_directory(path).map_err(|error| error.to_string()));
+    directories: &mut std::collections::HashMap<std::path::PathBuf, super::DirectoryLoad>,
+) -> Option<super::files::TreeAction> {
+    use super::{
+        DirectoryLoad,
+        files::{TreeAction, tree_menu},
+    };
+    use std::sync::mpsc::{self, TryRecvError};
+
+    let entries = match directories.remove(path) {
+        Some(DirectoryLoad::Ready(entries)) => entries,
+        Some(DirectoryLoad::Pending(receiver)) => match receiver.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => {
+                directories.insert(path.to_owned(), DirectoryLoad::Pending(receiver));
+                ui.label(muted("Loading…"));
+                return None;
+            }
+            Err(TryRecvError::Disconnected) => Err("Directory scan was interrupted.".into()),
+        },
+        None => {
+            let folder = path.to_owned();
+            let ctx = ui.ctx().clone();
+            let (sender, receiver) = mpsc::channel();
+            std::thread::spawn(move || {
+                let contents =
+                    workspace::read_directory(&folder).map_err(|error| error.to_string());
+                if sender.send(contents).is_ok() {
+                    ctx.request_repaint();
+                }
+            });
+            directories.insert(path.to_owned(), DirectoryLoad::Pending(receiver));
+            ui.label(muted("Loading…"));
+            return None;
+        }
+    };
     let mut selected = None;
     match &entries {
         Ok(entries) => {
             for entry in entries {
                 let name = workspace::filename(&entry.path);
                 if entry.directory {
-                    let found = egui::CollapsingHeader::new(RichText::new(name).color(TEXT))
+                    let response = egui::CollapsingHeader::new(RichText::new(name).color(TEXT))
                         .id_salt(&entry.path)
-                        .show(ui, |ui| tree(ui, &entry.path, active, directories))
-                        .body_returned
-                        .flatten();
-                    if found.is_some() {
-                        selected = found;
+                        .show(ui, |ui| tree(ui, root, &entry.path, active, directories));
+                    response.header_response.context_menu(|ui| {
+                        if let Some(action) = tree_menu(ui, root, &entry.path, true) {
+                            selected = Some(action);
+                        }
+                    });
+                    if let Some(Some(action)) = response.body_returned {
+                        selected = Some(action);
                     }
-                } else if ui
-                    .selectable_label(active == Some(entry.path.as_path()), name)
-                    .on_hover_text(entry.path.display().to_string())
-                    .clicked()
-                {
-                    selected = Some(entry.path.clone());
+                } else {
+                    let response = ui
+                        .selectable_label(active == Some(entry.path.as_path()), name)
+                        .on_hover_text(entry.path.display().to_string());
+                    if response.clicked() {
+                        selected = Some(TreeAction::Open(entry.path.clone()));
+                    }
+                    response.context_menu(|ui| {
+                        if let Some(action) = tree_menu(ui, root, &entry.path, false) {
+                            selected = Some(action);
+                        }
+                    });
                 }
             }
         }
@@ -751,6 +783,6 @@ fn tree(
             ui.label(RichText::new(error).small().color(ERROR));
         }
     }
-    directories.insert(path.to_owned(), entries);
+    directories.insert(path.to_owned(), super::DirectoryLoad::Ready(entries));
     selected
 }

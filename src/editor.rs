@@ -1,4 +1,14 @@
+mod files;
+mod hub;
 mod panels;
+mod preferences;
+mod shell;
+mod skills;
+mod theme;
+mod tools;
+
+use preferences::Preferences;
+pub(crate) use theme::TITLE;
 
 use std::{
     collections::HashMap,
@@ -23,12 +33,18 @@ enum Sidebar {
     #[default]
     Files,
     Search,
+    Git,
 }
 
 enum Pending {
     OpenWorkspace(PathBuf),
     CloseTab(usize),
     Exit,
+}
+
+enum DirectoryLoad {
+    Pending(Receiver<Result<Vec<Entry>, String>>),
+    Ready(Result<Vec<Entry>, String>),
 }
 
 struct SearchJob {
@@ -42,14 +58,9 @@ impl Drop for SearchJob {
     }
 }
 
-struct ChatMessage {
-    author: &'static str,
-    text: String,
-}
-
 pub struct Editor {
     root: Option<PathBuf>,
-    directories: HashMap<PathBuf, Result<Vec<Entry>, String>>,
+    directories: HashMap<PathBuf, DirectoryLoad>,
     documents: Vec<Document>,
     active: Option<usize>,
     focus_editor: bool,
@@ -65,24 +76,46 @@ pub struct Editor {
     find_query: String,
     find_match: Option<(usize, usize)>,
     find_empty: bool,
-    ai_open: bool,
-    prompt: String,
+    preferences: Preferences,
+    saved_preferences: Preferences,
+    preferences_path: Option<PathBuf>,
+    settings_open: bool,
+    hub_open: bool,
+    tools: tools::Tools,
+    palette: Option<shell::Palette>,
+    chat: hub::Chat,
+    hub: hub::Hub,
+    skills: skills::Skills,
     include_active_file: bool,
-    messages: Vec<ChatMessage>,
-    session: Option<String>,
-    run: Option<assistant::Run>,
-    activity: &'static str,
+    include_project_note: bool,
     notice: Option<(bool, String)>,
     pending: Option<Pending>,
     force_close: bool,
     new_file: Option<String>,
+    file_change: Option<(files::FileChange, String)>,
+    pending_delete: Option<PathBuf>,
     focus_new_file: bool,
     syntax: egui_extras::syntax_highlighting::CodeTheme,
 }
 
 impl Editor {
-    pub fn new(ctx: &egui::Context, root: Option<PathBuf>) -> Self {
-        panels::install_theme(ctx);
+    pub fn from_preferences(ctx: &egui::Context, root: Option<PathBuf>) -> Self {
+        let path = Preferences::path();
+        let loaded = path.as_deref().map(Preferences::load).transpose();
+        let (preferences, error) = match loaded {
+            Ok(value) => (value.unwrap_or_default(), None),
+            Err(error) => (Preferences::default(), Some(error)),
+        };
+        let mut editor = Self::new(ctx, root, preferences);
+        editor.preferences_path = path;
+        if let Some(error) = error {
+            editor.error(format!("Could not read settings. {error}"));
+        }
+        editor
+    }
+
+    fn new(ctx: &egui::Context, root: Option<PathBuf>, preferences: Preferences) -> Self {
+        theme::install(ctx, preferences.font_size, preferences.high_contrast);
         let mut editor = Self {
             root: None,
             directories: HashMap::new(),
@@ -101,17 +134,24 @@ impl Editor {
             find_query: String::new(),
             find_match: None,
             find_empty: false,
-            ai_open: true,
-            prompt: String::new(),
+            saved_preferences: preferences.clone(),
+            preferences,
+            preferences_path: None,
+            settings_open: false,
+            hub_open: false,
+            tools: tools::Tools::default(),
+            palette: None,
+            chat: hub::Chat::default(),
+            hub: hub::Hub::default(),
+            skills: skills::Skills::default(),
             include_active_file: false,
-            messages: Vec::new(),
-            session: None,
-            run: None,
-            activity: "",
+            include_project_note: false,
             notice: None,
             pending: None,
             force_close: false,
             new_file: None,
+            file_change: None,
+            pending_delete: None,
             focus_new_file: false,
             syntax: egui_extras::syntax_highlighting::CodeTheme::from_style(&ctx.style()),
         };
@@ -140,7 +180,16 @@ impl Editor {
         if self.root.as_ref() == Some(&root) {
             return;
         }
+        self.preferences.remember(&root);
+        self.reset_chat();
+        self.hub.change_workspace(
+            self.preferences.note(&root).to_owned(),
+            self.preferences.tasks(&root),
+        );
+        self.include_project_note = false;
         self.root = Some(root);
+        self.hub_open = false;
+        self.tools.workspace_changed();
         self.directories.clear();
         self.documents.clear();
         self.active = None;
@@ -149,12 +198,37 @@ impl Editor {
         self.search_hits.clear();
         self.search_job = None;
         self.find_open = false;
-        self.reset_chat();
-        self.prompt.clear();
         self.notice = None;
     }
 
+    fn pick_file(&mut self) {
+        let mut dialog = rfd::FileDialog::new().set_title("Open file");
+        if let Some(root) = &self.root {
+            dialog = dialog.set_directory(root);
+        }
+        if let Some(path) = dialog.pick_file() {
+            self.open_file(path);
+        }
+    }
+
+    fn pick_new_project(&mut self, ctx: &egui::Context) {
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Choose a name and location for the project")
+            .save_file()
+        else {
+            return;
+        };
+        match std::fs::create_dir(&path) {
+            Ok(()) => self.request(Pending::OpenWorkspace(path), ctx),
+            Err(error) => self.error(format!("Could not create project folder. {error}")),
+        }
+    }
+
     fn open_file(&mut self, path: PathBuf) {
+        let path = match path.canonicalize() {
+            Ok(path) => path,
+            Err(error) => return self.error(format!("Could not open file. {error}")),
+        };
         match self.documents.iter().position(|doc| doc.path == path) {
             Some(index) => self.activate(index),
             None => match Document::open(path) {
@@ -246,7 +320,8 @@ impl Editor {
             }
             Pending::Exit => {
                 self.force_close = true;
-                self.run.take();
+                self.chat.run.take();
+                self.hub.general_chat.run.take();
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
         }
@@ -270,7 +345,9 @@ impl Editor {
     }
 
     fn error(&mut self, message: impl Into<String>) {
-        self.notice = Some((true, message.into()));
+        let message = message.into();
+        self.editor_log(&message);
+        self.notice = Some((true, message));
     }
 
     fn show_find(&mut self) {
@@ -371,25 +448,25 @@ impl Editor {
     }
 
     fn reset_chat(&mut self) {
-        self.run = None;
-        self.session = None;
-        self.messages.clear();
+        self.chat = hub::Chat::default();
+        self.hub.discard_workflow();
+        self.save_task_history();
         self.include_active_file = false;
-        self.activity = "";
     }
 
     fn send_prompt(&mut self, ctx: &egui::Context) {
-        let prompt = self.prompt.trim();
+        let prompt = self.chat.prompt.trim();
         let Some(root) = self.root.clone() else {
             return;
         };
-        if prompt.is_empty() || self.run.is_some() {
+        if prompt.is_empty() || self.chat.run.is_some() || self.hub.workflow.is_some() {
             return;
         }
         let mut message = prompt.to_owned();
         let include = std::mem::take(&mut self.include_active_file);
-        let input = if let Some(document) = self.active.map(|index| &self.documents[index]) {
-            let path = document.path.strip_prefix(&root).unwrap_or(&document.path);
+        let input = if let Some(document) = self.active.map(|index| &self.documents[index])
+            && let Ok(path) = document.path.strip_prefix(&root)
+        {
             if include {
                 message.push_str(&format!("\n\nAttached: {}", path.display()));
             }
@@ -397,19 +474,11 @@ impl Editor {
         } else {
             prompt.to_owned()
         };
-        self.messages.push(ChatMessage {
-            author: "You",
-            text: message,
-        });
-        self.prompt.clear();
-        self.activity = "Waiting for Codex";
-        let ctx = ctx.clone();
-        self.run = Some(assistant::start(
-            root,
-            self.session.clone(),
-            input,
-            move || ctx.request_repaint(),
-        ));
+        self.chat.push("You", message);
+        self.chat.prompt.clear();
+        self.tools.log_agent("Codex request started");
+        self.chat
+            .start(assistant::Scope::Workspace, root, input, ctx);
     }
 
     fn poll(&mut self) {
@@ -425,63 +494,61 @@ impl Editor {
                 }
             }
         }
-        if let Some(run) = &self.run {
-            for event in run.events.try_iter() {
-                match event {
-                    assistant::Event::Session(id) => self.session = Some(id),
-                    assistant::Event::Activity => self.activity = "Inspecting workspace",
-                    assistant::Event::Message(text) => self.messages.push(ChatMessage {
-                        author: "Codex",
-                        text,
-                    }),
-                    assistant::Event::Error(text) => {
-                        self.messages.push(ChatMessage {
-                            author: "Error",
-                            text,
-                        });
-                        self.activity = "";
-                    }
-                    assistant::Event::Cancelled => {
-                        self.messages.push(ChatMessage {
-                            author: "Codex",
-                            text: "Request stopped.".into(),
-                        });
-                        self.activity = "";
-                    }
-                    assistant::Event::Done => self.activity = "",
-                }
-            }
-            if self.activity.is_empty() {
-                self.run = None;
-            }
-        }
     }
 }
 
 impl Editor {
     fn render(&mut self, ctx: &egui::Context) {
         self.poll();
+        self.poll_chats(ctx);
+        self.tools.poll();
         if ctx.input(|input| input.viewport().close_requested()) && !self.force_close {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.request(Pending::Exit, ctx);
         }
 
-        if self.pending.is_none() && self.new_file.is_none() {
+        if self.pending.is_none()
+            && self.new_file.is_none()
+            && self.palette.is_none()
+            && self.file_change.is_none()
+            && self.pending_delete.is_none()
+        {
             self.shortcuts(ctx);
         }
         self.top_bar(ctx);
         self.status_bar(ctx);
-        self.sidebar(ctx);
-        if self.ai_open {
-            self.assistant_panel(ctx);
+        if self.hub_open {
+            egui::CentralPanel::default().show(ctx, |ui| self.agent_hub(ui));
+        } else {
+            if self.preferences.tools_open {
+                self.tools_panel(ctx);
+            }
+            self.activity_rail(ctx);
+            self.sidebar(ctx);
+            if self.preferences.assistant_open {
+                self.assistant_panel(ctx);
+            }
+            egui::CentralPanel::default().show(ctx, |ui| self.editor_panel(ui));
         }
-        egui::CentralPanel::default().show(ctx, |ui| self.editor_panel(ui));
+        self.settings_window(ctx);
+        self.palette_modal(ctx);
         self.modals(ctx);
+        self.file_dialogs(ctx);
     }
 }
 impl eframe::App for Editor {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.render(ctx);
+        if self.preferences != self.saved_preferences
+            && !ctx.input(|input| input.pointer.any_down())
+        {
+            self.saved_preferences = self.preferences.clone();
+            if let Some(path) = &self.preferences_path
+                && let Err(error) = self.preferences.save(path)
+            {
+                self.error(format!("Could not save editor settings. {error}"));
+            }
+        }
     }
 }
 
@@ -493,7 +560,7 @@ mod tests {
     fn workspace_editing_and_find_render_in_the_normal_view() -> std::io::Result<()> {
         let folder = tempfile::tempdir()?;
         let ctx = egui::Context::default();
-        let mut editor = Editor::new(&ctx, Some(folder.path().to_owned()));
+        let mut editor = Editor::new(&ctx, Some(folder.path().to_owned()), Preferences::default());
         assert!(editor.create_file("example.rs"));
         let document = &mut editor.documents[0];
         document.text.push_str("fn main() { }\n// Unicode: café\n");
@@ -520,6 +587,118 @@ mod tests {
             std::fs::read_to_string(folder.path().join("example.rs"))?,
             "fn main() { }\n// Unicode: café\n"
         );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "opens a native Windows test window and captures its own rendered frames"]
+    #[cfg(windows)]
+    fn capture_native_smoke_frames() -> Result<(), Box<dyn std::error::Error>> {
+        use eframe::egui::{Event, UserData, ViewportBuilder, ViewportCommand};
+        use winit::platform::windows::EventLoopBuilderExtWindows;
+
+        struct Smoke {
+            editor: Editor,
+            fixture: PathBuf,
+            output: PathBuf,
+            sent: bool,
+            frame: usize,
+            deadline: std::time::Instant,
+        }
+
+        impl eframe::App for Smoke {
+            fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+                use std::time::Duration;
+
+                if self.frame >= 3 {
+                    return;
+                }
+                assert!(
+                    std::time::Instant::now() < self.deadline,
+                    "native render did not report a screenshot"
+                );
+                let screenshot = ctx.input(|input| {
+                    input.events.iter().find_map(|event| {
+                        if let Event::Screenshot { image, .. } = event {
+                            Some(image.clone())
+                        } else {
+                            None
+                        }
+                    })
+                });
+                if let Some(pixels) = screenshot {
+                    let bytes = pixels
+                        .pixels
+                        .iter()
+                        .flat_map(|pixel| pixel.to_array())
+                        .collect::<Vec<_>>();
+                    image::save_buffer(
+                        self.output.join(format!("frame-{}.png", self.frame)),
+                        &bytes,
+                        pixels.size[0] as u32,
+                        pixels.size[1] as u32,
+                        image::ColorType::Rgba8,
+                    )
+                    .expect("save rendered frame");
+                    self.frame += 1;
+                    self.sent = false;
+                    match self.frame {
+                        1 => self.editor.open_file(self.fixture.join("src/main.rs")),
+                        2 => self.editor.hub_open = true,
+                        _ => {
+                            ctx.send_viewport_cmd(ViewportCommand::Close);
+                            return;
+                        }
+                    }
+                }
+                self.editor.render(ctx);
+                if !self.sent {
+                    self.sent = true;
+                    ctx.send_viewport_cmd(ViewportCommand::Screenshot(UserData::default()));
+                }
+                ctx.request_repaint_after(Duration::from_millis(100));
+            }
+        }
+
+        let output = std::env::var_os("AEROS_SMOKE_DIR")
+            .map(PathBuf::from)
+            .ok_or("set AEROS_SMOKE_DIR")?;
+        std::fs::create_dir_all(&output)?;
+        let fixture = tempfile::tempdir()?;
+        std::fs::create_dir(fixture.path().join("src"))?;
+        std::fs::write(
+            fixture.path().join("src/main.rs"),
+            "fn main() {\n    println!(\"Hello from AEROS\");\n}\n",
+        )?;
+        std::fs::write(
+            fixture.path().join("Cargo.toml"),
+            "[package]\nname = \"sample-workspace\"\n",
+        )?;
+        let root = fixture.path().to_owned();
+        let options = eframe::NativeOptions {
+            viewport: ViewportBuilder::default()
+                .with_inner_size([1040.0, 690.0])
+                .with_title("AEROS render test"),
+            event_loop_builder: Some(Box::new(|builder| {
+                builder.with_any_thread(true);
+            })),
+            ..Default::default()
+        };
+        eframe::run_native(
+            "AEROS render test",
+            options,
+            Box::new(move |cc| {
+                let editor = Editor::new(&cc.egui_ctx, Some(root.clone()), Preferences::default());
+                Ok(Box::new(Smoke {
+                    editor,
+                    fixture: root,
+                    output,
+                    sent: false,
+                    frame: 0,
+                    deadline: std::time::Instant::now() + std::time::Duration::from_secs(12),
+                }))
+            }),
+        )?;
         Ok(())
     }
 }

@@ -15,8 +15,13 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     eframe::run_native(
-        "AEROS Editor",
+        editor::TITLE,
         options,
-        Box::new(move |cc| Ok(Box::new(editor::Editor::new(&cc.egui_ctx, root)))),
+        Box::new(move |cc| {
+            Ok(Box::new(editor::Editor::from_preferences(
+                &cc.egui_ctx,
+                root,
+            )))
+        }),
     )
 }
