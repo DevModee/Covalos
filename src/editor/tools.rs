@@ -273,6 +273,8 @@ impl Editor {
             .frame(panel_frame(Margin::symmetric(12, 8)))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
+                    let (_, mark) = ui.allocate_space(egui::vec2(20.0, 28.0));
+                    draw_icon(ui.painter(), mark.center(), Icon::Terminal, MUTED);
                     for (tab, label) in [
                         (Tab::Terminal, "Terminal"),
                         (Tab::Output, "Output"),

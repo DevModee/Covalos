@@ -71,26 +71,36 @@ impl Editor {
 
     pub(super) fn top_bar(&mut self, ctx: &Context) {
         TopBottomPanel::top("menu")
-            .frame(panel_frame(Margin::symmetric(14, 8)))
+            .exact_height(CHROME_HEIGHT)
+            .frame(panel_frame(Margin::symmetric(12, 6)))
             .show(ctx, |ui| {
-                let ctx = ui.ctx().clone();
-                let available = ui.available_width();
-                let height = 31.0;
-                let bar = ui.available_rect_before_wrap();
-                let sides = (available * 0.32).min(380.0);
-                let center = (available - 2.0 * sides - 20.0).clamp(155.0, 490.0);
-                ui.allocate_ui_with_layout(
-                    egui::vec2(available, height),
-                    Layout::left_to_right(Align::Center),
+                let rect = ui.available_rect_before_wrap();
+                let drag = ui.interact(rect, Id::new("window-drag"), egui::Sense::click_and_drag());
+                if drag.drag_started() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                }
+                let maximized = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
+                if drag.double_clicked() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+                }
+                let left_width = if rect.width() > 1100.0 { 280.0 } else { 216.0 };
+                let right_width = if rect.width() > 1000.0 { 312.0 } else { 248.0 };
+                let left =
+                    egui::Rect::from_min_size(rect.min, egui::vec2(left_width, rect.height()));
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(left)
+                        .layout(Layout::left_to_right(Align::Center)),
                     |ui| {
-                        let (_, mark) = ui.allocate_space(egui::vec2(21.0, 26.0));
+                        ui.set_clip_rect(left);
+                        let (_, mark) = ui.allocate_space(egui::vec2(22.0, 28.0));
                         draw_icon(ui.painter(), mark.center(), Icon::Brand, ACCENT);
-                        ui.label(RichText::new(BRAND).strong().size(16.0));
-                        ui.separator();
+                        ui.label(RichText::new(BRAND).size(LEAD).strong());
+                        ui.add_space(8.0);
                         ui.menu_button("File", |ui| {
                             if ui.button("Open folder…").clicked() {
                                 ui.close();
-                                self.pick_workspace(&ctx);
+                                self.pick_workspace(ctx);
                             }
                             if ui.button("Open file…").clicked() {
                                 ui.close();
@@ -103,6 +113,7 @@ impl Editor {
                                 ui.close();
                                 self.show_new_file();
                             }
+                            ui.separator();
                             if ui
                                 .add_enabled(self.active.is_some(), egui::Button::new("Save"))
                                 .clicked()
@@ -128,117 +139,220 @@ impl Editor {
                                 && let Some(index) = self.active
                             {
                                 ui.close();
-                                self.request(Pending::CloseTab(index), &ctx);
+                                self.request(Pending::CloseTab(index), ctx);
                             }
                         });
-                        if available >= 1020.0 {
+                        if rect.width() > 1100.0 {
                             self.workspace_picker(ui);
                         }
                     },
                 );
-                let command_rect = egui::Rect::from_center_size(
-                    egui::pos2(bar.center().x, bar.top() + height / 2.0),
-                    egui::vec2(center, height),
+                let middle = egui::Rect::from_min_max(
+                    egui::pos2(rect.left() + left_width + 12.0, rect.top()),
+                    egui::pos2(rect.right() - right_width - 20.0, rect.bottom()),
+                );
+                let command_width = middle.width().min(520.0);
+                let command =
+                    egui::Rect::from_center_size(middle.center(), egui::vec2(command_width, 30.0));
+                ui.scope_builder(egui::UiBuilder::new().max_rect(command), |ui| {
+                    let response = ui.add_sized(
+                        command.size(),
+                        egui::Button::new("")
+                            .fill(INSET)
+                            .stroke(egui::Stroke::new(1.0_f32, BORDER)),
+                    );
+                    draw_icon(
+                        ui.painter(),
+                        response.rect.left_center() + egui::vec2(16.0, 0.0),
+                        Icon::Search,
+                        MUTED,
+                    );
+                    ui.painter().text(
+                        response.rect.left_center() + egui::vec2(32.0, 0.0),
+                        egui::Align2::LEFT_CENTER,
+                        if command_width > 320.0 {
+                            "Search files and commands"
+                        } else {
+                            "Quick access"
+                        },
+                        egui::FontId::proportional(BODY),
+                        SECONDARY,
+                    );
+                    ui.painter().text(
+                        response.rect.right_center() - egui::vec2(12.0, 0.0),
+                        egui::Align2::RIGHT_CENTER,
+                        if cfg!(target_os = "macos") {
+                            "⌘ P"
+                        } else {
+                            "Ctrl P"
+                        },
+                        egui::FontId::proportional(SMALL),
+                        MUTED,
+                    );
+                    response.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Quick access")
+                    });
+                    if response.clicked() {
+                        self.open_palette(ctx);
+                    }
+                });
+                let right = egui::Rect::from_min_max(
+                    egui::pos2(rect.right() - right_width, rect.top()),
+                    rect.max,
                 );
                 ui.scope_builder(
                     egui::UiBuilder::new()
-                        .max_rect(command_rect)
-                        .layout(Layout::centered_and_justified(egui::Direction::LeftToRight)),
-                    |ui| {
-                        if ui
-                            .add(
-                                egui::Button::new(muted("Quick access     Ctrl / ⌘ P")).fill(INSET),
-                            )
-                            .clicked()
-                        {
-                            self.open_palette(&ctx);
-                        }
-                    },
-                );
-                let actions = egui::Rect::from_min_max(
-                    egui::pos2(bar.right() - sides, bar.top()),
-                    egui::pos2(bar.right(), bar.top() + height),
-                );
-                ui.scope_builder(
-                    egui::UiBuilder::new()
-                        .max_rect(actions)
+                        .max_rect(right)
                         .layout(Layout::right_to_left(Align::Center)),
                     |ui| {
-                        if ui.button("Settings").clicked() {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        if icon_button(ui, Icon::Close, "Close window", false).clicked() {
+                            self.request(Pending::Exit, ctx);
+                        }
+                        if icon_button(
+                            ui,
+                            if maximized {
+                                Icon::Restore
+                            } else {
+                                Icon::Maximize
+                            },
+                            "Maximize or restore",
+                            false,
+                        )
+                        .clicked()
+                        {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+                        }
+                        if icon_button(ui, Icon::Minimize, "Minimize", false).clicked() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                        }
+                        ui.add_space(8.0);
+                        if icon_button(ui, Icon::Settings, "Settings", self.settings_open).clicked()
+                        {
                             self.settings_open = true;
                         }
-                        if ui.selectable_label(self.hub_open, "Agent Hub").clicked() {
-                            self.hub_open = !self.hub_open;
-                        }
-                        if ui
-                            .selectable_label(
-                                !self.hub_open && self.preferences.assistant_open,
-                                "Codex",
+                        if rect.width() > 1000.0 {
+                            if ui.selectable_label(self.hub_open, "Agent Hub").clicked() {
+                                self.hub_open = !self.hub_open;
+                            }
+                            if ui
+                                .selectable_label(
+                                    !self.hub_open && self.preferences.assistant_open,
+                                    "Codex",
+                                )
+                                .clicked()
+                            {
+                                self.hub_open = false;
+                                self.preferences.assistant_open = !self.preferences.assistant_open;
+                            }
+                        } else {
+                            if icon_button(ui, Icon::Hub, "Agent Hub", self.hub_open).clicked() {
+                                self.hub_open = !self.hub_open;
+                            }
+                            if icon_button(
+                                ui,
+                                Icon::Code,
+                                "Toggle Codex panel",
+                                self.preferences.assistant_open,
                             )
                             .clicked()
-                        {
-                            if self.hub_open {
+                            {
                                 self.hub_open = false;
-                                self.preferences.assistant_open = true;
-                            } else {
                                 self.preferences.assistant_open = !self.preferences.assistant_open;
                             }
                         }
                     },
+                );
+                ui.painter().hline(
+                    rect.x_range(),
+                    rect.bottom() + 6.0,
+                    egui::Stroke::new(1.0_f32, BORDER),
                 );
             });
     }
 
     pub(super) fn status_bar(&mut self, ctx: &Context) {
         TopBottomPanel::bottom("status")
-            .frame(panel_frame(Margin::symmetric(12, 3)))
+            .exact_height(STATUS_HEIGHT)
+            .frame(panel_frame(Margin::symmetric(12, 2)))
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    if let Some((error, notice)) = &self.notice {
-                        ui.label(RichText::new(notice).small().color(if *error {
-                            ERROR
+                let rect = ui.available_rect_before_wrap();
+                let right_width = if self.active.is_some() { 290.0 } else { 100.0 };
+                let left = egui::Rect::from_min_max(
+                    rect.min,
+                    egui::pos2(rect.right() - right_width - 8.0, rect.bottom()),
+                );
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(left)
+                        .layout(Layout::left_to_right(Align::Center)),
+                    |ui| {
+                        ui.set_clip_rect(left);
+                        if let Some((error, text)) = &self.notice {
+                            ui.add(
+                                egui::Label::new(muted(text).color(if *error {
+                                    ERROR
+                                } else {
+                                    SECONDARY
+                                }))
+                                .truncate(),
+                            )
+                            .on_hover_text(text);
+                        } else if let Some(root) = &self.root {
+                            let name = workspace::filename(root);
+                            draw_icon(
+                                ui.painter(),
+                                left.left_center() + egui::vec2(7.0, 0.0),
+                                Icon::Explorer,
+                                MUTED,
+                            );
+                            ui.add_space(18.0);
+                            ui.add(egui::Label::new(muted(name)).truncate())
+                                .on_hover_text(root.display().to_string());
                         } else {
-                            TEXT
-                        }));
-                    } else if let Some(root) = &self.root {
-                        let text = root.to_string_lossy();
-                        let display = text.strip_prefix(r"\\?\").unwrap_or(&text);
-                        ui.add(egui::Label::new(muted(display)).truncate())
-                            .on_hover_text(display);
-                    } else {
-                        ui.label(muted("No workspace open"));
-                    }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.label(muted("Open a workspace"));
+                        }
+                    },
+                );
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(egui::Rect::from_min_max(
+                            egui::pos2(rect.right() - right_width, rect.top()),
+                            rect.max,
+                        ))
+                        .layout(Layout::right_to_left(Align::Center)),
+                    |ui| {
                         if ui
-                            .selectable_label(self.preferences.tools_open, "Terminal")
+                            .selectable_label(self.preferences.tools_open, muted("Terminal"))
                             .clicked()
                         {
                             self.preferences.tools_open = !self.preferences.tools_open;
                         }
                         if let Some(doc) = self.active.map(|index| &self.documents[index]) {
-                            let mut line = 1;
-                            let mut column = 1;
-                            for ch in doc.text.chars().take(self.cursor) {
-                                if ch == '\n' {
-                                    line += 1;
-                                    column = 1;
-                                } else {
-                                    column += 1;
-                                }
-                            }
                             ui.label(muted("UTF-8"));
-                            ui.label(muted(format!("Ln {line}, Col {column}")));
+                            let before: String = doc.text.chars().take(self.cursor).collect();
+                            let line = before.bytes().filter(|&b| b == b'\n').count() + 1;
+                            let col = before
+                                .rsplit('\n')
+                                .next()
+                                .map_or(1, |s| s.chars().count() + 1);
+                            ui.label(muted(format!("Ln {line}, Col {col}")));
                         }
-                    });
-                });
+                    },
+                );
+                ui.painter().hline(
+                    rect.x_range(),
+                    rect.top() - 2.0,
+                    egui::Stroke::new(1.0_f32, BORDER),
+                );
             });
     }
 
     pub(super) fn activity_rail(&mut self, ctx: &Context) {
         SidePanel::left("activity")
-            .exact_width(49.0)
+            .exact_width(RAIL_WIDTH)
             .resizable(false)
-            .frame(panel_frame(Margin::symmetric(5, 10)))
+            .frame(panel_frame(Margin::symmetric(8, 12)))
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     for (tab, icon, label) in [
@@ -271,7 +385,7 @@ impl Editor {
         let panel = SidePanel::left("workspace")
             .default_width(self.preferences.sidebar_width)
             .width_range(155.0..=340.0)
-            .frame(panel_frame(Margin::same(10)))
+            .frame(panel_frame(Margin::same(PANEL_PADDING)))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     let label = match self.sidebar {
@@ -279,18 +393,26 @@ impl Editor {
                         Sidebar::Search => "Search",
                         Sidebar::Git => "Git",
                     };
-                    ui.label(RichText::new(label).strong().color(TEXT));
+                    ui.allocate_ui_with_layout(
+                        egui::vec2((ui.available_width() - 40.0).max(40.0), 28.0),
+                        Layout::left_to_right(Align::Center),
+                        |ui| {
+                            ui.set_min_width(ui.available_width());
+                            ui.add(
+                                egui::Label::new(RichText::new(label).strong().color(SECONDARY))
+                                    .truncate(),
+                            );
+                        },
+                    );
                     if self.sidebar == Sidebar::Files && self.root.is_some() {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.small_button("+").on_hover_text("New file").clicked() {
+                            if icon_button(ui, Icon::Add, "New file", false).clicked() {
                                 self.show_new_file();
                             }
                         });
                     }
                 });
-                ui.add_space(5.0);
-                ui.separator();
-                ui.add_space(6.0);
+                ui.add_space(12.0);
                 let Some(root) = self.root.clone() else {
                     ui.label(muted("Open a folder to browse files."));
                     return;
@@ -300,21 +422,26 @@ impl Editor {
                         let mut selected = None;
                         ui.horizontal(|ui| {
                             let root_label = ui
-                                .add(
-                                    egui::Label::new(
-                                        RichText::new(workspace::filename(&root)).strong(),
-                                    )
-                                    .truncate(),
+                                .allocate_ui_with_layout(
+                                    egui::vec2((ui.available_width() - 40.0).max(40.0), 28.0),
+                                    Layout::left_to_right(Align::Center),
+                                    |ui| {
+                                        ui.set_min_width(ui.available_width());
+                                        ui.add(
+                                            egui::Label::new(
+                                                RichText::new(workspace::filename(&root)).strong(),
+                                            )
+                                            .truncate(),
+                                        )
+                                    },
                                 )
+                                .inner
                                 .on_hover_text(root.display().to_string());
                             root_label.context_menu(|ui| {
                                 selected = super::files::tree_menu(ui, &root, &root, true);
                             });
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if ui
-                                    .small_button("↻")
-                                    .on_hover_text("Refresh files")
-                                    .clicked()
+                                if icon_button(ui, Icon::Refresh, "Refresh files", false).clicked()
                                 {
                                     self.directories.clear();
                                 }
@@ -339,6 +466,11 @@ impl Editor {
                 }
             });
         self.preferences.sidebar_width = panel.response.rect.width();
+        ctx.layer_painter(egui::LayerId::background()).vline(
+            panel.response.rect.right(),
+            panel.response.rect.y_range(),
+            egui::Stroke::new(1.0_f32, BORDER),
+        );
     }
 
     fn search_panel(&mut self, ui: &mut Ui, root: &Path) {
@@ -399,7 +531,6 @@ impl Editor {
             return;
         }
         self.tabs(ui);
-        ui.separator();
         if self.find_open {
             self.find_bar(ui);
             ui.separator();
@@ -411,14 +542,24 @@ impl Editor {
             .as_ref()
             .and_then(|root| doc.path.strip_prefix(root).ok())
             .unwrap_or(&doc.path);
-        ui.label(muted(
-            breadcrumb
-                .components()
-                .map(|part| part.as_os_str().to_string_lossy())
-                .collect::<Vec<_>>()
-                .join("  /  "),
-        ));
-        ui.add_space(2.0);
+        let path_label = breadcrumb
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("  ›  ");
+        egui::Frame::new()
+            .inner_margin(Margin::symmetric(16, 0))
+            .show(ui, |ui| {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(ui.available_width(), BREADCRUMB_HEIGHT),
+                    Layout::left_to_right(Align::Center),
+                    |ui| {
+                        ui.add(egui::Label::new(muted(&path_label)).truncate())
+                            .on_hover_text(doc.path.display().to_string());
+                    },
+                );
+            });
+        ui.add_space(4.0);
         let id = Id::new(("document", &doc.path));
         let selection = self.selection.take();
         if let Some((start, end)) = selection {
@@ -464,6 +605,16 @@ impl Editor {
                         let font_size = TextStyle::Monospace.resolve(ui.style()).size;
                         for section in &mut job.sections {
                             section.format.font_id.size = font_size;
+                            section.format.line_height = Some(
+                                font_size
+                                    * if ui.spacing().interact_size.y <= 24.0 {
+                                        COMPACT_CODE_LINE_HEIGHT
+                                    } else {
+                                        CODE_LINE_HEIGHT
+                                    },
+                            );
+                            section.format.color =
+                                syntax_color(section.format.color, section.format.italics);
                         }
                         job.wrap.max_width = f32::INFINITY;
                         ui.fonts_mut(|fonts| fonts.layout_job(job))
@@ -519,7 +670,7 @@ impl Editor {
                             egui::Align2::RIGHT_TOP,
                             (index + 1).to_string(),
                             TextStyle::Monospace.resolve(ui.style()),
-                            MUTED,
+                            DISABLED,
                         );
                     }
                 });
@@ -529,30 +680,96 @@ impl Editor {
     fn tabs(&mut self, ui: &mut Ui) {
         let mut active = None;
         let mut close = None;
-        ScrollArea::horizontal().id_salt("tabs").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                for (index, document) in self.documents.iter().enumerate() {
-                    let selected = self.active == Some(index);
+        egui::Frame::new().fill(SURFACE).show(ui, |ui| {
+            ScrollArea::horizontal()
+                .id_salt("tabs")
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
                     ui.horizontal(|ui| {
-                        let name = workspace::filename(&document.path);
-                        let label = if document.dirty {
-                            format!("{name} •")
-                        } else {
-                            name
-                        };
-                        if ui
-                            .selectable_label(selected, label)
-                            .on_hover_text(document.path.display().to_string())
-                            .clicked()
-                        {
-                            active = Some(index);
-                        }
-                        if ui.small_button("×").on_hover_text("Close tab").clicked() {
-                            close = Some(index);
+                        for (index, document) in self.documents.iter().enumerate() {
+                            let selected = self.active == Some(index);
+                            let name = workspace::filename(&document.path);
+                            let label_width = ui.fonts_mut(|fonts| {
+                                fonts
+                                    .layout_no_wrap(
+                                        name.clone(),
+                                        egui::FontId::proportional(BODY),
+                                        TEXT,
+                                    )
+                                    .size()
+                                    .x
+                            });
+                            let width = (label_width + 72.0).clamp(128.0, 232.0);
+                            let response = ui
+                                .add_sized([width, TAB_HEIGHT], egui::Button::new("").frame(false));
+                            let painter = ui.painter_at(response.rect);
+                            if selected {
+                                painter.rect_filled(response.rect, 0, CANVAS);
+                            } else if response.hovered() {
+                                painter.rect_filled(response.rect, 0, HOVER);
+                            }
+                            draw_icon(
+                                &painter,
+                                response.rect.left_center() + egui::vec2(18.0, 0.0),
+                                Icon::Code,
+                                file_color(&document.path),
+                            );
+                            let text_rect = egui::Rect::from_min_max(
+                                response.rect.left_top() + egui::vec2(34.0, 0.0),
+                                response.rect.right_bottom() - egui::vec2(30.0, 0.0),
+                            );
+                            painter.with_clip_rect(text_rect).text(
+                                text_rect.left_center(),
+                                egui::Align2::LEFT_CENTER,
+                                &name,
+                                egui::FontId::proportional(BODY),
+                                if selected { TEXT } else { MUTED },
+                            );
+                            if selected {
+                                painter.hline(
+                                    response.rect.x_range().shrink(14.0),
+                                    response.rect.bottom() - 1.0,
+                                    egui::Stroke::new(2.0_f32, ACCENT),
+                                );
+                            }
+                            let close_rect = egui::Rect::from_center_size(
+                                response.rect.right_center() - egui::vec2(16.0, 0.0),
+                                egui::vec2(24.0, 24.0),
+                            );
+                            let close_response = ui.interact(
+                                close_rect,
+                                Id::new(("tab-close", &document.path)),
+                                egui::Sense::click(),
+                            );
+                            if close_response.hovered() {
+                                painter.rect_filled(close_rect, 4, HOVER);
+                                draw_icon(&painter, close_rect.center(), Icon::Close, TEXT);
+                            } else if document.dirty {
+                                painter.circle_filled(close_rect.center(), 3.0, ACCENT);
+                            } else if selected || response.hovered() {
+                                draw_icon(&painter, close_rect.center(), Icon::Close, MUTED);
+                            }
+                            response.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::WidgetType::SelectableLabel,
+                                    true,
+                                    &name,
+                                )
+                            });
+                            if close_response.clicked() {
+                                close = Some(index);
+                            } else if response.clicked() {
+                                active = Some(index);
+                            }
+                            if response.middle_clicked() {
+                                close = Some(index);
+                            }
+                            response.on_hover_text(document.path.display().to_string());
+                            close_response.on_hover_text("Close tab");
                         }
                     });
-                }
-            });
+                });
         });
         if let Some(index) = active {
             self.activate(index);
@@ -606,41 +823,56 @@ impl Editor {
     }
 
     pub(super) fn assistant_panel(&mut self, ctx: &Context) {
+        let max_width = (ctx.content_rect().width() * 0.30)
+            .min(
+                ctx.content_rect().width()
+                    - RAIL_WIDTH
+                    - self.preferences.sidebar_width
+                    - MIN_EDITOR_WIDTH,
+            )
+            .clamp(240.0, 520.0);
         let panel = SidePanel::right("assistant")
-            .default_width(self.preferences.assistant_width)
-            .width_range(230.0..=(ctx.content_rect().width() * 0.42).clamp(260.0, 520.0))
+            .default_width(self.preferences.assistant_width.min(max_width))
+            .width_range(240.0..=max_width)
             .frame(panel_frame(Margin::same(12)))
             .show(ctx, |ui| self.workspace_chat(ui));
         let width = panel.response.rect.width();
-        if width < (ctx.content_rect().width() * 0.42).clamp(260.0, 520.0) {
+        ctx.layer_painter(egui::LayerId::background()).vline(
+            panel.response.rect.left(),
+            panel.response.rect.y_range(),
+            egui::Stroke::new(1.0_f32, BORDER),
+        );
+        if width + 1.0 < max_width {
             self.preferences.assistant_width = width;
         }
     }
 
     pub(super) fn modals(&mut self, ctx: &Context) {
         if let Some(action) = self.pending.take() {
-            let modal = egui::Modal::new(Id::new("close_confirmation")).show(ctx, |ui| {
-                ui.heading("Save your changes?");
-                ui.label(if matches!(action, Pending::CloseTab(_)) {
-                    "This file has unsaved changes."
-                } else {
-                    "One or more files have unsaved changes."
+            let modal = egui::Modal::new(Id::new("close_confirmation"))
+                .frame(modal_frame())
+                .show(ctx, |ui| {
+                    ui.heading("Save your changes?");
+                    ui.label(if matches!(action, Pending::CloseTab(_)) {
+                        "This file has unsaved changes."
+                    } else {
+                        "One or more files have unsaved changes."
+                    });
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.add(primary("Save")).clicked() {
+                            return Some(true);
+                        }
+                        if ui.button("Discard").clicked() {
+                            return Some(false);
+                        }
+                        if ui.button("Cancel").clicked() {
+                            ui.close();
+                        }
+                        None
+                    })
+                    .inner
                 });
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    if ui.button("Save").clicked() {
-                        return Some(true);
-                    }
-                    if ui.button("Discard").clicked() {
-                        return Some(false);
-                    }
-                    if ui.button("Cancel").clicked() {
-                        ui.close();
-                    }
-                    None
-                })
-                .inner
-            });
             match modal.inner {
                 Some(false) => self.perform(action, ctx),
                 Some(true) => {
@@ -667,37 +899,40 @@ impl Editor {
             }
         }
         if let Some(mut name) = self.new_file.take() {
-            let modal = egui::Modal::new(Id::new("new_file")).show(ctx, |ui| {
-                ui.heading("New file");
-                if let Some((true, message)) = &self.notice {
-                    ui.label(RichText::new(message).color(ERROR));
-                }
-                let input = ui.add(
-                    TextEdit::singleline(&mut name)
-                        .hint_text("Path relative to the workspace")
-                        .desired_width(310.0)
-                        .char_limit(260),
-                );
-                if std::mem::take(&mut self.focus_new_file) {
-                    input.request_focus();
-                }
-                let enter = input.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
-                ui.add_space(5.0);
-                ui.horizontal(|ui| {
-                    if ui.button("Cancel").clicked() {
-                        return Some(false);
+            let modal = egui::Modal::new(Id::new("new_file"))
+                .frame(modal_frame())
+                .show(ctx, |ui| {
+                    ui.heading("New file");
+                    if let Some((true, message)) = &self.notice {
+                        ui.label(RichText::new(message).color(ERROR));
                     }
-                    if ui
-                        .add_enabled(!name.trim().is_empty(), egui::Button::new("Create"))
-                        .clicked()
-                        || (enter && !name.trim().is_empty())
-                    {
-                        return Some(true);
+                    let input = ui.add(
+                        TextEdit::singleline(&mut name)
+                            .hint_text("Path relative to the workspace")
+                            .desired_width(310.0)
+                            .char_limit(260),
+                    );
+                    if std::mem::take(&mut self.focus_new_file) {
+                        input.request_focus();
                     }
-                    None
-                })
-                .inner
-            });
+                    let enter =
+                        input.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
+                    ui.add_space(5.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Cancel").clicked() {
+                            return Some(false);
+                        }
+                        if ui
+                            .add_enabled(!name.trim().is_empty(), primary("Create"))
+                            .clicked()
+                            || (enter && !name.trim().is_empty())
+                        {
+                            return Some(true);
+                        }
+                        None
+                    })
+                    .inner
+                });
             match modal.inner {
                 Some(true) if !self.create_file(&name) => self.new_file = Some(name),
                 None if !modal.should_close() => self.new_file = Some(name),
@@ -765,9 +1000,19 @@ fn tree(
                         selected = Some(action);
                     }
                 } else {
-                    let response = ui
-                        .selectable_label(active == Some(entry.path.as_path()), name)
-                        .on_hover_text(entry.path.display().to_string());
+                    let response = row(
+                        ui,
+                        &format!("      {name}"),
+                        "",
+                        active == Some(entry.path.as_path()),
+                    )
+                    .on_hover_text(entry.path.display().to_string());
+                    draw_icon(
+                        ui.painter(),
+                        response.rect.left_center() + egui::vec2(17.0, 0.0),
+                        Icon::File,
+                        file_color(&entry.path),
+                    );
                     if response.clicked() {
                         selected = Some(TreeAction::Open(entry.path.clone()));
                     }

@@ -181,12 +181,24 @@ impl Editor {
             }
         }
         ScrollArea::vertical().id_salt("hub-skills").show(ui, |ui| {
-            ui.label(muted("Import text instructions from GitHub and review them before enabling. This editor gives imported skills no executable tools."));
+            ui.label(muted(
+                "Review GitHub instructions before enabling them for tasks.",
+            ));
+            ui.label(secondary("GitHub skill URL"));
             ui.horizontal(|ui| {
-                ui.add(TextEdit::singleline(&mut self.skills.source)
-                    .hint_text("https://github.com/owner/repo/blob/ref/SKILL.md")
-                    .char_limit(600).desired_width((ui.available_width() - 132.0).max(110.0)));
-                if ui.add_enabled(self.skills.download.is_none() && !self.skills.source.trim().is_empty(), egui::Button::new("Fetch preview")).clicked() {
+                ui.add(
+                    TextEdit::singleline(&mut self.skills.source)
+                        .hint_text("https://github.com/owner/repo/blob/ref/SKILL.md")
+                        .char_limit(600)
+                        .desired_width((ui.available_width() - 132.0).max(110.0)),
+                );
+                if ui
+                    .add_enabled(
+                        self.skills.download.is_none() && !self.skills.source.trim().is_empty(),
+                        egui::Button::new("Fetch preview"),
+                    )
+                    .clicked()
+                {
                     let url = self.skills.source.trim().to_owned();
                     let (sender, receiver) = mpsc::channel();
                     let ctx = ui.ctx().clone();
@@ -199,15 +211,26 @@ impl Editor {
                     });
                 }
             });
-            if self.skills.download.is_some() { ui.spinner(); }
-            if let Some(error) = &self.skills.error { ui.label(RichText::new(error).color(ERROR)); }
+            if self.skills.download.is_some() {
+                busy_indicator(ui);
+            }
+            if let Some(error) = &self.skills.error {
+                ui.label(RichText::new(error).color(ERROR));
+            }
             if let Some(skill) = &self.skills.preview {
                 ui.separator();
                 ui.label(RichText::new(&skill.name).strong());
                 ui.label(muted(&skill.source));
-                ScrollArea::vertical().id_salt("skill-preview").max_height(250.0).show(ui, |ui| {
-                    ui.add(egui::Label::new(&skill.instructions).wrap().selectable(true));
-                });
+                ScrollArea::vertical()
+                    .id_salt("skill-preview")
+                    .max_height(250.0)
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::Label::new(&skill.instructions)
+                                .wrap()
+                                .selectable(true),
+                        );
+                    });
                 if ui.button("Install disabled").clicked()
                     && let Some(skill) = self.skills.preview.take()
                 {
@@ -221,11 +244,23 @@ impl Editor {
                 ui.push_id(skill.id.clone(), |ui| {
                     ui.label(RichText::new(&skill.name).strong());
                     ui.label(muted(format!("{} · {}", skill.version, skill.source)));
-                    if !skill.description.is_empty() { ui.label(&skill.description); }
+                    if !skill.description.is_empty() {
+                        ui.label(&skill.description);
+                    }
                     ui.horizontal_wrapped(|ui| {
-                        ui.checkbox(&mut skill.enabled, "Enabled");
+                        checkbox(ui, &mut skill.enabled, "Enabled");
                         let selected = self.skills.selected.as_ref() == Some(&skill.id);
-                        if ui.add_enabled(skill.enabled, egui::Button::new(if selected { "Deselect for tasks" } else { "Use in tasks" })).clicked() {
+                        if ui
+                            .add_enabled(
+                                skill.enabled,
+                                egui::Button::new(if selected {
+                                    "Deselect for tasks"
+                                } else {
+                                    "Use in tasks"
+                                }),
+                            )
+                            .clicked()
+                        {
                             self.skills.selected = (!selected).then(|| skill.id.clone());
                         }
                         if ui.small_button("Review").clicked() {
