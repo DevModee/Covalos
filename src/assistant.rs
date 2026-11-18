@@ -96,8 +96,7 @@ pub fn start_provider(
     let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(wake);
     thread::spawn(move || {
         let result = execute(
-            provider,
-            scope,
+            (provider, scope),
             &root,
             session.as_deref(),
             &prompt,
@@ -112,8 +111,7 @@ pub fn start_provider(
 }
 
 fn execute(
-    provider: Provider,
-    scope: Scope,
+    provider_scope: (Provider, Scope),
     root: &Path,
     session: Option<&str>,
     prompt: &str,
@@ -121,6 +119,7 @@ fn execute(
     events: &Sender<Event>,
     wake: &Arc<dyn Fn() + Send + Sync>,
 ) -> Result<Event, String> {
+    let (provider, scope) = provider_scope;
     let program = provider.discover().ok_or_else(|| {
         format!(
             "Could not find the {} CLI. Install it or configure its executable.",
@@ -134,12 +133,7 @@ fn execute(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
+    crate::process::configure(&mut command);
 
     let mut child = command
         .spawn()
@@ -193,8 +187,7 @@ fn execute(
     let input_writer = thread::spawn(move || stdin.write_all(input.as_bytes()).err());
     let status = loop {
         if cancelled.load(Ordering::Relaxed) {
-            let _ = child.kill();
-            let _ = child.wait();
+            crate::process::terminate(&mut child);
             return Ok(Event::Cancelled);
         }
         if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
@@ -336,5 +329,69 @@ mod tests {
             }
         }
         assert_eq!(repeated.trim(), "AEROS_OK");
+    }
+
+    #[test]
+    #[ignore = "requires an authenticated Codex CLI and sends an isolated prompt"]
+    fn general_codex_uses_the_tool_disabled_isolated_command() -> std::io::Result<()> {
+        let root = tempfile::tempdir()?;
+        let run = start_provider(
+            Provider::Codex,
+            Scope::Isolated,
+            root.path().to_owned(),
+            None,
+            "Reply with the exact text AEROS_GENERAL_OK. Do not use tools.".into(),
+            || {},
+        );
+        let mut reply = String::new();
+        loop {
+            match run
+                .events
+                .recv_timeout(Duration::from_secs(75))
+                .expect("agent event")
+            {
+                Event::Message(text) => reply.push_str(&text),
+                Event::Done => break,
+                Event::Error(error) => panic!("{error}"),
+                _ => {}
+            }
+        }
+        assert_eq!(reply.trim(), "AEROS_GENERAL_OK");
+        Ok(())
+    }
+
+    #[test]
+    fn codex_and_claude_response_events_preserve_errors_and_messages() {
+        let mut codex = Responses::default();
+        assert!(matches!(codex.event(Provider::Codex, &serde_json::json!({
+            "type": "thread.started", "thread_id": "test-session"
+        })), Some(Event::Session(id)) if id == "test-session"));
+        assert!(matches!(codex.event(Provider::Codex, &serde_json::json!({
+            "type": "item.completed", "item": { "type": "agent_message", "text": "answer" }
+        })), Some(Event::Message(text)) if text == "answer"));
+        assert!(codex.seen_message);
+        assert!(matches!(
+            codex.event(
+                Provider::Codex,
+                &serde_json::json!({
+                    "type": "turn.completed", "usage": { "input_tokens": 12, "output_tokens": 8 }
+                })
+            ),
+            Some(Event::Usage {
+                input: 12,
+                output: 8
+            })
+        ));
+        let mut claude = Responses::default();
+        assert!(matches!(claude.event(Provider::Claude, &serde_json::json!({
+            "type": "stream_event", "event": { "type": "content_block_delta", "delta": { "text": "chunk" } }
+        })), Some(Event::Delta(text)) if text == "chunk"));
+        claude.event(
+            Provider::Claude,
+            &serde_json::json!({
+                "type": "result", "is_error": true, "result": "session expired"
+            }),
+        );
+        assert_eq!(claude.failure.as_deref(), Some("session expired"));
     }
 }

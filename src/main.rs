@@ -2,6 +2,7 @@
 
 mod assistant;
 mod editor;
+mod process;
 mod workspace;
 
 use eframe::egui;

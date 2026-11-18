@@ -954,4 +954,43 @@ mod tests {
         assert!(Replacement::parse(json, "let x = 1; let x = 1;").is_none());
         assert!(Replacement::parse(json, "let x = 3;").is_none());
     }
+
+    #[test]
+    #[ignore = "requires an authenticated Codex CLI and sends an Assist request"]
+    fn assist_runs_through_approval_without_saving_the_file() -> std::io::Result<()> {
+        use super::super::preferences::Preferences;
+        use std::{
+            thread,
+            time::{Duration, Instant},
+        };
+
+        let folder = tempfile::tempdir()?;
+        let ctx = Context::default();
+        let mut editor = Editor::new(&ctx, Some(folder.path().to_owned()), Preferences::default());
+        assert!(editor.create_file("value.rs"));
+        editor.documents[0].text = "const VALUE: u32 = 1;\n".into();
+        editor.documents[0].update_dirty();
+        editor.save_active();
+        editor.hub.task_request = "Change the value of the VALUE constant from 1 to 2 in the attached buffer. Return exactly the required JSON, without using tools.".into();
+        editor.start_task(&ctx, TaskMode::Assist);
+        let until = Instant::now() + Duration::from_secs(90);
+        while editor.chat.run.is_some() && Instant::now() < until {
+            editor.poll_chats(&ctx);
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            editor.hub.proposal.is_some(),
+            "{}",
+            editor.chat.response().unwrap_or("missing response")
+        );
+        assert_eq!(editor.documents[0].text, "const VALUE: u32 = 1;\n");
+        editor.resolve_proposal(true);
+        assert_eq!(editor.documents[0].text, "const VALUE: u32 = 2;\n");
+        assert!(editor.documents[0].dirty);
+        assert_eq!(
+            std::fs::read_to_string(folder.path().join("value.rs"))?,
+            "const VALUE: u32 = 1;\n"
+        );
+        Ok(())
+    }
 }

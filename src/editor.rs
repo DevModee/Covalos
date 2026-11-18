@@ -701,4 +701,66 @@ mod tests {
         )?;
         Ok(())
     }
+
+    #[test]
+    fn compact_views_dirty_close_and_workspace_switch_preserve_edits() -> std::io::Result<()> {
+        let first = tempfile::tempdir()?;
+        let second = tempfile::tempdir()?;
+        let ctx = egui::Context::default();
+        let mut editor = Editor::new(&ctx, Some(first.path().to_owned()), Preferences::default());
+        assert!(editor.create_file("first.rs"));
+        assert!(editor.create_file("second.rs"));
+        editor.documents[0].text = "let n = 1;".into();
+        editor.documents[0].update_dirty();
+        editor.request(Pending::CloseTab(0), &ctx);
+        assert!(editor.pending.is_some());
+        assert_eq!(editor.documents.len(), 2);
+        editor.pending = None;
+        editor.request(Pending::OpenWorkspace(second.path().to_owned()), &ctx);
+        assert!(editor.pending.is_some());
+        assert!(
+            editor
+                .root
+                .as_ref()
+                .is_some_and(|root| root == &first.path().canonicalize().unwrap())
+        );
+        editor.pending = None;
+        editor.save_all();
+        editor.request(Pending::CloseTab(0), &ctx);
+        assert_eq!(editor.active, Some(0));
+        assert_eq!(workspace::filename(&editor.documents[0].path), "second.rs");
+
+        for (size, scale) in [
+            ([920.0, 600.0], 1.0),
+            ([1390.0, 860.0], 1.25),
+            ([1920.0, 1080.0], 1.5),
+        ] {
+            ctx.set_pixels_per_point(scale);
+            for hub in [false, true] {
+                editor.hub_open = hub;
+                editor.preferences.tools_open = true;
+                let output = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(size[0], size[1]),
+                        )),
+                        ..Default::default()
+                    },
+                    |ctx| editor.render(ctx),
+                );
+                assert!(!output.shapes.is_empty());
+                assert!(
+                    output
+                        .shapes
+                        .iter()
+                        .all(|shape| shape.clip_rect.is_finite())
+                );
+            }
+        }
+        editor.open_palette(&ctx);
+        let output = ctx.run(egui::RawInput::default(), |ctx| editor.render(ctx));
+        assert!(!output.shapes.is_empty());
+        Ok(())
+    }
 }

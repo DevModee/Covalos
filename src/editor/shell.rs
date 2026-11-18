@@ -211,7 +211,7 @@ impl Editor {
                         self.preferences.high_contrast,
                     );
                 }
-                ui.label(muted("AEROS Dark"));
+                ui.label(muted(THEME_NAME));
                 ui.separator();
                 ui.checkbox(&mut self.preferences.allow_auto_buffer, "Allow opt-in Auto buffer edits")
                     .on_hover_text("Auto can apply one proposed replacement in the active editor buffer. Saving remains manual.");
@@ -401,7 +401,7 @@ fn constellation(ui: &mut Ui, width: f32, height: f32) {
     painter.text(
         center,
         egui::Align2::CENTER_CENTER,
-        "A",
+        BRAND.chars().next().unwrap_or_default().to_string(),
         egui::FontId::monospace(24.0),
         ACCENT_HOVER,
     );

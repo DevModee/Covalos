@@ -1,7 +1,7 @@
 use std::{
     io::{BufRead, BufReader, Read},
     path::Path,
-    process::{Child, Command, Stdio},
+    process::{Command, Stdio},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -16,6 +16,7 @@ use eframe::egui::{
 };
 
 use super::{Editor, theme::*};
+use crate::process::{configure as hidden, terminate};
 
 const MAX_LOG: usize = 140_000;
 
@@ -93,40 +94,8 @@ fn drain(job: &mut Option<Job>, text: &mut String) {
     }
 }
 
-fn hidden(command: &mut Command) {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000);
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-}
-
-fn terminate(child: &mut Child) {
-    #[cfg(windows)]
-    {
-        let mut command = Command::new("taskkill.exe");
-        hidden(&mut command);
-        let _ = command
-            .args(["/PID", &child.id().to_string(), "/T", "/F"])
-            .output();
-    }
-    #[cfg(unix)]
-    {
-        let _ = Command::new("kill")
-            .args(["-KILL", "--", &format!("-{}", child.id())])
-            .output();
-    }
-    let _ = child.kill();
-    let _ = child.wait();
-}
-
 fn worker(mut command: Command, ctx: Context, show_status: bool) -> Job {
-    let (sender, events) = mpsc::channel();
+    let (sender, events) = mpsc::sync_channel(256);
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = stop.clone();
     hidden(&mut command);

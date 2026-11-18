@@ -2,6 +2,7 @@ use eframe::egui::{self, Color32, Context, FontId, Frame, Margin, RichText, Stro
 
 pub(crate) const BRAND: &str = "AEROS";
 pub(crate) const TITLE: &str = "AEROS Editor";
+pub(super) const THEME_NAME: &str = "AEROS Dark";
 pub(super) const CANVAS: Color32 = Color32::from_rgb(11, 11, 15);
 pub(super) const SURFACE: Color32 = Color32::from_rgb(17, 17, 22);
 pub(super) const INSET: Color32 = Color32::from_rgb(23, 23, 30);
