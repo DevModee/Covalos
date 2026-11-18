@@ -8,6 +8,8 @@ use std::{
 #[serde(default)]
 pub(super) struct Preferences {
     pub(super) font_size: f32,
+    pub(super) compact: bool,
+    pub(super) reduce_motion: bool,
     pub(super) high_contrast: bool,
     pub(super) assistant_open: bool,
     pub(super) tools_open: bool,
@@ -24,7 +26,9 @@ pub(super) struct Preferences {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
-            font_size: 15.0,
+            font_size: 14.0,
+            compact: false,
+            reduce_motion: false,
             high_contrast: false,
             assistant_open: true,
             tools_open: false,
@@ -137,6 +141,8 @@ mod tests {
         let path = dir.path().join("nested/editor.json");
         let mut prefs = Preferences {
             high_contrast: true,
+            compact: true,
+            reduce_motion: true,
             font_size: 18.0,
             tools_open: true,
             ..Default::default()

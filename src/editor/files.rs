@@ -102,37 +102,40 @@ impl Editor {
                 FileChange::Folder => "New folder",
                 FileChange::Move(_) => "Rename or move",
             };
-            let modal = egui::Modal::new(Id::new("change-file")).show(ctx, |ui| {
-                ui.heading(header);
-                if let Some((true, message)) = &self.notice {
-                    ui.label(RichText::new(message).color(ERROR));
-                }
-                let input = ui.add(
-                    TextEdit::singleline(&mut name)
-                        .hint_text("Path relative to the workspace")
-                        .desired_width(340.0)
-                        .char_limit(512),
-                );
-                if std::mem::take(&mut self.focus_new_file) {
-                    input.request_focus();
-                }
-                let enter = input.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
-                ui.horizontal(|ui| {
-                    if ui.button("Cancel").clicked() {
-                        return Some(false);
+            let modal = egui::Modal::new(Id::new("change-file"))
+                .frame(modal_frame())
+                .show(ctx, |ui| {
+                    ui.heading(header);
+                    if let Some((true, message)) = &self.notice {
+                        ui.label(RichText::new(message).color(ERROR));
                     }
-                    if (ui
-                        .add_enabled(!name.trim().is_empty(), primary("Confirm"))
-                        .clicked()
-                        || enter)
-                        && !name.trim().is_empty()
-                    {
-                        return Some(true);
+                    let input = ui.add(
+                        TextEdit::singleline(&mut name)
+                            .hint_text("Path relative to the workspace")
+                            .desired_width(340.0)
+                            .char_limit(512),
+                    );
+                    if std::mem::take(&mut self.focus_new_file) {
+                        input.request_focus();
                     }
-                    None
-                })
-                .inner
-            });
+                    let enter =
+                        input.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
+                    ui.horizontal(|ui| {
+                        if ui.button("Cancel").clicked() {
+                            return Some(false);
+                        }
+                        if (ui
+                            .add_enabled(!name.trim().is_empty(), primary("Confirm"))
+                            .clicked()
+                            || enter)
+                            && !name.trim().is_empty()
+                        {
+                            return Some(true);
+                        }
+                        None
+                    })
+                    .inner
+                });
             match modal.inner {
                 Some(true) if !self.apply_file_change(&change, &name) => {
                     self.file_change = Some((change, name))
@@ -142,21 +145,23 @@ impl Editor {
             }
         }
         if let Some(path) = self.pending_delete.take() {
-            let modal = egui::Modal::new(Id::new("delete-entry")).show(ctx, |ui| {
-                ui.heading(format!("Delete {}?", workspace::filename(&path)));
-                ui.label(muted(path.display().to_string()));
-                ui.label("This permanently deletes a file or an empty folder.");
-                ui.horizontal(|ui| {
-                    if ui.button("Cancel").clicked() {
-                        return Some(false);
-                    }
-                    if ui.button(RichText::new("Delete").color(ERROR)).clicked() {
-                        return Some(true);
-                    }
-                    None
-                })
-                .inner
-            });
+            let modal = egui::Modal::new(Id::new("delete-entry"))
+                .frame(modal_frame())
+                .show(ctx, |ui| {
+                    ui.heading(format!("Delete {}?", workspace::filename(&path)));
+                    ui.label(muted(path.display().to_string()));
+                    ui.label("This permanently deletes a file or an empty folder.");
+                    ui.horizontal(|ui| {
+                        if ui.button("Cancel").clicked() {
+                            return Some(false);
+                        }
+                        if ui.button(RichText::new("Delete").color(ERROR)).clicked() {
+                            return Some(true);
+                        }
+                        None
+                    })
+                    .inner
+                });
             match modal.inner {
                 Some(true) => {
                     let Some(root) = &self.root else { return };

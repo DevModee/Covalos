@@ -1,16 +1,18 @@
-# AEROS Editor 0.2
+# AEROS Editor 0.3
 
 AEROS Editor is a native Rust code editor for local projects. AEROS is the working name. The application uses eframe and egui for the desktop interface, syntect for highlighting, and native file dialogs through rfd. Branding and interface colors live in [the theme module](src/editor/theme.rs).
 
+V3 introduces the Orbital visual system with integrated window chrome, Geist and IBM Plex Mono, a unified command palette, compact controls, and refined editor and agent surfaces. See [DESIGN.md](DESIGN.md) for the three proposals, actual before/after captures, validation, and performance.
+
 ## Run the Windows build
 
-Open `target/v2/release/aeros-editor.exe`. You can pass a folder path to open it directly. The original V1 executable is at `target/release/aeros-editor.exe`.
+Open `target/v3/release/aeros-editor.exe`. You can pass a folder path to open it directly. The original V1 executable is at `target/release/aeros-editor.exe`.
 
 For a fresh build, install stable Rust and the platform's native build prerequisites. Build the release and run the tests with these commands.
 
 ```sh
-cargo build --release --locked --target-dir target/v2
-cargo test --locked --target-dir target/v2
+cargo build --release --locked --target-dir target/v3
+cargo test --locked --target-dir target/v3
 ```
 
 The application targets Windows, Linux x64 and macOS Apple Silicon. On Linux it needs a desktop session with OpenGL and an XDG file chooser portal.
@@ -58,37 +60,14 @@ Settings are stored in `AerosEditor/editor.json` under the OS config location. S
 | Area | V1 | V2 |
 | --- | --- | --- |
 | Workspace | Open folders and files, tabs, search, save | Welcome and recent projects, Quick Access, breadcrumbs, Explorer operations |
-| Appearance | Fixed theme and basic layout | AEROS Dark tokens, custom icons, font and contrast controls, panel persistence |
+| Appearance | Fixed theme and basic layout | Orbital tokens, custom icons, font and contrast controls, panel persistence |
 | Development tools | File editing | Git status and diffs, command runner, output and agent activity |
 | AI | Codex conversation and active file attachment | Agent Hub, general and workspace conversations, a Claude adapter, planning, review, and supervised edits |
 | Project context | Current session | Local notes, recent task outcomes, and reviewed text skills |
 
-## Verified on Windows
+## Verification
 
-The Windows release and all 14 tests passed, including the native render test, isolated Codex conversation, the live Assist approval flow, and the authenticated two-turn Codex test. Strict Clippy analysis with warnings treated as errors passed. The Codex tests verify buffer attachment, session continuation, and an isolated conversation. The live Assist test confirms that approving an edit changes the buffer while the saved file retains its previous content. The render test captures the welcome screen, an open Rust file, and Agent Hub from the native window. The Linux x64 and macOS Apple Silicon builds passed `cargo check` for their targets. Runtime testing was on Windows.
-
-```sh
-cargo test --locked codex_answers_and_resumes -- --ignored
-# On Windows, set AEROS_SMOKE_DIR to an output directory before running:
-cargo test --locked capture_native_smoke_frames -- --ignored
-```
-
-Claude Code was detected locally. Its authenticated requests and independent review still need a live session test.
-
-## Performance
-
-Windows process measurements use the median of three warm-cache launches for each version and scenario. Startup measures process launch to Windows input idle. Memory is the process working set sampled after settling. CPU is the average over a 1.3 s interval, normalized to a single logical core. The project scenario opens this repository without opening a file.
-
-| Scenario | Version | Input idle | Working set | Private memory | Idle CPU / one core |
-| --- | --- | --- | --- | --- | --- |
-| Welcome | V1 | 265 ms | 81.89 MiB | 93.50 MiB | 0.00% |
-| Project open | V1 | 256 ms | 84.26 MiB | 93.47 MiB | 0.00% |
-| Welcome | V2 | 304 ms | 83.94 MiB | 94.09 MiB | 0.00% |
-| Project open | V2 | 318 ms | 90.85 MiB | 95.06 MiB | 0.00% |
-
-The V2 release executable is approximately 11.7 MiB, compared with 10.8 MiB for V1. This run shows additional startup work in V2. The CPU result is the sampled value during the idle interval.
-
-The workspace timings are medians of 15 interleaved runs on a generated 151-file Rust project with 15 search hits. Opening and decoding a 292,600-byte file took 0.352 ms in V1 and 0.325 ms in V2. Full-project text search took 25.872 ms in V1 and 26.734 ms in V2. These timings cover file I/O and search logic. Typing latency, scroll frame times, and large-workspace memory remain unmeasured.
+The V3 validation includes 12 local regression tests, the authenticated two-turn Codex test, strict Clippy, Windows Release, cross-target checks for Linux and macOS, and 72 native captures covering both target resolutions at 100%, 125%, and 150% egui scale. The capture fixtures and measured performance are documented in [DESIGN.md](DESIGN.md).
 
 ## Remaining work and integration decisions
 

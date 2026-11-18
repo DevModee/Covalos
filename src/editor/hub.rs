@@ -255,63 +255,107 @@ impl Hub {
 impl Editor {
     pub(super) fn agent_hub(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
-        let width = ui.available_width().min(1040.0);
-        let pad = ((ui.available_width() - width) / 2.0).max(0.0);
+        let width = ui.available_width().min(1280.0);
         let rect = ui.available_rect_before_wrap();
-        let content = egui::Rect::from_min_max(
-            rect.left_top() + egui::vec2(pad, 4.0),
-            rect.right_bottom() - egui::vec2(pad, 4.0),
+        let content = egui::Rect::from_min_size(
+            egui::pos2(rect.center().x - width * 0.5, rect.top() + 20.0),
+            egui::vec2(width, (rect.height() - 28.0).max(1.0)),
         );
         ui.scope_builder(egui::UiBuilder::new().max_rect(content), |ui| {
-            ui.set_width(width);
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("Agent Hub").size(26.0).strong());
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.button("Back to editor").clicked() {
-                        self.hub_open = false;
-                    }
-                });
-            });
-            ui.horizontal(|ui| {
+            let nav_width = 184.0;
+            let nav =
+                egui::Rect::from_min_size(content.min, egui::vec2(nav_width, content.height()));
+            ui.scope_builder(egui::UiBuilder::new().max_rect(nav), |ui| {
+                ui.add_space(8.0);
+                ui.label(RichText::new("Agent Hub").size(HEADING).strong());
+                ui.add_space(24.0);
                 for (tab, label) in [
                     (HubTab::Conversations, "Conversations"),
                     (HubTab::Tasks, "Tasks"),
                     (HubTab::Memory, "Project memory"),
                     (HubTab::Skills, "Skills"),
                 ] {
-                    if ui.selectable_label(self.hub.tab == tab, label).clicked() {
+                    if row(ui, label, "", self.hub.tab == tab).clicked() {
                         self.hub.tab = tab;
                     }
                 }
+                ui.add_space(24.0);
+                if row(ui, "Back to editor", "", false).clicked() {
+                    self.hub_open = false;
+                }
             });
-            ui.separator();
-            match self.hub.tab {
-                HubTab::Tasks => self.task_panel(ui),
-                HubTab::Memory => self.memory_panel(ui),
-                HubTab::Skills => self.skills_panel(ui),
-                HubTab::Conversations => {
-                    ui.columns(2, |columns| {
-                        let [left, right] = columns else { return };
-                        left.horizontal(|ui| {
-                            if ui
-                                .selectable_label(!self.hub.general, "Workspace")
-                                .clicked()
-                            {
-                                self.hub.general = false;
-                            }
-                            if ui.selectable_label(self.hub.general, "General").clicked() {
-                                self.hub.general = true;
+            ui.painter().vline(
+                nav.right() + 12.0,
+                content.y_range(),
+                egui::Stroke::new(1.0_f32, BORDER),
+            );
+            let body = egui::Rect::from_min_max(
+                egui::pos2(nav.right() + 40.0, content.top()),
+                content.max,
+            );
+            ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
+                ui.set_width(body.width());
+                match self.hub.tab {
+                    HubTab::Tasks => {
+                        section(
+                            ui,
+                            "Tasks",
+                            "Plan a change or review an edit before applying it.",
+                        );
+                        self.task_panel(ui);
+                    }
+                    HubTab::Memory => {
+                        section(
+                            ui,
+                            "Project memory",
+                            "Keep goals and decisions with this workspace.",
+                        );
+                        self.memory_panel(ui);
+                    }
+                    HubTab::Skills => {
+                        section(
+                            ui,
+                            "Skills",
+                            "Review reusable instructions and choose them for tasks.",
+                        );
+                        self.skills_panel(ui);
+                    }
+                    HubTab::Conversations => {
+                        let providers_width = (body.width() * 0.28).clamp(200.0, 260.0);
+                        let conversation = egui::Rect::from_min_max(
+                            body.min,
+                            egui::pos2(body.right() - providers_width - 32.0, body.bottom()),
+                        );
+                        ui.scope_builder(egui::UiBuilder::new().max_rect(conversation), |ui| {
+                            ui.set_width(conversation.width());
+                            ui.horizontal(|ui| {
+                                if ui
+                                    .selectable_label(!self.hub.general, "Workspace")
+                                    .clicked()
+                                {
+                                    self.hub.general = false;
+                                }
+                                if ui.selectable_label(self.hub.general, "General").clicked() {
+                                    self.hub.general = true;
+                                }
+                            });
+                            ui.add_space(16.0);
+                            if self.hub.general {
+                                self.general_chat(ui);
+                            } else {
+                                self.workspace_chat(ui);
                             }
                         });
-                        if self.hub.general {
-                            self.general_chat(left);
-                        } else {
-                            self.workspace_chat(left);
-                        }
-                        self.providers_panel(right, &ctx);
-                    });
+                        let providers = egui::Rect::from_min_max(
+                            egui::pos2(body.right() - providers_width, body.top()),
+                            body.max,
+                        );
+                        ui.scope_builder(egui::UiBuilder::new().max_rect(providers), |ui| {
+                            self.providers_panel(ui, &ctx);
+                        });
+                    }
                 }
-            }
+            });
         });
     }
 
@@ -319,51 +363,55 @@ impl Editor {
         if self.hub.providers.is_none() {
             self.hub.providers = Some(Provider::ALL.map(|provider| provider.discover().is_some()));
         }
-        card().show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("Providers").strong());
-                if ui.small_button("Refresh").clicked() {
-                    self.hub.providers =
-                        Some(Provider::ALL.map(|provider| provider.discover().is_some()));
+        Frame::new()
+            .fill(SURFACE)
+            .inner_margin(Margin::same(16))
+            .corner_radius(PANEL_RADIUS)
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Installed agents").strong());
+                    if ui.small_button("Refresh").clicked() {
+                        self.hub.providers =
+                            Some(Provider::ALL.map(|provider| provider.discover().is_some()));
+                    }
+                });
+                for (provider, installed) in Provider::ALL
+                    .into_iter()
+                    .zip(self.hub.providers.unwrap_or_default())
+                {
+                    ui.separator();
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(RichText::new(provider.label()).strong());
+                        let status = match (provider.supported(), installed) {
+                            (true, true) => "CLI available",
+                            (true, false) => "CLI missing",
+                            (false, true) => "Detected · adapter pending",
+                            (false, false) => "Adapter pending",
+                        };
+                        ui.label(muted(status));
+                    });
+                    if provider.supported()
+                        && installed
+                        && (provider == Provider::Claude || self.hub.general)
+                        && ui
+                            .small_button(
+                                if self.hub.general_chat.provider == provider && self.hub.general {
+                                    "New general chat"
+                                } else {
+                                    "Open general chat"
+                                },
+                            )
+                            .clicked()
+                    {
+                        self.hub.general_chat = Chat {
+                            provider,
+                            ..Default::default()
+                        };
+                        self.hub.general = true;
+                    }
                 }
             });
-            for (provider, installed) in Provider::ALL
-                .into_iter()
-                .zip(self.hub.providers.unwrap_or_default())
-            {
-                ui.separator();
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(RichText::new(provider.label()).strong());
-                    let status = match (provider.supported(), installed) {
-                        (true, true) => "CLI available",
-                        (true, false) => "CLI missing",
-                        (false, true) => "Detected · adapter pending",
-                        (false, false) => "Adapter pending",
-                    };
-                    ui.label(muted(status));
-                });
-                if provider.supported()
-                    && installed
-                    && (provider == Provider::Claude || self.hub.general)
-                    && ui
-                        .small_button(
-                            if self.hub.general_chat.provider == provider && self.hub.general {
-                                "New general chat"
-                            } else {
-                                "Open general chat"
-                            },
-                        )
-                        .clicked()
-                {
-                    self.hub.general_chat = Chat {
-                        provider,
-                        ..Default::default()
-                    };
-                    self.hub.general = true;
-                }
-            }
-        });
     }
 
     fn isolated_root(&mut self) -> std::io::Result<PathBuf> {
@@ -444,10 +492,9 @@ impl Editor {
                 && !matches!(self.hub.workflow, Some(Workflow::ExternalReview { .. })),
             |ui| {
                 if let Some(name) = active {
-                    ui.checkbox(&mut self.include_active_file, "Include active file")
-                        .on_hover_text(
-                            "Attach up to 24 KB from the current buffer, including unsaved edits.",
-                        );
+                    checkbox(ui, &mut self.include_active_file, "Active file").on_hover_text(
+                        "Attach up to 24 KB from the current buffer, including unsaved edits.",
+                    );
                     if self.include_active_file && ui.available_width() > 92.0 {
                         ui.label(muted(name));
                     }
@@ -464,17 +511,50 @@ impl Editor {
 
     fn task_panel(&mut self, ui: &mut Ui) {
         ScrollArea::vertical().id_salt("hub-tasks").show(ui, |ui| {
-            ui.label(muted("Ask runs a plan and a review. Assist proposes a change to the active buffer for approval."));
+            ui.label(secondary(
+                "Ask creates a plan and review. Assist proposes a change to your active file.",
+            ));
+            ui.add_space(12.0);
+            ui.label(secondary("Task"));
             if self.root.is_none() {
                 ui.label(muted("Open a workspace to run a task."));
                 return;
             }
-            ui.add(TextEdit::multiline(&mut self.hub.task_request).hint_text("Describe the task…").desired_rows(3).desired_width(f32::INFINITY).char_limit(4000));
-            ui.horizontal(|ui| {
-                let ready = self.hub.workflow.is_none() && self.chat.run.is_none() && self.hub.proposal.is_none() && !self.hub.task_request.trim().is_empty();
-                if ui.add_enabled(ready, primary("Ask · plan and review")).clicked() { self.start_task(ui.ctx(), TaskMode::Ask); }
-                if ui.add_enabled(ready && self.active.is_some(), egui::Button::new("Assist · propose edit")).clicked() { self.start_task(ui.ctx(), TaskMode::Assist); }
-                if self.preferences.allow_auto_buffer && ui.add_enabled(ready && self.active.is_some(), egui::Button::new("Auto · edit buffer")).clicked() {
+            ui.add(
+                TextEdit::multiline(&mut self.hub.task_request)
+                    .hint_text("Describe the task…")
+                    .desired_rows(3)
+                    .desired_width(f32::INFINITY)
+                    .char_limit(4000),
+            );
+            ui.horizontal_wrapped(|ui| {
+                let ready = self.hub.workflow.is_none()
+                    && self.chat.run.is_none()
+                    && self.hub.proposal.is_none()
+                    && !self.hub.task_request.trim().is_empty();
+                if ui
+                    .add_enabled(ready, primary("Ask · plan and review"))
+                    .clicked()
+                {
+                    self.start_task(ui.ctx(), TaskMode::Ask);
+                }
+                if ui
+                    .add_enabled(
+                        ready && self.active.is_some(),
+                        egui::Button::new("Assist · propose edit"),
+                    )
+                    .clicked()
+                {
+                    self.start_task(ui.ctx(), TaskMode::Assist);
+                }
+                if self.preferences.allow_auto_buffer
+                    && ui
+                        .add_enabled(
+                            ready && self.active.is_some(),
+                            egui::Button::new("Auto · edit buffer"),
+                        )
+                        .clicked()
+                {
                     self.start_task(ui.ctx(), TaskMode::Auto);
                 }
                 if let Some(run) = self.chat.run.as_ref().or(self.hub.reviewer.run.as_ref())
@@ -485,8 +565,14 @@ impl Editor {
                 }
             });
             if Provider::Claude.discover().is_some() {
-                ui.checkbox(&mut self.hub.independent_review, "Ask Claude to review the Codex plan")
-                    .on_hover_text("Sends the task text and generated plan to Claude in an isolated directory.");
+                checkbox(
+                    ui,
+                    &mut self.hub.independent_review,
+                    "Ask Claude to review the Codex plan",
+                )
+                .on_hover_text(
+                    "Sends the task text and generated plan to Claude in an isolated directory.",
+                );
             }
             if let Some(proposal) = &self.hub.proposal {
                 ui.separator();
@@ -499,7 +585,9 @@ impl Editor {
                     if ui.add(primary("Apply to editor buffer")).clicked() {
                         self.resolve_proposal(true);
                     }
-                    if ui.button("Reject").clicked() { self.resolve_proposal(false); }
+                    if ui.button("Reject").clicked() {
+                        self.resolve_proposal(false);
+                    }
                 });
             }
             ui.separator();
@@ -508,7 +596,9 @@ impl Editor {
             }
             if !self.hub.reviewer.messages.is_empty() {
                 ui.collapsing("Claude review", |ui| {
-                    for message in &self.hub.reviewer.messages { markdown(ui, &message.text); }
+                    for message in &self.hub.reviewer.messages {
+                        markdown(ui, &message.text);
+                    }
                 });
             }
             if self.hub.workflow.is_some() || !self.hub.tasks.is_empty() {
@@ -526,9 +616,11 @@ impl Editor {
             ui.label(muted("Open a workspace to keep project notes."));
             return;
         };
-        ui.label(muted(
-            "Local project notes are sent only when you explicitly include them in a task.",
+        ui.label(secondary(
+            "Choose whether these saved notes are included in an agent task.",
         ));
+        ui.add_space(16.0);
+        ui.label(secondary("Project notes"));
         ui.add(
             TextEdit::multiline(&mut self.hub.note)
                 .hint_text("Goals, decisions, and references…")
@@ -540,7 +632,8 @@ impl Editor {
             self.preferences.set_note(root, self.hub.note.clone());
             self.notice = Some((false, "Project notes saved locally".into()));
         }
-        ui.checkbox(
+        checkbox(
+            ui,
             &mut self.include_project_note,
             "Include saved notes in agent tasks",
         );
@@ -788,104 +881,164 @@ fn chat_box(
     context: impl FnOnce(&mut Ui),
     reset: &mut bool,
 ) -> bool {
-    ui.horizontal_wrapped(|ui| {
-        ui.label(RichText::new(chat.provider.label()).size(17.0).strong());
+    ui.horizontal(|ui| {
+        let (_, mark) = ui.allocate_space(egui::vec2(20.0, 28.0));
+        draw_icon(ui.painter(), mark.center(), Icon::Hub, ACCENT);
+        ui.label(RichText::new(chat.provider.label()).size(LEAD).strong());
         if chat.connected {
-            ui.label(RichText::new("Session active").small().color(SUCCESS));
+            let (_, dot) = ui.allocate_space(egui::vec2(10.0, 10.0));
+            ui.painter().circle_filled(dot.center(), 2.5, SUCCESS);
         }
-        if let Some(model) = &chat.model {
-            ui.label(muted(model));
-        }
-        if ui
-            .add_enabled(
-                chat.run.is_none() && !chat.messages.is_empty(),
-                egui::Button::new("New chat"),
-            )
-            .clicked()
-        {
-            *reset = true;
-        }
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if ui
+                .add_enabled(
+                    chat.run.is_none() && !chat.messages.is_empty(),
+                    egui::Button::new("New chat").frame(false),
+                )
+                .clicked()
+            {
+                *reset = true;
+            }
+        });
     });
     ui.label(muted(label));
-    if let Some((input, output)) = chat.usage {
-        ui.label(muted(format!(
-            "Last turn · {input} input / {output} output tokens"
-        )));
+    if let Some(model) = &chat.model {
+        ui.label(muted(model));
     }
-    ui.separator();
-    let height = (ui.available_height() - 145.0).max(35.0);
+    if let Some((input, output)) = chat.usage {
+        ui.label(muted(format!("{input} input / {output} output tokens")));
+    }
+    ui.add_space(16.0);
+    let history_height = (ui.available_height() - CHAT_COMPOSER_HEIGHT - 16.0).max(24.0);
     ScrollArea::vertical()
         .id_salt("chat-history")
-        .max_height(height)
+        .max_height(history_height)
         .auto_shrink([false, false])
         .stick_to_bottom(true)
         .show(ui, |ui| {
             if chat.messages.is_empty() {
-                ui.label(muted("Start a conversation."));
-            }
-            for message in &chat.messages {
-                let color = match message.author {
-                    "Error" => ERROR,
-                    "You" => TEXT,
-                    _ => ACCENT_HOVER,
-                };
-                Frame::new()
-                    .fill(if message.author == "You" {
-                        ELEVATED
+                ui.add_space(32.0);
+                ui.label(
+                    RichText::new(if available {
+                        "What are you working on?"
                     } else {
-                        INSET
+                        "Open a workspace"
                     })
-                    .inner_margin(Margin::same(9))
-                    .corner_radius(8)
-                    .show(ui, |ui| {
+                    .size(LEAD)
+                    .color(TEXT),
+                );
+                ui.add_space(8.0);
+                ui.add(
+                    egui::Label::new(secondary(if available {
+                        "Ask about your code or work through a change."
+                    } else {
+                        "Choose a project to give this conversation context."
+                    }))
+                    .wrap(),
+                );
+            }
+            for (index, message) in chat.messages.iter().enumerate() {
+                ui.push_id(index, |ui| {
+                    let is_user = message.author == "You";
+                    let color = if message.author == "Error" {
+                        ERROR
+                    } else if is_user {
+                        SECONDARY
+                    } else {
+                        ACCENT_HOVER
+                    };
+                    let frame = Frame::new()
+                        .fill(if is_user {
+                            ELEVATED
+                        } else {
+                            egui::Color32::TRANSPARENT
+                        })
+                        .inner_margin(Margin::same(12))
+                        .corner_radius(CONTROL_RADIUS);
+                    frame.show(ui, |ui| {
                         ui.set_width(ui.available_width());
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new(message.author).color(color).strong().small());
-                            if ui.small_button("Copy").clicked() {
-                                ui.ctx().copy_text(message.text.clone());
-                            }
+                            ui.label(
+                                RichText::new(message.author)
+                                    .size(SMALL)
+                                    .strong()
+                                    .color(color),
+                            );
+                            ui.add_space((ui.available_width() - 40.0).max(0.0));
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if ui
+                                    .add(egui::Button::new(muted("Copy")).frame(false))
+                                    .clicked()
+                                {
+                                    ui.ctx().copy_text(message.text.clone());
+                                }
+                            });
                         });
-                        if message.author == "You" || message.author == "Error" {
+                        ui.add_space(4.0);
+                        if is_user || message.author == "Error" {
                             ui.add(egui::Label::new(&message.text).wrap().selectable(true));
                         } else {
                             markdown(ui, &message.text);
                         }
                     });
+                    ui.add_space(12.0);
+                });
             }
             if !chat.partial.is_empty() {
                 markdown(ui, &chat.partial);
             }
             if chat.run.is_some() {
                 ui.horizontal(|ui| {
-                    ui.spinner();
+                    busy_indicator(ui);
                     ui.label(muted(chat.activity));
                 });
             }
         });
-    ui.separator();
-    ui.add_enabled(
-        available,
-        TextEdit::multiline(&mut chat.prompt)
-            .hint_text("Ask an agent…")
-            .desired_rows(3)
-            .char_limit(12_000)
-            .desired_width(f32::INFINITY)
-            .margin(Margin::same(8)),
-    );
-    ui.horizontal_wrapped(context);
-    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-        if let Some(run) = &chat.run {
-            if ui.button("Stop").clicked() {
-                run.cancel();
-                chat.activity = "Stopping";
-            }
-            false
-        } else {
-            ui.add_enabled(available && !chat.prompt.trim().is_empty(), primary("Send"))
-                .clicked()
-        }
-    })
-    .inner
+    ui.add_space(8.0);
+    Frame::new()
+        .fill(ELEVATED)
+        .inner_margin(Margin::same(12))
+        .corner_radius(PANEL_RADIUS)
+        .stroke(egui::Stroke::new(1.0_f32, CONTROL_BORDER))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.add_enabled(
+                available,
+                TextEdit::multiline(&mut chat.prompt)
+                    .frame(false)
+                    .hint_text("Ask about your code…")
+                    .desired_rows(3)
+                    .char_limit(12_000)
+                    .desired_width(f32::INFINITY)
+                    .margin(Margin::ZERO),
+            );
+            ui.add_space(8.0);
+            let footer = ui.available_rect_before_wrap();
+            let context_width = (footer.width() - 72.0).max(80.0);
+            let mut send = false;
+            ui.horizontal(|ui| {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(context_width, 28.0),
+                    Layout::left_to_right(Align::Center),
+                    |ui| {
+                        ui.set_min_width(context_width);
+                        ui.horizontal_wrapped(context);
+                    },
+                );
+                if let Some(run) = &chat.run {
+                    if ui.button("Stop").clicked() {
+                        run.cancel();
+                        chat.activity = "Stopping";
+                    }
+                } else {
+                    send = ui
+                        .add_enabled(available && !chat.prompt.trim().is_empty(), primary("Send"))
+                        .clicked();
+                }
+            });
+            send
+        })
+        .inner
 }
 
 fn markdown(ui: &mut Ui, text: &str) {
@@ -941,6 +1094,27 @@ fn code_block(ui: &mut Ui, text: &str, language: &str) {
                     .selectable(true),
             );
         });
+}
+
+#[cfg(test)]
+impl Editor {
+    pub(super) fn review_fixture(&mut self, screen: &str) {
+        self.hub.tab = match screen {
+            "tasks" => HubTab::Tasks,
+            "memory" => HubTab::Memory,
+            "skills" => HubTab::Skills,
+            _ => HubTab::Conversations,
+        };
+        self.hub.general = false;
+        if screen == "conversation" {
+            self.chat.messages.clear();
+            self.chat.push(
+                "You",
+                "Explain how the native window opens this workspace.".into(),
+            );
+            self.chat.push("Codex", "### Window setup\nThe entry point reads the workspace path and creates the window. The editor then loads the project folder.\n\n- Window dimensions are configured before startup.\n- The workspace path is passed to the editor.\n\n```rust\nlet root = args.next().map(PathBuf::from);\nEditor::new(&cc.egui_ctx, root);\n```\n\nYou can adjust the initial window size in main.rs.".into());
+        }
+    }
 }
 
 #[cfg(test)]

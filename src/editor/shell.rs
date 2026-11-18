@@ -8,9 +8,7 @@ use std::{
     thread,
 };
 
-use eframe::egui::{
-    self, CornerRadius, Id, Key, RichText, ScrollArea, Sense, Stroke, TextEdit, Ui,
-};
+use eframe::egui::{self, Id, Key, RichText, ScrollArea, Sense, Stroke, TextEdit, Ui};
 
 use super::{Editor, Pending, theme::*};
 use crate::workspace;
@@ -18,6 +16,7 @@ use crate::workspace;
 pub(super) struct Palette {
     query: String,
     focus: bool,
+    selected: usize,
     files: Vec<PathBuf>,
     results: mpsc::Receiver<Vec<PathBuf>>,
     stop: Arc<AtomicBool>,
@@ -44,6 +43,7 @@ impl Palette {
         Self {
             query: String::new(),
             focus: true,
+            selected: 0,
             files: Vec::new(),
             results,
             stop,
@@ -121,61 +121,131 @@ impl Editor {
 
     pub(super) fn welcome(&mut self, ui: &mut Ui) {
         let area = ui.available_rect_before_wrap();
-        let centered_width = (area.width() - 36.0).clamp(180.0, 520.0);
-        let pad = ((area.width() - centered_width) / 2.0).max(0.0);
-        let side = area.left() + pad;
-        let height = area.height();
-        let top = area.top() + (height * 0.12).clamp(10.0, 78.0);
-        let content = egui::Rect::from_min_max(
-            egui::pos2(side, top),
-            egui::pos2(side + centered_width, area.bottom()),
+        let width = (area.width() - 64.0).clamp(240.0, 640.0).min(area.width());
+        let top = if area.height() < 560.0 {
+            24.0
+        } else {
+            (area.height() * 0.16).clamp(24.0, 120.0)
+        };
+        let rect = egui::Rect::from_min_size(
+            egui::pos2(area.center().x - width * 0.5, area.top() + top),
+            egui::vec2(width, (area.height() - top).max(1.0)),
         );
-        ui.scope_builder(egui::UiBuilder::new().max_rect(content), |ui| {
-            ui.set_width(centered_width);
+        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+            ui.set_width(width);
             ScrollArea::vertical().id_salt("welcome").show(ui, |ui| {
-                constellation(ui, centered_width, (height * 0.24).clamp(74.0, 132.0));
-                ui.add_space(12.0);
                 let title = self
                     .root
                     .as_deref()
                     .map(workspace::filename)
-                    .unwrap_or_else(|| TITLE.into());
-                ui.label(RichText::new(title).size(32.0).strong().color(TEXT));
-                ui.label(muted(if self.root.is_some() {
-                    "Open a file from the Explorer or search the project."
-                } else {
-                    "Open a local project, edit code, or work with Codex."
-                }));
-                ui.add_space(8.0);
-                ui.horizontal_wrapped(|ui| {
-                    if ui.add(primary("Open folder")).clicked() {
-                        self.pick_workspace(ui.ctx());
-                    }
-                    if ui.button("Open file").clicked() {
-                        self.pick_file();
-                    }
-                    if ui.button("Create project").clicked() {
-                        self.pick_new_project(ui.ctx());
-                    }
-                    if ui.button("Agent Hub").clicked() {
-                        self.hub_open = true;
+                    .unwrap_or_else(|| format!("Welcome to {BRAND}"));
+                ui.horizontal(|ui| {
+                    let text_width = if width > 400.0 { width - 132.0 } else { width };
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(text_width, 112.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            ui.add_space(12.0);
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(title)
+                                        .size(if width > 480.0 { DISPLAY } else { 28.0 })
+                                        .strong(),
+                                )
+                                .wrap(),
+                            );
+                            ui.add_space(8.0);
+                            ui.add(
+                                egui::Label::new(secondary(if self.root.is_some() {
+                                    "Find a file or explore your workspace."
+                                } else {
+                                    "Open a project or continue your work."
+                                }))
+                                .wrap(),
+                            );
+                        },
+                    );
+                    if width > 400.0 {
+                        constellation(ui, 112.0, 104.0);
                     }
                 });
+                ui.add_space(24.0);
+                ui.add_space(4.0);
+                if row(
+                    ui,
+                    "Open folder",
+                    if cfg!(target_os = "macos") {
+                        "⌘ O"
+                    } else {
+                        "Ctrl O"
+                    },
+                    false,
+                )
+                .clicked()
+                {
+                    self.pick_workspace(ui.ctx());
+                }
+                if row(
+                    ui,
+                    "Open file",
+                    if cfg!(target_os = "macos") {
+                        "⇧ ⌘ O"
+                    } else {
+                        "Ctrl Shift O"
+                    },
+                    false,
+                )
+                .clicked()
+                {
+                    self.pick_file();
+                }
+                if row(ui, "Create project", "", false).clicked() {
+                    self.pick_new_project(ui.ctx());
+                }
+                if row(ui, "Open Agent Hub", "", false).clicked() {
+                    self.hub_open = true;
+                }
                 if !self.preferences.recent.is_empty() {
-                    ui.add_space(12.0);
-                    card().show(ui, |ui| {
-                        ui.set_min_width((centered_width - 30.0).max(1.0));
-                        ui.label(RichText::new("Recent projects").strong());
-                        for root in self.preferences.recent.clone() {
-                            if ui
-                                .add(egui::Button::new(workspace::filename(&root)).frame(false))
-                                .on_hover_text(root.display().to_string())
-                                .clicked()
-                            {
-                                self.request(Pending::OpenWorkspace(root), ui.ctx());
-                            }
+                    ui.add_space(28.0);
+                    section(ui, "Recent projects", "");
+                    for root in self.preferences.recent.clone() {
+                        let response = ui.add_sized(
+                            [ui.available_width(), 52.0],
+                            egui::Button::new("").frame(false),
+                        );
+                        let painter = ui.painter_at(response.rect);
+                        if response.hovered() {
+                            painter.rect_filled(response.rect, CONTROL_RADIUS, HOVER);
                         }
-                    });
+                        draw_icon(
+                            &painter,
+                            response.rect.left_center() + egui::vec2(16.0, 0.0),
+                            Icon::Explorer,
+                            MUTED,
+                        );
+                        let text_rect = response.rect.shrink2(egui::vec2(40.0, 4.0));
+                        let painter = painter.with_clip_rect(text_rect);
+                        painter.text(
+                            text_rect.left_top() + egui::vec2(0.0, 5.0),
+                            egui::Align2::LEFT_TOP,
+                            workspace::filename(&root),
+                            egui::FontId::proportional(BODY),
+                            TEXT,
+                        );
+                        let displayed = root.display().to_string();
+                        let displayed = displayed.strip_prefix(r"\\?\").unwrap_or(&displayed);
+                        painter.text(
+                            text_rect.left_top() + egui::vec2(0.0, 26.0),
+                            egui::Align2::LEFT_TOP,
+                            displayed,
+                            egui::FontId::proportional(SMALL),
+                            MUTED,
+                        );
+                        if response.clicked() {
+                            self.request(Pending::OpenWorkspace(root.clone()), ui.ctx());
+                        }
+                        response.on_hover_text(root.display().to_string());
+                    }
                 }
             });
         });
@@ -185,36 +255,30 @@ impl Editor {
         if !self.settings_open {
             return;
         }
-        egui::Window::new("Settings")
-            .open(&mut self.settings_open)
-            .collapsible(false)
-            .resizable(false)
-            .show(ctx, |ui| {
-                ui.label(RichText::new("Appearance").strong());
-                let font_changed = ui
-                    .add(
-                        egui::Slider::new(&mut self.preferences.font_size, 11.0..=26.0)
-                            .step_by(1.0)
-                            .text("Editor font size"),
-                    )
-                    .changed();
-                let contrast_changed = ui
-                    .checkbox(
-                        &mut self.preferences.high_contrast,
-                        "High contrast controls",
-                    )
-                    .changed();
-                if font_changed || contrast_changed {
-                    install(
-                        ctx,
-                        self.preferences.font_size,
-                        self.preferences.high_contrast,
-                    );
-                }
-                ui.label(muted(THEME_NAME));
-                ui.separator();
-                ui.checkbox(&mut self.preferences.allow_auto_buffer, "Allow opt-in Auto buffer edits")
-                    .on_hover_text("Auto can apply one proposed replacement in the active editor buffer. Saving remains manual.");
+        egui::Window::new("Settings").open(&mut self.settings_open)
+            .collapsible(false).resizable(false).fixed_size(egui::vec2(440.0,(ctx.content_rect().height()-140.0).clamp(260.0,440.0)))
+            .vscroll(true)
+            .constrain_to(ctx.content_rect().shrink(16.0))
+            .show(ctx,|ui| {
+                ui.set_max_width(440.0);
+                section(ui,"Appearance","Tune the workspace for long editing sessions.");
+                ui.horizontal(|ui| {
+                    ui.label(secondary("Theme"));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui|{ui.label(RichText::new(THEME_NAME).color(ACCENT));});
+                });
+                ui.add_space(12.0);
+                ui.label(secondary("Editor font size"));
+                let font_changed=ui.add(egui::Slider::new(&mut self.preferences.font_size,11.0..=26.0).step_by(1.0).suffix(" pt")).changed();
+                ui.add_space(12.0);
+                let contrast_changed=checkbox(ui,&mut self.preferences.high_contrast,"High contrast controls").changed();
+                checkbox(ui,&mut self.preferences.compact,"Compact interface");
+                checkbox(ui,&mut self.preferences.reduce_motion,"Reduce motion");
+                ui.add_space(20.0);
+                section(ui,"Agent editing","Control how proposed changes reach your editor.");
+                checkbox(ui,&mut self.preferences.allow_auto_buffer,"Allow Auto buffer edits")
+                    .on_hover_text("Auto applies an eligible replacement to the active buffer. Use Save to write the file.");
+                if font_changed || contrast_changed {install(ctx,self.preferences.font_size,self.preferences.high_contrast);}
+                ui.add_space(8.0);
             });
     }
 
@@ -225,84 +289,142 @@ impl Editor {
         if let Ok(files) = palette.results.try_recv() {
             palette.files = files;
         }
-        let modal = egui::Modal::new(Id::new("command-palette")).show(ctx, |ui| {
-            ui.set_width((ctx.content_rect().width() * 0.56).clamp(280.0, 660.0));
-            ui.heading("Quick access");
-            let input = ui.add(
-                TextEdit::singleline(&mut palette.query)
-                    .hint_text("Open a file   ·   > command   ·   @ project   ·   ? ask Codex")
-                    .desired_width(f32::INFINITY)
-                    .char_limit(12_000),
-            );
-            if std::mem::take(&mut palette.focus) {
-                input.request_focus();
-            }
-            let query = palette.query.trim();
-            let mut choices = Vec::new();
-            if let Some(prompt) = query.strip_prefix('?') {
-                if self.root.is_some() && !prompt.trim().is_empty() {
-                    choices.push((
-                        Selection::Ask(prompt.trim().to_owned()),
-                        "Ask Codex in this workspace".to_owned(),
-                    ));
+        let palette_width = (ctx.content_rect().width() * 0.60).clamp(360.0, 680.0);
+        let area = egui::Modal::default_area(Id::new("command-palette")).anchor(
+            egui::Align2::CENTER_TOP,
+            egui::vec2(0.0, ctx.content_rect().height() * 0.15),
+        );
+        let modal = egui::Modal::new(Id::new("command-palette"))
+            .frame(modal_frame())
+            .area(area)
+            .show(ctx, |ui| {
+                ui.set_width(palette_width);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Quick access").strong().size(LEAD));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(muted("Esc"));
+                    });
+                });
+                ui.add_space(12.0);
+                let down = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::ArrowDown));
+                let up = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::ArrowUp));
+                let confirm = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Enter));
+                let input = ui.add(
+                    TextEdit::singleline(&mut palette.query)
+                        .hint_text("Find a file, > command, @ project, ? Codex")
+                        .margin(egui::Margin::same(10))
+                        .desired_width(f32::INFINITY)
+                        .char_limit(12_000),
+                );
+                if std::mem::take(&mut palette.focus) {
+                    input.request_focus();
                 }
-            } else if let Some(filter) = query.strip_prefix('@') {
-                let filter = filter.trim().to_lowercase();
-                choices.extend(self.preferences.recent.iter().filter_map(|root| {
-                    let title = workspace::filename(root);
-                    title
-                        .to_lowercase()
-                        .contains(&filter)
-                        .then(|| (Selection::Project(root.clone()), title))
-                }));
-            } else if query.is_empty() || query.starts_with('>') {
-                let filter = query.trim_start_matches('>').trim().to_lowercase();
-                choices.extend(
-                    ACTIONS
-                        .iter()
-                        .filter(|(_, label)| label.to_lowercase().contains(&filter))
-                        .map(|(action, label)| (Selection::Action(*action), (*label).to_owned())),
-                );
-            } else if let Some(root) = &self.root {
-                let filter = query.to_lowercase().replace('\\', "/");
-                choices.extend(
-                    palette
-                        .files
-                        .iter()
-                        .filter_map(|file| {
-                            let label = file
-                                .strip_prefix(root)
-                                .unwrap_or(file)
-                                .display()
-                                .to_string();
-                            label
-                                .to_lowercase()
-                                .replace('\\', "/")
-                                .contains(&filter)
-                                .then(|| (Selection::File(file.clone()), label))
-                        })
-                        .take(30),
-                );
-            }
-            if input.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) && !choices.is_empty()
-            {
-                return Some(choices.remove(0).0);
-            }
-            ScrollArea::vertical()
-                .max_height(300.0)
-                .show(ui, |ui| {
-                    if choices.is_empty() {
-                        ui.label(muted("No matching items."));
+                if input.changed() {
+                    palette.selected = 0;
+                }
+                ui.add_space(8.0);
+                let query = palette.query.trim();
+                let mut choices = Vec::new();
+                if let Some(prompt) = query.strip_prefix('?') {
+                    if self.root.is_some() && !prompt.trim().is_empty() {
+                        choices.push((
+                            Selection::Ask(prompt.trim().to_owned()),
+                            "Ask Codex in this workspace".to_owned(),
+                        ));
                     }
-                    for (choice, label) in choices {
-                        if ui.button(label).clicked() {
-                            return Some(choice);
+                } else if let Some(filter) = query.strip_prefix('@') {
+                    let filter = filter.trim().to_lowercase();
+                    choices.extend(self.preferences.recent.iter().filter_map(|root| {
+                        let title = workspace::filename(root);
+                        title
+                            .to_lowercase()
+                            .contains(&filter)
+                            .then(|| (Selection::Project(root.clone()), title))
+                    }));
+                } else if query.is_empty() || query.starts_with('>') {
+                    let filter = query.trim_start_matches('>').trim().to_lowercase();
+                    choices.extend(
+                        ACTIONS
+                            .iter()
+                            .filter(|(_, label)| label.to_lowercase().contains(&filter))
+                            .map(|(action, label)| {
+                                (Selection::Action(*action), (*label).to_owned())
+                            }),
+                    );
+                } else if let Some(root) = &self.root {
+                    let filter = query.to_lowercase().replace('\\', "/");
+                    choices.extend(
+                        palette
+                            .files
+                            .iter()
+                            .filter_map(|file| {
+                                let label = file
+                                    .strip_prefix(root)
+                                    .unwrap_or(file)
+                                    .display()
+                                    .to_string();
+                                label
+                                    .to_lowercase()
+                                    .replace('\\', "/")
+                                    .contains(&filter)
+                                    .then(|| (Selection::File(file.clone()), label))
+                            })
+                            .take(30),
+                    );
+                }
+                if !choices.is_empty() {
+                    if down {
+                        palette.selected = (palette.selected + 1) % choices.len();
+                    }
+                    if up {
+                        palette.selected = (palette.selected + choices.len() - 1) % choices.len();
+                    }
+                    palette.selected = palette.selected.min(choices.len() - 1);
+                    if confirm {
+                        return Some(choices.remove(palette.selected).0);
+                    }
+                }
+                let selected = ScrollArea::vertical()
+                    .id_salt("palette-results")
+                    .max_height((ctx.content_rect().height() * 0.48).min(360.0))
+                    .show(ui, |ui| {
+                        if choices.is_empty() {
+                            ui.add_space(16.0);
+                            ui.label(secondary("No matching items."));
+                            ui.add_space(16.0);
                         }
-                    }
-                    None
-                })
-                .inner
-        });
+                        for (index, (choice, label)) in choices.into_iter().enumerate() {
+                            let hint = match &choice {
+                                Selection::File(_) => "File",
+                                Selection::Project(_) => "Project",
+                                Selection::Ask(_) => "Codex",
+                                Selection::Action(Action::OpenFolder) => "Ctrl O",
+                                Selection::Action(Action::OpenFile) => "Ctrl Shift O",
+                                Selection::Action(Action::Save) => "Ctrl S",
+                                Selection::Action(_) => "Command",
+                            };
+                            let response = row(ui, &label, hint, index == palette.selected);
+                            if (up || down) && index == palette.selected {
+                                response.scroll_to_me(None);
+                            }
+                            if response.clicked() {
+                                return Some(choice);
+                            }
+                        }
+                        None
+                    })
+                    .inner;
+                ui.add_space(8.0);
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label(muted("↑ ↓  Navigate"));
+                    ui.label(muted("Enter  Open"));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(muted(">  Commands"));
+                    });
+                });
+                selected
+            });
         match modal.inner {
             Some(Selection::Action(action)) => match action {
                 Action::OpenFolder => self.pick_workspace(ctx),
@@ -332,77 +454,57 @@ impl Editor {
 fn constellation(ui: &mut Ui, width: f32, height: f32) {
     let (rect, _) = ui.allocate_at_least(egui::vec2(width, height), Sense::hover());
     let painter = ui.painter_at(rect);
-    painter.rect(
-        rect,
-        CornerRadius::same(PANEL_RADIUS),
-        INSET,
-        Stroke::new(1.0_f32, BORDER),
-        egui::StrokeKind::Inside,
-    );
-    for column in 1..12 {
-        let x = rect.left() + rect.width() * column as f32 / 12.0;
-        painter.vline(
-            x,
-            rect.y_range().shrink(1.0),
-            Stroke::new(1.0_f32, BORDER.gamma_multiply(0.44)),
-        );
-    }
-    for row in 1..5 {
-        let y = rect.top() + rect.height() * row as f32 / 5.0;
-        painter.hline(
-            rect.x_range().shrink(1.0),
-            y,
-            Stroke::new(1.0_f32, BORDER.gamma_multiply(0.44)),
-        );
-    }
     let center = rect.center();
-    let radius = height * 0.25;
-    for ring in 0..3 {
-        let size = radius * (1.45 + ring as f32 * 0.39);
-        let points = (0..=80)
+    for ring in 0..2 {
+        let points = (0..=64)
             .map(|i| {
-                let angle = i as f32 / 80.0 * std::f32::consts::TAU;
-                let x = angle.cos() * size * 2.0;
-                let y = angle.sin() * size * 0.38;
-                center + egui::vec2(x * 0.96 + y * 0.27, -x * 0.27 + y * 0.96)
+                let a = i as f32 / 64.0 * std::f32::consts::TAU;
+                let x = a.cos() * (42.0 + ring as f32 * 9.0);
+                let y = a.sin() * (16.0 + ring as f32 * 4.0);
+                center + egui::vec2(x * 0.9 + y * 0.43, -x * 0.43 + y * 0.9)
             })
             .collect();
         painter.add(egui::Shape::line(
             points,
-            Stroke::new(1.0_f32, ACCENT.gamma_multiply(0.34 - ring as f32 * 0.08)),
+            Stroke::new(1.0_f32, ACCENT.gamma_multiply(0.28)),
         ));
     }
-    painter.circle_filled(center, radius, SURFACE);
-    painter.circle_stroke(
-        center,
-        radius,
-        Stroke::new(1.0_f32, ACCENT.gamma_multiply(0.68)),
-    );
-    for i in 0..49 {
-        let x = rect.left() + 12.0 + (rect.width() - 24.0) * ((i * 67 + 19) % 101) as f32 / 101.0;
-        let y = rect.top() + 8.0 + (rect.height() - 16.0) * ((i * 43 + 11) % 103) as f32 / 103.0;
-        let point = egui::pos2(x, y);
-        if point.distance(center) < radius + 4.0 {
-            continue;
-        }
-        if i % 8 == 0 {
-            painter.line_segment(
-                [point - egui::vec2(3.0, 0.0), point + egui::vec2(3.0, 0.0)],
-                Stroke::new(1.0_f32, ACCENT),
-            );
-            painter.line_segment(
-                [point - egui::vec2(0.0, 3.0), point + egui::vec2(0.0, 3.0)],
-                Stroke::new(1.0_f32, ACCENT),
-            );
-        } else {
-            painter.circle_filled(point, 1.0, MUTED.gamma_multiply(0.5));
-        }
+    painter.circle_filled(center, 19.0, CANVAS);
+    draw_icon(&painter, center, Icon::Brand, ACCENT);
+    painter.circle_filled(center + egui::vec2(43.0, -16.0), 2.5, ACCENT);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::preferences::Preferences;
+    use super::*;
+
+    #[test]
+    fn command_palette_arrows_choose_the_selected_command() {
+        let ctx = egui::Context::default();
+        let mut editor = Editor::new(&ctx, None, Preferences::default());
+        editor.open_palette(&ctx);
+        editor.palette.as_mut().unwrap().query = "> toggle".into();
+        let input = |events| egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1366.0, 768.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        let press = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let _ = ctx.run(input(vec![]), |ctx| editor.render(ctx));
+        let _ = ctx.run(input(vec![press(Key::ArrowDown)]), |ctx| editor.render(ctx));
+        let _ = ctx.run(input(vec![press(Key::Enter)]), |ctx| editor.render(ctx));
+        assert!(editor.palette.is_none());
+        assert!(editor.hub_open);
+        assert!(!editor.preferences.tools_open);
     }
-    painter.text(
-        center,
-        egui::Align2::CENTER_CENTER,
-        BRAND.chars().next().unwrap_or_default().to_string(),
-        egui::FontId::monospace(24.0),
-        ACCENT_HOVER,
-    );
 }

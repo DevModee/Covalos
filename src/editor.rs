@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod visual_tests;
+
 mod files;
 mod hub;
 mod panels;
@@ -115,6 +118,7 @@ impl Editor {
     }
 
     fn new(ctx: &egui::Context, root: Option<PathBuf>, preferences: Preferences) -> Self {
+        theme::install_fonts(ctx);
         theme::install(ctx, preferences.font_size, preferences.high_contrast);
         let mut editor = Self {
             root: None,
@@ -499,6 +503,15 @@ impl Editor {
 
 impl Editor {
     fn render(&mut self, ctx: &egui::Context) {
+        let focused = ctx.input(|input| input.focused);
+        ctx.style_mut(|style| {
+            style.animation_time = if focused && !self.preferences.reduce_motion {
+                theme::HOVER_SECONDS
+            } else {
+                0.0
+            };
+            style.spacing.interact_size.y = if self.preferences.compact { 24.0 } else { 28.0 };
+        });
         self.poll();
         self.poll_chats(ctx);
         self.tools.poll();
@@ -528,7 +541,9 @@ impl Editor {
             if self.preferences.assistant_open {
                 self.assistant_panel(ctx);
             }
-            egui::CentralPanel::default().show(ctx, |ui| self.editor_panel(ui));
+            egui::CentralPanel::default()
+                .frame(egui::Frame::new().fill(theme::CANVAS))
+                .show(ctx, |ui| self.editor_panel(ui));
         }
         self.settings_window(ctx);
         self.palette_modal(ctx);
