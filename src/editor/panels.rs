@@ -567,7 +567,8 @@ impl Editor {
                 ui.label(muted("Workspace access · Read only"));
                 ui.add_space(6.0);
                 ui.separator();
-                let chat_height = (ui.available_height() - 115.0).max(80.0);
+                let composer_height = if self.active.is_some() { 143.0 } else { 115.0 };
+                let chat_height = (ui.available_height() - composer_height).max(80.0);
                 ui.scope(|ui| {
                     ui.set_height(chat_height);
                     ScrollArea::vertical().id_salt("chat").stick_to_bottom(true).show(ui, |ui| {
@@ -602,6 +603,10 @@ impl Editor {
                 ui.separator();
                 ui.add_enabled(self.root.is_some(), TextEdit::multiline(&mut self.prompt)
                     .hint_text("Ask Codex…").desired_rows(3).char_limit(12_000).desired_width(f32::INFINITY));
+                if self.active.is_some() {
+                    ui.checkbox(&mut self.include_active_file, "Include active file")
+                        .on_hover_text("Send up to 24 KB from the current buffer with this message, including unsaved edits.");
+                }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if let Some(run) = &self.run {
                         if ui.button("Stop").clicked() {

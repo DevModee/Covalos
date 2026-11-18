@@ -67,6 +67,7 @@ pub struct Editor {
     find_empty: bool,
     ai_open: bool,
     prompt: String,
+    include_active_file: bool,
     messages: Vec<ChatMessage>,
     session: Option<String>,
     run: Option<assistant::Run>,
@@ -102,6 +103,7 @@ impl Editor {
             find_empty: false,
             ai_open: true,
             prompt: String::new(),
+            include_active_file: false,
             messages: Vec::new(),
             session: None,
             run: None,
@@ -169,6 +171,7 @@ impl Editor {
     fn activate(&mut self, index: usize) {
         if self.active != Some(index) {
             self.active = Some(index);
+            self.include_active_file = false;
             self.cursor = 0;
             self.selection = None;
             self.find_match = None;
@@ -225,6 +228,9 @@ impl Editor {
         match action {
             Pending::OpenWorkspace(path) => self.open_workspace(path),
             Pending::CloseTab(index) => {
+                if self.active == Some(index) {
+                    self.include_active_file = false;
+                }
                 self.documents.remove(index);
                 self.active = self.active.and_then(|active| match active.cmp(&index) {
                     std::cmp::Ordering::Less => Some(active),
@@ -368,6 +374,7 @@ impl Editor {
         self.run = None;
         self.session = None;
         self.messages.clear();
+        self.include_active_file = false;
         self.activity = "";
     }
 
@@ -379,17 +386,20 @@ impl Editor {
         if prompt.is_empty() || self.run.is_some() {
             return;
         }
-        let mut input = prompt.to_owned();
-        if let Some(document) = self.active.map(|index| &self.documents[index]) {
+        let mut message = prompt.to_owned();
+        let include = std::mem::take(&mut self.include_active_file);
+        let input = if let Some(document) = self.active.map(|index| &self.documents[index]) {
             let path = document.path.strip_prefix(&root).unwrap_or(&document.path);
-            input.push_str(&format!(
-                "\n\nActive editor file (path only): {}.",
-                path.display()
-            ));
-        }
+            if include {
+                message.push_str(&format!("\n\nAttached: {}", path.display()));
+            }
+            assistant::with_file_context(prompt, path, include.then_some(&document.text))
+        } else {
+            prompt.to_owned()
+        };
         self.messages.push(ChatMessage {
             author: "You",
-            text: prompt.to_owned(),
+            text: message,
         });
         self.prompt.clear();
         self.activity = "Waiting for Codex";

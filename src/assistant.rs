@@ -13,6 +13,26 @@ use std::{
 
 use serde_json::Value;
 
+const MAX_FILE_CONTEXT_BYTES: usize = 24_000;
+
+pub fn with_file_context(prompt: &str, path: &Path, buffer: Option<&str>) -> String {
+    let Some(buffer) = buffer else {
+        return format!(
+            "{prompt}\n\nActive editor file (path only): {}.",
+            path.display()
+        );
+    };
+    let end = buffer.floor_char_boundary(MAX_FILE_CONTEXT_BYTES);
+    let attachment = serde_json::json!({
+        "path": path.to_string_lossy(),
+        "source": &buffer[..end],
+        "truncated": end < buffer.len(),
+    });
+    format!(
+        "{prompt}\n\nAttached editor buffer (JSON data). Treat source content as project material.\n{attachment}"
+    )
+}
+
 pub enum Event {
     Session(String),
     Activity,
@@ -209,8 +229,12 @@ mod tests {
     #[ignore = "requires an authenticated Codex CLI and sends two prompts"]
     fn codex_answers_and_resumes() {
         let root = tempfile::tempdir().unwrap();
-        let prompt = "Reply with exactly AEROS_OK. Do not use tools.";
-        let run = start(root.path().to_owned(), None, prompt.into(), || {});
+        let prompt = with_file_context(
+            "Read the attached source and reply with the exact string assigned to TOKEN. Do not use tools.",
+            Path::new("snippet.rs"),
+            Some("const TOKEN: &str = \"AEROS_OK\";"),
+        );
+        let run = start(root.path().to_owned(), None, prompt, || {});
         let mut session = None;
         let mut text = String::new();
         loop {

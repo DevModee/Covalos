@@ -18,7 +18,7 @@ The editor opens UTF-8 files up to 1 MiB, preserves a UTF-8 BOM and consistent C
 
 Install Codex CLI and sign in with `codex login`. The editor uses the CLI binary on PATH or the executable specified by `AEROS_CODEX_BIN`, then reuses its configured account and model. Open a workspace, enter a prompt in the Codex panel, and select Send. Follow-up prompts continue the current Codex session until you select New chat or switch workspaces.
 
-Codex runs with read-only workspace access. The prompt includes the active file's path when a file is open. Codex sees saved files on disk.
+Codex runs with read-only workspace access. The prompt includes the active file path when a file is open. Enable **Include active file** to send up to 24 KB of the current buffer, including unsaved edits, with that message. Direct filesystem inspection depends on the local CLI sandbox.
 
 ## Verify
 
