@@ -273,7 +273,11 @@ impl Editor {
 
     pub(super) fn status_bar(&mut self, ctx: &Context) {
         TopBottomPanel::bottom("status")
-            .exact_height(STATUS_HEIGHT)
+            .exact_height(if self.preferences.identity.mascot {
+                STATUS_HEIGHT.max(self.preferences.identity.mascot_size + 4.0)
+            } else {
+                STATUS_HEIGHT
+            })
             .frame(panel_frame(Margin::symmetric(12, 2)))
             .show(ctx, |ui| {
                 let rect = ui.available_rect_before_wrap();
@@ -288,6 +292,15 @@ impl Editor {
                         .layout(Layout::left_to_right(Align::Center)),
                     |ui| {
                         ui.set_clip_rect(left);
+                        let mood = self.agent_mood(ui.input(|i| i.focused));
+                        if self.identity.mascot(
+                            ui,
+                            &self.preferences.identity,
+                            mood,
+                            self.preferences.reduce_motion,
+                        ) {
+                            self.hub_open = true;
+                        }
                         if let Some((error, text)) = &self.notice {
                             ui.add(
                                 egui::Label::new(muted(text).color(if *error {
@@ -531,6 +544,15 @@ impl Editor {
         if self.documents.is_empty() {
             self.welcome(ui);
             return;
+        }
+        if self.preferences.identity.behind_code {
+            let mood = self.agent_mood(ui.input(|i| i.focused));
+            self.identity.paint(
+                ui,
+                ui.available_rect_before_wrap(),
+                &self.preferences.identity,
+                mood,
+            );
         }
         self.tabs(ui);
         if self.find_open {
