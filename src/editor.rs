@@ -6,6 +6,7 @@ mod brands;
 mod companion;
 mod files;
 mod hub;
+mod icons;
 mod identity;
 mod mascot;
 mod motion;
