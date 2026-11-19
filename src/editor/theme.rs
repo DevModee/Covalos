@@ -75,6 +75,7 @@ pub(super) struct Palette {
     pub(super) error: Color32,
     pub(super) warning: Color32,
     pub(super) syntax_string: Color32,
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(super) syntax_number: Color32,
 }
 impl Theme {
@@ -192,6 +193,10 @@ thread_local! {
     // egui renders on its UI thread. Each test and viewport installs its palette before drawing.
     static ACTIVE_THEME: std::cell::Cell<Theme> = const { std::cell::Cell::new(Theme::Dark) };
 }
+pub(super) fn active() -> Theme {
+    ACTIVE_THEME.with(|theme| theme.get())
+}
+
 pub(super) fn colors() -> Palette {
     ACTIVE_THEME.with(|theme| theme.get().colors())
 }
@@ -281,6 +286,7 @@ pub(super) fn install(ctx: &Context, font_size: f32, high_contrast: bool, theme:
     visuals.selection.bg_fill = colors().accent_bg;
     visuals.selection.stroke = Stroke::new(1.0_f32, colors().accent);
     visuals.hyperlink_color = colors().accent_hover;
+    visuals.text_cursor.stroke = Stroke::new(2.0_f32, colors().accent_hover);
     visuals.indent_has_left_vline = true;
     visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, border);
     visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, colors().text);
@@ -652,21 +658,6 @@ pub(super) fn draw_icon(painter: &egui::Painter, center: egui::Pos2, icon: Icon,
             line(p(-1.0, 0.0), p(-4.0, 2.0));
             line(p(1.0, 3.0), p(5.0, 3.0));
         }
-    }
-}
-
-pub(super) fn syntax_color(color: Color32, italic: bool) -> Color32 {
-    let [r, g, b, _] = color.to_array();
-    if italic || r.max(g).max(b) < 145 {
-        colors().muted
-    } else if r.abs_diff(g) < 20 && g.abs_diff(b) < 20 {
-        colors().text
-    } else if b > r || (b > g && r > g) {
-        colors().accent_hover
-    } else if g > r && g > b {
-        colors().syntax_string
-    } else {
-        colors().syntax_number
     }
 }
 

@@ -640,7 +640,6 @@ impl Editor {
             state.store(ui.ctx(), id);
         }
         let focus = std::mem::take(&mut self.focus_editor);
-        let syntax = &self.syntax;
         let language = doc
             .path
             .extension()
@@ -655,39 +654,37 @@ impl Editor {
                     let (_, gutter) = ui.allocate_space(egui::vec2(44.0, 1.0));
                     let mut layouter = |ui: &Ui, buffer: &dyn egui::TextBuffer, _width: f32| {
                         let text = buffer.as_str();
-                        let mut job = if language.is_empty() || text.len() > 256 * 1024 {
-                            LayoutJob::simple(
+                        let font_size = TextStyle::Monospace.resolve(ui.style()).size;
+                        let line_height = font_size
+                            * if ui.spacing().interact_size.y <= 24.0 {
+                                COMPACT_CODE_LINE_HEIGHT
+                            } else {
+                                CODE_LINE_HEIGHT
+                            };
+                        let mut job = if language.is_empty() || text.len() > 512 * 1024 {
+                            let mut job = LayoutJob::simple(
                                 text.to_owned(),
                                 TextStyle::Monospace.resolve(ui.style()),
                                 colors().text,
                                 f32::INFINITY,
-                            )
+                            );
+                            for section in &mut job.sections {
+                                section.format.line_height = Some(line_height);
+                            }
+                            job
                         } else {
-                            egui_extras::syntax_highlighting::highlight(
+                            super::syntax::highlight(
                                 ui.ctx(),
-                                ui.style(),
-                                syntax,
                                 text,
                                 &language,
+                                font_size,
+                                line_height,
                             )
                         };
-                        let font_size = TextStyle::Monospace.resolve(ui.style()).size;
-                        for section in &mut job.sections {
-                            section.format.font_id.size = font_size;
-                            section.format.line_height = Some(
-                                font_size
-                                    * if ui.spacing().interact_size.y <= 24.0 {
-                                        COMPACT_CODE_LINE_HEIGHT
-                                    } else {
-                                        CODE_LINE_HEIGHT
-                                    },
-                            );
-                            section.format.color =
-                                syntax_color(section.format.color, section.format.italics);
-                        }
                         job.wrap.max_width = f32::INFINITY;
                         ui.fonts_mut(|fonts| fonts.layout_job(job))
                     };
+                    let decorations = ui.painter().add(egui::Shape::Noop);
                     let output = TextEdit::multiline(&mut doc.text)
                         .id(id)
                         .code_editor()
@@ -726,20 +723,117 @@ impl Editor {
                     }
                     let clip = ui.clip_rect();
                     let rows = &output.galley.rows;
-                    let first = rows.partition_point(|row| {
-                        output.galley_pos.y + row.pos.y + row.size.y < clip.top()
-                    });
-                    for (index, row) in rows.iter().enumerate().skip(first) {
-                        let top = output.galley_pos.y + row.pos.y;
-                        if top > clip.bottom() {
-                            break;
+                    let origin = output.galley_pos;
+                    let palette = super::syntax::current();
+                    let font = TextStyle::Monospace.resolve(ui.style());
+                    let space = ui.fonts_mut(|f| f.glyph_width(&font, ' ')).max(1.0);
+                    let caret = output.galley.pos_from_cursor(CCursor::new(self.cursor));
+                    let active_row = rows
+                        .iter()
+                        .position(|row| {
+                            caret.center().y >= row.pos.y
+                                && caret.center().y < row.pos.y + row.size.y
+                        })
+                        .unwrap_or(0);
+                    let first =
+                        rows.partition_point(|row| origin.y + row.pos.y + row.size.y < clip.top());
+                    let last = rows
+                        .partition_point(|row| origin.y + row.pos.y < clip.bottom())
+                        .min(rows.len());
+                    let mut shapes = Vec::new();
+                    // Active line band across gutter and text.
+                    if let Some(row) = rows.get(active_row) {
+                        let y = origin.y + row.pos.y;
+                        shapes.push(egui::Shape::rect_filled(
+                            egui::Rect::from_min_max(
+                                egui::pos2(gutter.left(), y),
+                                egui::pos2(clip.right(), y + row.size.y),
+                            ),
+                            0,
+                            palette.active_line,
+                        ));
+                    }
+                    // Indent guides at columns 0, 4, 8… inside leading whitespace. Blank
+                    // lines inherit the indentation of the next non-blank line.
+                    let scan_end = (last + 200).min(rows.len());
+                    let scan_start = first.min(active_row);
+                    let mut levels = vec![0usize; scan_end.saturating_sub(scan_start)];
+                    let mut carry = 0;
+                    for i in (scan_start..scan_end).rev() {
+                        let level = leading_indent(&rows[i]).unwrap_or(carry);
+                        carry = level;
+                        levels[i - scan_start] = level;
+                    }
+                    let level_at = |i: usize| levels.get(i.wrapping_sub(scan_start)).copied();
+                    let active_col = level_at(active_row)
+                        .unwrap_or(0)
+                        .checked_sub(1)
+                        .map(|c| c - c % 4);
+                    let in_block = |i: usize| -> bool {
+                        let Some(col) = active_col else { return false };
+                        let (lo, hi) = if i <= active_row {
+                            (i, active_row)
+                        } else {
+                            (active_row, i)
+                        };
+                        (lo..=hi).all(|r| level_at(r).is_none_or(|l| l > col))
+                    };
+                    for i in first..last {
+                        let row = &rows[i];
+                        let level = level_at(i).unwrap_or(0);
+                        let y = origin.y + row.pos.y;
+                        let mut col = 0;
+                        while col < level {
+                            let x = (origin.x + col as f32 * space + space * 0.5).round() + 0.5;
+                            let lit = Some(col) == active_col && in_block(i);
+                            shapes.push(egui::Shape::line_segment(
+                                [egui::pos2(x, y), egui::pos2(x, y + row.size.y)],
+                                egui::Stroke::new(
+                                    1.0_f32,
+                                    if lit {
+                                        palette.guide_active
+                                    } else {
+                                        palette.guide
+                                    },
+                                ),
+                            ));
+                            col += 4;
                         }
+                    }
+                    // Bracket matching around the caret.
+                    if let Some((a, b)) = matching_bracket(&doc.text, self.cursor) {
+                        for index in [a, b] {
+                            let r = output
+                                .galley
+                                .pos_from_cursor(CCursor::new(index))
+                                .translate(origin.to_vec2());
+                            let rect =
+                                egui::Rect::from_min_size(r.min, egui::vec2(space, r.height()));
+                            shapes.push(egui::Shape::rect_filled(
+                                rect,
+                                2,
+                                palette.bracket.gamma_multiply(0.16),
+                            ));
+                            shapes.push(egui::Shape::rect_stroke(
+                                rect,
+                                2,
+                                egui::Stroke::new(1.0_f32, palette.bracket.gamma_multiply(0.7)),
+                                egui::StrokeKind::Inside,
+                            ));
+                        }
+                    }
+                    ui.painter().set(decorations, egui::Shape::Vec(shapes));
+                    for (index, row) in rows.iter().enumerate().take(last).skip(first) {
                         ui.painter().text(
-                            egui::pos2(gutter.right() - 5.0, top),
+                            egui::pos2(gutter.right() - 5.0, origin.y + row.pos.y),
                             egui::Align2::RIGHT_TOP,
                             (index + 1).to_string(),
-                            TextStyle::Monospace.resolve(ui.style()),
-                            colors().disabled,
+                            font.clone(),
+                            if index == active_row {
+                                colors().secondary
+                            } else {
+                                colors().disabled
+                            },
                         );
                     }
                 });
@@ -1082,6 +1176,59 @@ impl Editor {
             }
         }
     }
+}
+
+/// Leading indentation of a laid-out row in columns, or `None` for a blank row.
+fn leading_indent(row: &egui::epaint::text::Row) -> Option<usize> {
+    let mut n = 0;
+    for glyph in &row.glyphs {
+        match glyph.chr {
+            ' ' => n += 1,
+            '\t' => n += 4,
+            '\n' | '\r' => return None,
+            _ => return Some(n),
+        }
+    }
+    None
+}
+
+/// Character indices of the bracket pair touching `cursor`, if any.
+fn matching_bracket(text: &str, cursor: usize) -> Option<(usize, usize)> {
+    const LIMIT: usize = 40_000;
+    const PAIRS: [(char, char); 3] = [('(', ')'), ('[', ']'), ('{', '}')];
+    let start = cursor.saturating_sub(1);
+    let window: Vec<char> = text.chars().skip(start).take(2).collect();
+    for (offset, c) in window.iter().enumerate() {
+        let at = start + offset;
+        if let Some(&(open, close)) = PAIRS.iter().find(|(o, _)| o == c) {
+            let mut depth = 0usize;
+            for (i, ch) in text.chars().skip(at).take(LIMIT).enumerate() {
+                if ch == open {
+                    depth += 1;
+                } else if ch == close {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some((at, at + i));
+                    }
+                }
+            }
+        } else if let Some(&(open, close)) = PAIRS.iter().find(|(_, cl)| cl == c) {
+            let base = at.saturating_sub(LIMIT);
+            let before: Vec<char> = text.chars().skip(base).take(at - base + 1).collect();
+            let mut depth = 0usize;
+            for (i, ch) in before.iter().enumerate().rev() {
+                if *ch == close {
+                    depth += 1;
+                } else if *ch == open {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return Some((base + i, at));
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 const TREE_INDENT: f32 = 14.0;

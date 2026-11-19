@@ -14,6 +14,7 @@ mod preferences;
 mod sessions;
 mod shell;
 mod skills;
+mod syntax;
 mod theme;
 mod tools;
 
