@@ -19,7 +19,7 @@ pub(super) const CONTROL_RADIUS: u8 = 6;
 pub(super) const CHECKBOX_RADIUS: u8 = 2;
 pub(super) const PANEL_RADIUS: u8 = 10;
 pub(super) const MODAL_RADIUS: u8 = 12;
-pub(super) const HOVER_SECONDS: f32 = 0.10;
+pub(super) const HOVER_SECONDS: f32 = super::motion::HOVER;
 pub(super) const MIN_EDITOR_WIDTH: f32 = 320.0;
 pub(super) const CHAT_COMPOSER_HEIGHT: f32 = 132.0;
 pub(super) const CODE_LINE_HEIGHT: f32 = 1.4;
@@ -382,13 +382,23 @@ pub(super) fn row(ui: &mut egui::Ui, label: &str, detail: &str, selected: bool) 
     response
         .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::SelectableLabel, true, label));
     let painter = ui.painter_at(response.rect);
-    let fill = if selected {
-        colors().accent_bg
-    } else if response.hovered() {
-        colors().hover
-    } else {
-        Color32::TRANSPARENT
-    };
+    let hovered = super::motion::state(
+        ui,
+        response.id.with("row-hover"),
+        response.hovered(),
+        super::motion::HOVER,
+    );
+    let selection = super::motion::state(
+        ui,
+        response.id.with("row-selection"),
+        selected,
+        super::motion::CONTROL,
+    );
+    let fill = super::motion::blend(
+        colors().hover.gamma_multiply(hovered),
+        colors().accent_bg,
+        selection,
+    );
     painter.rect_filled(response.rect, 4, fill);
     if selected {
         painter.rect_filled(
@@ -461,7 +471,6 @@ pub(super) enum Icon {
     Minimize,
     Maximize,
     Restore,
-    File,
     Code,
     Terminal,
 }
@@ -478,6 +487,8 @@ pub(super) fn icon_button(
             .selected(selected)
             .min_size(egui::vec2(32.0, 32.0)),
     );
+    #[cfg(test)]
+    super::motion::record(ui, label, response.rect);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
     let hover = response.hovered() || response.has_focus();
     let color = if selected || hover {
@@ -519,7 +530,18 @@ pub(super) fn icon_button(
             egui::StrokeKind::Inside,
         );
     }
-    draw_icon(ui.painter(), response.rect.center(), icon, color);
+    let press = super::motion::state(
+        ui,
+        response.id.with("press"),
+        response.is_pointer_button_down_on(),
+        super::motion::CONTROL,
+    );
+    draw_icon(
+        ui.painter(),
+        response.rect.center() + egui::vec2(0.0, press * 0.75),
+        icon,
+        color,
+    );
     response.on_hover_text(label)
 }
 
@@ -619,13 +641,6 @@ pub(super) fn draw_icon(painter: &egui::Painter, center: egui::Pos2, icon: Icon,
             line(p(-2.0, -5.0), p(5.0, -5.0));
             line(p(5.0, -5.0), p(5.0, 2.0));
         }
-        Icon::File => outline(&[
-            (-5.0, -7.0),
-            (1.0, -7.0),
-            (5.0, -3.0),
-            (5.0, 7.0),
-            (-5.0, 7.0),
-        ]),
         Icon::Code => {
             line(p(-3.0, -4.0), p(-7.0, 0.0));
             line(p(-7.0, 0.0), p(-3.0, 4.0));
@@ -638,15 +653,6 @@ pub(super) fn draw_icon(painter: &egui::Painter, center: egui::Pos2, icon: Icon,
             line(p(-1.0, 0.0), p(-4.0, 2.0));
             line(p(1.0, 3.0), p(5.0, 3.0));
         }
-    }
-}
-
-pub(super) fn file_color(path: &std::path::Path) -> Color32 {
-    match path.extension().and_then(|e| e.to_str()) {
-        Some("rs" | "toml") => colors().syntax_number,
-        Some("js" | "ts" | "tsx") => colors().warning,
-        Some("md") => colors().secondary,
-        _ => colors().muted,
     }
 }
 
@@ -675,23 +681,7 @@ pub(super) fn modal_frame() -> Frame {
 
 /// Short surface entry; input remains available throughout the transition.
 pub(super) fn enter(ui: &mut egui::Ui, id: egui::Id) {
-    let duration = ui.style().animation_time;
-    if duration <= 0.0 {
-        return;
-    }
-    let frame = ui.ctx().cumulative_frame_nr();
-    let now = ui.input(|i| i.time);
-    let start = ui.ctx().data_mut(|data| {
-        let (last, started) = data.get_temp::<(u64, f64)>(id).unwrap_or((frame, now));
-        let started = if frame > last + 1 { now } else { started };
-        data.insert_temp(id, (frame, started));
-        started
-    });
-    let progress = ((now - start) / f64::from(duration)).clamp(0.0, 1.0) as f32;
-    ui.multiply_opacity(egui::emath::easing::cubic_out(progress));
-    if progress < 1.0 {
-        ui.ctx().request_repaint();
-    }
+    super::motion::enter(ui, id, super::motion::VIEW);
 }
 
 #[cfg(test)]

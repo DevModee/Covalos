@@ -1,0 +1,10 @@
+{
+  "gpu_presentation_latency": "not measured",
+  "input_source": "scripted native RawInput hook; desktop automation unavailable",
+  "input_to_cpu_paint_ms_p50": 5.3225,
+  "input_to_cpu_paint_ms_p95": 55.0972,
+  "physical_input_latency": "not measured",
+  "render_cpu_ms_p50": 2.9898,
+  "render_cpu_ms_p95": 5.757499999999999,
+  "render_samples": 2586
+}

@@ -1,0 +1,93 @@
+{
+  "package": "vscode-icons",
+  "source": "https://github.com/vscode-icons/vscode-icons",
+  "license": "MIT; see LICENSE. Product logos remain trademarks of their owners.",
+  "selected_over": "Material Icon Theme was evaluated; vscode-icons supplies both open/closed default folders and a cohesive small file-type subset.",
+  "rasterization": "Unchanged SVG sources rasterized to 64px PNG using @resvg/resvg-js; embedded, cached textures; 17pt presentation.",
+  "icons": [
+    {
+      "name": "default_file",
+      "source": "https://raw.githubusercontent.com/vscode-icons/vscode-icons/master/icons/default_file.svg"
+    },
+    {
+      "name": "default_folder",
+      "source": "https://raw.githubusercontent.com/vscode-icons/vscode-icons/master/icons/default_folder.svg"
+    },
+    {
+      "name": "default_folder_opened",
+      "source": "https://raw.githubusercontent.com/vscode-icons/vscode-icons/master/icons/default_folder_opened.svg"
+    },
+    {
+      "name": "file_type_rust",
+      "source": "https://raw.githubusercontent.com/vscode-icons/vscode-icons/master/icons/file_type_rust.svg"
+    },
+    {
+      "name": "file_type_csharp",
+      "source": "https://raw.githubusercontent.com/vscode-icons/vscode-icons/master/icons/file_type_csharp.svg"
+    },
+    {
+      "name": "file_type_js_official",
+      "source": "https://raw.githubusercontent.com/vscode-icons/vscode-icons/master/icons/file_type_js_official.svg"
+    },
+    {
+      "name": "file_type_typescript_official",
+      "source": "https://raw.githubusercontent.com/vscode-icons/vscode-icons/master/icons/file_type_typescript_official.svg"
+    },
+    {
+      "name": "file_type_python",
+      "source": "https://raw.githubusercontent.com/vscode-icons/vscode-icons/master/icons/file_type_python.svg"
+    },
+    {
+      "name": "file_type_java",
+      "source": "https://raw.githubusercontent.com/vscode-icons/vscode-icons/master/icons/file_type_java.svg"
+    },
+    {
+      "name": "file_type_cpp",
+      "source": "https://raw.githubusercontent.com/vscode-icons/vscode-icons/master/icons/file_type_cpp.svg"
+    },
+    {
+      "name": "file_type_html",
+      "source": "https://raw.githubusercontent.com/vscode-icons/vscode-icons/master/icons/file_type_html.svg"
+    },
+    {
+      "name": "file_type_css",
+      "source": "https://raw.githubusercontent.com/vscode-icons/vscode-icons/master/icons/file_type_css.svg"
+    },
+    {
+      "name": "file_type_json",
+      "source": "https://raw.githubusercontent.com/vscode-icons/vscode-icons/master/icons/file_type_json.svg"
+    },
+    {
+      "name": "file_type_yaml",
+      "source": "https://raw.githubusercontent.com/vscode-icons/vscode-icons/master/icons/file_type_yaml.svg"
+    },
+    {
+      "name": "file_type_markdown",
+      "source": "https://raw.githubusercontent.com/vscode-icons/vscode-icons/master/icons/file_type_markdown.svg"
+    },
+    {
+      "name": "file_type_toml",
+      "source": "https://raw.githubusercontent.com/vscode-icons/vscode-icons/master/icons/file_type_toml.svg"
+    },
+    {
+      "name": "file_type_git",
+      "source": "https://raw.githubusercontent.com/vscode-icons/vscode-icons/master/icons/file_type_git.svg"
+    },
+    {
+      "name": "file_type_config",
+      "source": "https://raw.githubusercontent.com/vscode-icons/vscode-icons/master/icons/file_type_config.svg"
+    },
+    {
+      "name": "file_type_npm",
+      "source": "https://raw.githubusercontent.com/vscode-icons/vscode-icons/master/icons/file_type_npm.svg"
+    },
+    {
+      "name": "file_type_docker",
+      "source": "https://raw.githubusercontent.com/vscode-icons/vscode-icons/master/icons/file_type_docker.svg"
+    },
+    {
+      "name": "file_type_sln",
+      "source": "https://raw.githubusercontent.com/vscode-icons/vscode-icons/master/icons/file_type_sln.svg"
+    }
+  ]
+}

@@ -1,0 +1,96 @@
+{
+  "method": "3 independent launches/case; 1.5s warmup; 1s CPU window; own temporary profile; no window/input automation",
+  "warning": "CPU is percent of one core. Compare matching focus states only; WaitForInputIdle does not measure first fully presented frame. Physical input/GPU timing not measured.",
+  "samples": [
+    {
+      "case": "previous-orbital",
+      "trial": 1,
+      "working_set_mib": 96.390625,
+      "cpu_percent_of_one_core": 18.742589180265785,
+      "wait_for_input_idle_ms": 358.14780000509927,
+      "focus_before": true,
+      "focus_after": true,
+      "measurement_seconds": 1.0003953999985242
+    },
+    {
+      "case": "previous-orbital",
+      "trial": 2,
+      "working_set_mib": 98.6796875,
+      "cpu_percent_of_one_core": 18.74593588111635,
+      "wait_for_input_idle_ms": 363.9017999958014,
+      "focus_before": true,
+      "focus_after": false,
+      "measurement_seconds": 1.0002167999991798
+    },
+    {
+      "case": "previous-orbital",
+      "trial": 3,
+      "working_set_mib": 97.1171875,
+      "cpu_percent_of_one_core": 18.746211390609307,
+      "wait_for_input_idle_ms": 346.5771999981371,
+      "focus_before": true,
+      "focus_after": true,
+      "measurement_seconds": 1.000202100003662
+    },
+    {
+      "case": "precision-orbital",
+      "trial": 1,
+      "working_set_mib": 108.6953125,
+      "cpu_percent_of_one_core": 0.0,
+      "wait_for_input_idle_ms": 1097.8545999969356,
+      "focus_before": false,
+      "focus_after": false,
+      "measurement_seconds": 1.0005343000011635
+    },
+    {
+      "case": "precision-orbital",
+      "trial": 2,
+      "working_set_mib": 108.59765625,
+      "cpu_percent_of_one_core": 0.0,
+      "wait_for_input_idle_ms": 974.8715999958222,
+      "focus_before": false,
+      "focus_after": false,
+      "measurement_seconds": 1.0005821000013384
+    },
+    {
+      "case": "precision-orbital",
+      "trial": 3,
+      "working_set_mib": 93.984375,
+      "cpu_percent_of_one_core": 0.0,
+      "wait_for_input_idle_ms": 289.4233999977587,
+      "focus_before": false,
+      "focus_after": false,
+      "measurement_seconds": 1.0007810999959474
+    },
+    {
+      "case": "precision-off",
+      "trial": 1,
+      "working_set_mib": 98.25390625,
+      "cpu_percent_of_one_core": 0.0,
+      "wait_for_input_idle_ms": 985.1849999977276,
+      "focus_before": false,
+      "focus_after": false,
+      "measurement_seconds": 1.0004236999957357
+    },
+    {
+      "case": "precision-off",
+      "trial": 2,
+      "working_set_mib": 92.45703125,
+      "cpu_percent_of_one_core": 0.0,
+      "wait_for_input_idle_ms": 287.5906000044779,
+      "focus_before": false,
+      "focus_after": false,
+      "measurement_seconds": 1.0004527999990387
+    },
+    {
+      "case": "precision-off",
+      "trial": 3,
+      "working_set_mib": 98.4140625,
+      "cpu_percent_of_one_core": 0.0,
+      "wait_for_input_idle_ms": 1091.1577999941073,
+      "focus_before": false,
+      "focus_after": false,
+      "measurement_seconds": 1.0004886000024271
+    }
+  ]
+}

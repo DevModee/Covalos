@@ -229,7 +229,7 @@ impl Editor {
                         ui.add_space(8.0);
                         if icon_button(ui, Icon::Settings, "Settings", self.settings_open).clicked()
                         {
-                            self.settings_open = true;
+                            self.settings_open = !self.settings_open;
                         }
                         if rect.width() > 1000.0 {
                             if ui.selectable_label(self.hub_open, "Agent Hub").clicked() {
@@ -273,11 +273,7 @@ impl Editor {
 
     pub(super) fn status_bar(&mut self, ctx: &Context) {
         TopBottomPanel::bottom("status")
-            .exact_height(if self.preferences.identity.mascot {
-                STATUS_HEIGHT.max(self.preferences.identity.mascot_size + 4.0)
-            } else {
-                STATUS_HEIGHT
-            })
+            .exact_height(STATUS_HEIGHT)
             .frame(panel_frame(Margin::symmetric(12, 2)))
             .show(ctx, |ui| {
                 let rect = ui.available_rect_before_wrap();
@@ -292,15 +288,6 @@ impl Editor {
                         .layout(Layout::left_to_right(Align::Center)),
                     |ui| {
                         ui.set_clip_rect(left);
-                        let mood = self.agent_mood(ui.input(|i| i.focused));
-                        if self.identity.mascot(
-                            ui,
-                            &self.preferences.identity,
-                            mood,
-                            self.preferences.reduce_motion,
-                        ) {
-                            self.companion.open = true;
-                        }
                         let (running, waiting) = self.companion.counts();
                         if running + waiting > 0
                             && ui
@@ -394,10 +381,56 @@ impl Editor {
                         self.hub_open = true;
                     }
                     if icon_button(ui, Icon::Settings, "Settings", self.settings_open).clicked() {
-                        self.settings_open = true;
+                        self.settings_open = !self.settings_open;
                     }
                 });
             });
+    }
+
+    pub(super) fn luma_dock(&mut self, ui: &mut Ui) {
+        if !self.preferences.identity.mascot {
+            return;
+        }
+        let full = ui.available_rect_before_wrap();
+        let height = (self.preferences.identity.mascot_size + 24.0).max(80.0);
+        if full.height() < height + 70.0 {
+            return;
+        }
+        let footer =
+            egui::Rect::from_min_max(egui::pos2(full.left(), full.bottom() - height), full.max);
+        ui.painter().hline(
+            footer.x_range().shrink(4.0),
+            footer.top(),
+            egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.6)),
+        );
+        let mut dock = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt("luma-dock")
+                .max_rect(footer.shrink2(egui::vec2(2.0, 8.0)))
+                .layout(Layout::left_to_right(Align::Center)),
+        );
+        dock.set_clip_rect(footer);
+        let mood = self.agent_mood(ui.input(|i| i.focused));
+        if self.identity.mascot(
+            &mut dock,
+            &self.preferences.identity,
+            mood,
+            self.preferences.reduce_motion,
+        ) {
+            self.companion.open = true;
+        }
+        dock.vertical(|ui| {
+            ui.add_space(6.0);
+            ui.label(RichText::new("Luma").strong().color(colors().secondary));
+            ui.add(egui::Label::new(muted(mood.name())).truncate());
+            if ui
+                .add(egui::Button::new(muted("Companion ↗")).frame(false))
+                .clicked()
+            {
+                self.companion.open = true;
+            }
+        });
+        ui.set_max_height((full.height() - height - 12.0).max(1.0));
     }
 
     pub(super) fn sidebar(&mut self, ctx: &Context) {
@@ -406,6 +439,7 @@ impl Editor {
             .width_range(155.0..=340.0)
             .frame(panel_frame(Margin::same(PANEL_PADDING)))
             .show(ctx, |ui| {
+                self.luma_dock(ui);
                 ui.horizontal(|ui| {
                     let label = match self.sidebar {
                         Sidebar::Files => "Explorer",
@@ -717,6 +751,7 @@ impl Editor {
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     ui.horizontal(|ui| {
+                        let mut indicator = None;
                         for (index, document) in self.documents.iter().enumerate() {
                             let selected = self.active == Some(index);
                             let name = workspace::filename(&document.path);
@@ -733,17 +768,18 @@ impl Editor {
                             let width = (label_width + 72.0).clamp(128.0, 232.0);
                             let response = ui
                                 .add_sized([width, TAB_HEIGHT], egui::Button::new("").frame(false));
+                            #[cfg(test)]
+                            super::motion::record(ui, format!("Tab {}", name), response.rect);
                             let painter = ui.painter_at(response.rect);
                             if selected {
                                 painter.rect_filled(response.rect, 0, colors().canvas);
                             } else if response.hovered() {
                                 painter.rect_filled(response.rect, 0, colors().hover);
                             }
-                            draw_icon(
-                                &painter,
+                            super::assets::file(
+                                ui,
                                 response.rect.left_center() + egui::vec2(18.0, 0.0),
-                                Icon::Code,
-                                file_color(&document.path),
+                                &document.path,
                             );
                             let text_rect = egui::Rect::from_min_max(
                                 response.rect.left_top() + egui::vec2(34.0, 0.0),
@@ -761,11 +797,7 @@ impl Editor {
                                 },
                             );
                             if selected {
-                                painter.hline(
-                                    response.rect.x_range().shrink(14.0),
-                                    response.rect.bottom() - 1.0,
-                                    egui::Stroke::new(2.0_f32, colors().accent),
-                                );
+                                indicator = Some(response.rect);
                             }
                             let close_rect = egui::Rect::from_center_size(
                                 response.rect.right_center() - egui::vec2(16.0, 0.0),
@@ -811,6 +843,25 @@ impl Editor {
                             }
                             response.on_hover_text(document.path.display().to_string());
                             close_response.on_hover_text("Close tab");
+                        }
+                        if let Some(rect) = indicator {
+                            let left = super::motion::value(
+                                ui.ctx(),
+                                Id::new("active-tab-left"),
+                                rect.left() + 14.0,
+                                super::motion::PANEL,
+                            );
+                            let right = super::motion::value(
+                                ui.ctx(),
+                                Id::new("active-tab-right"),
+                                rect.right() - 14.0,
+                                super::motion::PANEL,
+                            );
+                            ui.painter().hline(
+                                left..=right,
+                                rect.bottom() - 1.0,
+                                egui::Stroke::new(2.0_f32, colors().accent),
+                            );
                         }
                     });
                 });
@@ -875,18 +926,60 @@ impl Editor {
                     - MIN_EDITOR_WIDTH,
             )
             .clamp(240.0, 520.0);
+        let id = Id::new("assistant-panel-motion");
+        let progress = super::motion::value(
+            ctx,
+            id,
+            if self.preferences.assistant_open {
+                1.0
+            } else {
+                0.0
+            },
+            super::motion::PANEL,
+        );
+        let previous = ctx.data_mut(|d| {
+            let previous = d.get_temp::<f32>(id.with("previous")).unwrap_or(progress);
+            d.insert_temp(id.with("previous"), progress);
+            previous
+        });
+        if progress <= 0.001 {
+            return;
+        }
+        let desired = self.preferences.assistant_width.min(max_width).max(240.0);
+        let animating = progress < 0.999 || previous < 0.999;
         let panel = SidePanel::right("assistant")
-            .default_width(self.preferences.assistant_width.min(max_width))
-            .width_range(240.0..=max_width)
-            .frame(panel_frame(Margin::same(12)))
-            .show(ctx, |ui| self.workspace_chat(ui));
-        let width = panel.response.rect.width();
+            .default_width(desired)
+            .frame(panel_frame(Margin::same(12)));
+        let panel = if animating {
+            panel
+                .exact_width((desired * progress).max(1.0))
+                .resizable(false)
+        } else {
+            panel.width_range(240.0..=max_width)
+        };
+        let result = panel.show(ctx, |ui| {
+            ui.set_min_width(ui.available_width());
+            let origin = ui.available_rect_before_wrap().min;
+            let rect = egui::Rect::from_min_size(
+                origin,
+                egui::vec2((desired - 24.0).max(1.0), ui.available_height()),
+            );
+            let mut content = ui.new_child(
+                egui::UiBuilder::new()
+                    .id_salt("assistant-content")
+                    .max_rect(rect),
+            );
+            content.set_clip_rect(ui.clip_rect());
+            content.multiply_opacity(progress);
+            self.workspace_chat(&mut content);
+        });
+        let width = result.response.rect.width();
         ctx.layer_painter(egui::LayerId::background()).vline(
-            panel.response.rect.left(),
-            panel.response.rect.y_range(),
+            result.response.rect.left(),
+            result.response.rect.y_range(),
             egui::Stroke::new(1.0_f32, colors().border),
         );
-        if width + 1.0 < max_width {
+        if !animating && width + 1.0 < max_width {
             self.preferences.assistant_width = width;
         }
     }
@@ -1034,8 +1127,31 @@ fn tree(
                 if entry.directory {
                     let response =
                         egui::CollapsingHeader::new(RichText::new(name).color(colors().text))
+                            .icon(|ui, openness, response| {
+                                super::assets::paint(
+                                    ui,
+                                    egui::Rect::from_center_size(
+                                        response.rect.center(),
+                                        egui::vec2(17.0, 17.0),
+                                    ),
+                                    if openness > 0.5 {
+                                        "default_folder_opened"
+                                    } else {
+                                        "default_folder"
+                                    },
+                                )
+                            })
                             .id_salt(&entry.path)
                             .show(ui, |ui| tree(ui, root, &entry.path, active, directories));
+                    #[cfg(test)]
+                    super::motion::record(
+                        ui,
+                        format!(
+                            "Folder {}",
+                            entry.path.strip_prefix(root).unwrap().display()
+                        ),
+                        response.header_response.rect,
+                    );
                     response.header_response.context_menu(|ui| {
                         if let Some(action) = tree_menu(ui, root, &entry.path, true) {
                             selected = Some(action);
@@ -1052,11 +1168,12 @@ fn tree(
                         active == Some(entry.path.as_path()),
                     )
                     .on_hover_text(entry.path.display().to_string());
-                    draw_icon(
-                        ui.painter(),
+                    #[cfg(test)]
+                    super::motion::record(ui, format!("File {}", name), response.rect);
+                    super::assets::file(
+                        ui,
                         response.rect.left_center() + egui::vec2(17.0, 0.0),
-                        Icon::File,
-                        file_color(&entry.path),
+                        &entry.path,
                     );
                     if response.clicked() {
                         selected = Some(TreeAction::Open(entry.path.clone()));

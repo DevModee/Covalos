@@ -34,6 +34,7 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
         settle: usize,
         requested: bool,
         hook: Option<std::process::Child>,
+        approval_seen: Option<Instant>,
         deadline: Instant,
     }
     impl Drop for Review {
@@ -105,6 +106,7 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
             }
             self.settle = 0;
             self.requested = false;
+            self.approval_seen = None;
         }
     }
     impl eframe::App for Review {
@@ -172,9 +174,17 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
             let settle_frames = if self.stage == 12 || self.stage == 14 {
                 65
             } else {
-                5
+                30
             };
-            if self.settle > settle_frames && !self.requested {
+            if self.stage == 12 && self.hook.is_some() && self.editor.companion.counts().1 > 0 {
+                self.approval_seen.get_or_insert_with(Instant::now);
+            }
+            let approval_ready = self.stage != 12
+                || self.hook.is_none()
+                || self
+                    .approval_seen
+                    .is_some_and(|at| at.elapsed() > Duration::from_millis(350));
+            if self.settle > settle_frames && !self.requested && approval_ready {
                 ctx.send_viewport_cmd(ViewportCommand::Screenshot(UserData::default()));
                 self.requested = true;
             }
@@ -249,6 +259,7 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
                 settle: 0,
                 requested: false,
                 hook: None,
+                approval_seen: None,
                 deadline: Instant::now() + Duration::from_secs(90),
             }))
         }),
@@ -397,6 +408,311 @@ fn capture_recovered_conversation() -> Result<(), Box<dyn std::error::Error>> {
                 frames: 0,
                 requested: false,
                 deadline: Instant::now() + Duration::from_secs(30),
+            }))
+        }),
+    )?;
+    Ok(())
+}
+
+#[test]
+#[ignore = "native pointer/keyboard integration and motion captures; uses only a temporary project"]
+#[cfg(windows)]
+fn capture_precision_interactions() -> Result<(), Box<dyn std::error::Error>> {
+    use eframe::egui::{
+        Event, Key, Modifiers, PointerButton, UserData, ViewportBuilder, ViewportCommand,
+    };
+    use winit::platform::windows::EventLoopBuilderExtWindows;
+    enum Action {
+        Click(&'static str),
+        Key(Key, bool),
+        Text(&'static str),
+        Move(egui::Pos2),
+        Capture(&'static str),
+        Check(u8),
+        DismissFixtureCompanion,
+    }
+    use Action::*;
+    let steps = vec![
+        Capture("home-rest"),
+        Click("Folder src"),
+        Check(1),
+        Click("File main.rs"),
+        Check(2),
+        Text("// native interaction verification\n"),
+        Key(Key::S, true),
+        Check(3),
+        Key(Key::F, true),
+        Text("PathBuf"),
+        Check(4),
+        Capture("find-and-editor"),
+        Key(Key::Escape, false),
+        Click("File Cargo.toml"),
+        Check(5),
+        Capture("tab-before"),
+        Click("Tab main.rs"),
+        Capture("tab-moving"),
+        Capture("tab-settled"),
+        Key(Key::P, true),
+        Capture("palette-open"),
+        Key(Key::Escape, false),
+        Move(egui::pos2(88.0, 680.0)),
+        Capture("luma-hover"),
+        Click("Luma"),
+        Check(6),
+        Capture("companion"),
+        DismissFixtureCompanion,
+        Click("Settings"),
+        Click("Theme AEROS Light"),
+        Check(7),
+        Capture("light-settings"),
+        Click("Settings"),
+        Key(Key::W, true),
+        Key(Key::W, true),
+        Click("Settings"),
+        Click("Background selector"),
+        Click("Background Neural"),
+        Check(8),
+        Click("Settings"),
+        Move(egui::pos2(420.0, 290.0)),
+        Capture("neural-left"),
+        Move(egui::pos2(880.0, 480.0)),
+        Capture("neural-right"),
+        Click("Settings"),
+        Click("Background selector"),
+        Click("Background ASCII"),
+        Check(9),
+        Click("Settings"),
+        Move(egui::pos2(420.0, 290.0)),
+        Capture("ascii-left"),
+        Move(egui::pos2(880.0, 480.0)),
+        Capture("ascii-right"),
+    ];
+    struct Interaction {
+        editor: Editor,
+        steps: Vec<Action>,
+        stage: usize,
+        at: Instant,
+        queued: Vec<Event>,
+        requested: bool,
+        output: PathBuf,
+        deadline: Instant,
+        fixture: tempfile::TempDir,
+        render_ms: Vec<f64>,
+        input_ms: Vec<f64>,
+        input_at: Option<Instant>,
+    }
+    impl eframe::App for Interaction {
+        fn raw_input_hook(&mut self, _ctx: &egui::Context, input: &mut egui::RawInput) {
+            input.focused = true;
+            if !self.queued.is_empty() {
+                self.input_at = Some(Instant::now());
+            }
+            input.events.append(&mut self.queued);
+        }
+        fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+            assert!(
+                Instant::now() < self.deadline,
+                "native interaction timed out at {}",
+                self.stage
+            );
+            let render_start = Instant::now();
+            self.editor.update(ctx, frame);
+            self.render_ms
+                .push(render_start.elapsed().as_secs_f64() * 1000.0);
+            if let Some(input_at) = self.input_at.take() {
+                self.input_ms
+                    .push(input_at.elapsed().as_secs_f64() * 1000.0);
+            }
+            let image = ctx.input(|i| {
+                i.events.iter().find_map(|event| {
+                    if let Event::Screenshot { image, .. } = event {
+                        Some(image.clone())
+                    } else {
+                        None
+                    }
+                })
+            });
+            if let Some(image) = image
+                && let Capture(name) = self.steps[self.stage]
+            {
+                let bytes: Vec<_> = image.pixels.iter().flat_map(|p| p.to_array()).collect();
+                image::save_buffer(
+                    self.output.join(format!("{name}.png")),
+                    &bytes,
+                    image.size[0] as u32,
+                    image.size[1] as u32,
+                    image::ColorType::Rgba8,
+                )
+                .unwrap();
+                self.stage += 1;
+                self.at = Instant::now();
+                self.requested = false;
+            }
+            if self.stage == self.steps.len() {
+                self.render_ms.sort_by(f64::total_cmp);
+                self.input_ms.sort_by(f64::total_cmp);
+                let percentile = |v: &[f64], p: f64| v[((v.len() - 1) as f64 * p).round() as usize];
+                let metrics = serde_json::json!({"input_source":"scripted native RawInput hook; desktop automation unavailable","render_samples":self.render_ms.len(),"render_cpu_ms_p50":percentile(&self.render_ms,0.5),"render_cpu_ms_p95":percentile(&self.render_ms,0.95),"input_to_cpu_paint_ms_p50":percentile(&self.input_ms,0.5),"input_to_cpu_paint_ms_p95":percentile(&self.input_ms,0.95),"physical_input_latency":"not measured","gpu_presentation_latency":"not measured"});
+                std::fs::write(
+                    self.output.join("interaction-metrics.json"),
+                    serde_json::to_vec_pretty(&metrics).unwrap(),
+                )
+                .unwrap();
+                self.editor.force_close = true;
+                ctx.send_viewport_cmd(ViewportCommand::Close);
+                return;
+            }
+            let delay = match self.steps[self.stage] {
+                Capture("tab-moving") => 0.035,
+                Capture("tab-settled") => 0.4,
+                _ => 0.35,
+            };
+            if self.at.elapsed().as_secs_f32() < delay || self.requested {
+                ctx.request_repaint_after(Duration::from_millis(16));
+                return;
+            }
+            match self.steps[self.stage] {
+                Click(label) => {
+                    let rect = ctx
+                        .data(|d| {
+                            d.get_temp::<std::collections::HashMap<String, egui::Rect>>(
+                                egui::Id::new("native-review-targets"),
+                            )
+                        })
+                        .and_then(|m| m.get(label).copied())
+                        .unwrap_or_else(|| {
+                            panic!("missing rendered control {label} at {}", self.stage)
+                        });
+                    let pos = rect.center();
+                    self.queued.extend([
+                        Event::PointerMoved(pos),
+                        Event::PointerButton {
+                            pos,
+                            button: PointerButton::Primary,
+                            pressed: true,
+                            modifiers: Modifiers::NONE,
+                        },
+                        Event::PointerButton {
+                            pos,
+                            button: PointerButton::Primary,
+                            pressed: false,
+                            modifiers: Modifiers::NONE,
+                        },
+                    ]);
+                }
+                Key(key, command) => {
+                    let modifiers = if command {
+                        Modifiers::COMMAND
+                    } else {
+                        Modifiers::NONE
+                    };
+                    self.queued.push(Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                    });
+                    self.queued.push(Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed: false,
+                        repeat: false,
+                        modifiers,
+                    });
+                }
+                Text(text) => self.queued.push(Event::Text(text.into())),
+                Move(pos) => self.queued.push(Event::PointerMoved(pos)),
+                Capture(_) => {
+                    ctx.send_viewport_cmd(ViewportCommand::Screenshot(UserData::default()));
+                    self.requested = true;
+                    ctx.request_repaint();
+                    return;
+                }
+                Check(n) => match n {
+                    1 => assert!(self.editor.directories.keys().any(|p| p.ends_with("src"))),
+                    2 => assert!(
+                        self.editor
+                            .documents
+                            .iter()
+                            .any(|d| d.path.ends_with("main.rs"))
+                    ),
+                    3 => {
+                        let doc = &self.editor.documents[self.editor.active.unwrap()];
+                        assert!(!doc.dirty);
+                        assert!(
+                            std::fs::read_to_string(&doc.path)
+                                .unwrap()
+                                .contains("native interaction verification")
+                        );
+                    }
+                    4 => assert!(self.editor.find_match.is_some()),
+                    5 => assert!(
+                        self.editor.documents[self.editor.active.unwrap()]
+                            .path
+                            .ends_with("Cargo.toml")
+                    ),
+                    6 => assert!(self.editor.companion.open),
+                    7 => assert_eq!(self.editor.preferences.theme, theme::Theme::Light),
+                    8 => assert_eq!(
+                        self.editor.preferences.identity.background,
+                        identity::Background::Neural
+                    ),
+                    9 => assert_eq!(
+                        self.editor.preferences.identity.background,
+                        identity::Background::Ascii
+                    ),
+                    _ => unreachable!(),
+                },
+                DismissFixtureCompanion => self.editor.companion.open = false,
+            }
+            self.stage += 1;
+            self.at = Instant::now();
+            ctx.request_repaint();
+            let _ = &self.fixture;
+        }
+    }
+    let output = PathBuf::from(
+        std::env::var_os("AEROS_INTERACTION_DIR").ok_or("set AEROS_INTERACTION_DIR")?,
+    );
+    std::fs::create_dir_all(&output)?;
+    let fixture = tempfile::tempdir()?;
+    let root = fixture.path().join("aeros-project");
+    std::fs::create_dir_all(root.join("src"))?;
+    std::fs::write(root.join("src/main.rs"), SAMPLE)?;
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"aeros-project\"\n",
+    )?;
+    let options = eframe::NativeOptions {
+        viewport: ViewportBuilder::default()
+            .with_inner_size([1366.0, 768.0])
+            .with_decorations(false)
+            .with_title("AEROS Precision Interaction Review"),
+        event_loop_builder: Some(Box::new(|b| {
+            b.with_any_thread(true);
+        })),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "AEROS Precision Interaction Review",
+        options,
+        Box::new(move |cc| {
+            let mut editor = Editor::new(&cc.egui_ctx, Some(root), Preferences::default());
+            editor.preferences_path = Some(fixture.path().join("profile/editor.json"));
+            Ok(Box::new(Interaction {
+                editor,
+                steps,
+                stage: 0,
+                at: Instant::now(),
+                queued: Vec::new(),
+                requested: false,
+                output,
+                deadline: Instant::now() + Duration::from_secs(80),
+                fixture,
+                render_ms: Vec::new(),
+                input_ms: Vec::new(),
+                input_at: None,
             }))
         }),
     )?;

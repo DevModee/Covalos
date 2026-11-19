@@ -104,3 +104,7 @@ Límites: esta fase conserva la conversación de Workspace. General sigue usando
 Checkpoint: continuar desde esta rama, no fusionada, para recuperación de conversaciones General con aislamiento persistente, hooks Claude autenticados, DPI entre monitores y activos de marca/referencias visuales todavía pendientes. Ejecutable de la continuación: E:/workspace/aeros-quality-resumed-build/release/aeros-editor.exe.
 
 Prueba del ejecutable: apertura nativa y cierre limpio con código 0, usando un proyecto y perfil temporales propios. Reproducible con design/smoke_recovery_windows.py <ruta-del-exe>. La prueba espera la inicialización de la ventana antes de solicitar el cierre; no cierra otras instancias.
+
+## Continuación visual unificada — Precision in Motion
+
+La integración de Visual Perfection + Project Apex continúa desde 17a2998 en design/precision-in-motion, dentro de E:/workspace/aeros-precision-motion, con build E:/workspace/aeros-precision-build. Se conservan todos los ciclos previos y la recuperación de conversaciones. Ver [sistema visual, evidencia y pendientes](PRECISION_IN_MOTION.md). No se fusionó con las ramas activas.
