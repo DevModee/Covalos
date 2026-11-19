@@ -1,3 +1,4 @@
+pub(super) use super::i18n::{tr, trf};
 use eframe::egui::{self, Color32, Context, FontId, Frame, Margin, RichText, Stroke, TextStyle};
 
 pub(crate) const BRAND: &str = "AEROS";
@@ -325,15 +326,19 @@ pub(super) fn panel_frame(margin: Margin) -> Frame {
 }
 
 pub(super) fn muted(text: impl Into<String>) -> RichText {
-    RichText::new(text).size(SMALL).color(colors().muted)
+    let text = text.into();
+    RichText::new(tr(&text)).size(SMALL).color(colors().muted)
 }
 
 pub(super) fn secondary(text: impl Into<String>) -> RichText {
-    RichText::new(text).size(BODY).color(colors().secondary)
+    let text = text.into();
+    RichText::new(tr(&text))
+        .size(BODY)
+        .color(colors().secondary)
 }
 
 pub(super) fn primary(text: &str) -> egui::Button<'_> {
-    egui::Button::new(RichText::new(text).strong().color(colors().canvas))
+    egui::Button::new(RichText::new(tr(text)).strong().color(colors().canvas))
         .fill(colors().accent)
         .stroke(Stroke::NONE)
         .corner_radius(CONTROL_RADIUS)
@@ -371,7 +376,7 @@ pub(super) fn busy_indicator(ui: &mut egui::Ui) -> egui::Response {
 }
 
 pub(super) fn section(ui: &mut egui::Ui, title: &str, description: &str) {
-    ui.label(RichText::new(title).size(LEAD).strong());
+    ui.label(RichText::new(tr(title)).size(LEAD).strong());
     if !description.is_empty() {
         ui.add(egui::Label::new(secondary(description)).wrap());
     }
@@ -379,6 +384,7 @@ pub(super) fn section(ui: &mut egui::Ui, title: &str, description: &str) {
 }
 
 pub(super) fn row(ui: &mut egui::Ui, label: &str, detail: &str, selected: bool) -> egui::Response {
+    let (label, detail) = (tr(label), tr(detail));
     let height = ui.spacing().interact_size.y.max(24.0);
     let response = ui.add_sized(
         [ui.available_width(), height],
@@ -547,7 +553,7 @@ pub(super) fn icon_button(
         icon,
         color,
     );
-    response.on_hover_text(label)
+    response.on_hover_text(tr(label))
 }
 
 pub(super) fn draw_icon(painter: &egui::Painter, center: egui::Pos2, icon: Icon, color: Color32) {

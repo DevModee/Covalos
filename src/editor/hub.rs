@@ -426,7 +426,7 @@ impl Editor {
             ui.scope_builder(egui::UiBuilder::new().max_rect(nav), |ui| {
                 self.luma_dock(ui);
                 ui.add_space(8.0);
-                ui.label(RichText::new("Agent Hub").size(HEADING).strong());
+                ui.label(RichText::new(tr("Agent Hub")).size(HEADING).strong());
                 ui.add_space(24.0);
                 for (tab, label) in [
                     (HubTab::Conversations, "Conversations"),
@@ -542,7 +542,7 @@ impl Editor {
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("AGENTS").size(10.0).color(colors().muted));
+                    ui.label(RichText::new(tr("AGENTS")).size(10.0).color(colors().muted));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if icon_button(ui, Icon::Refresh, "Detect installed agents", false)
                             .clicked()
@@ -611,7 +611,7 @@ impl Editor {
                     painter.text(
                         rect.left_center() + egui::vec2(57.0, 10.0),
                         egui::Align2::LEFT_CENTER,
-                        status,
+                        tr(status),
                         egui::FontId::proportional(SMALL - 0.5),
                         colors().muted,
                     );
@@ -619,7 +619,7 @@ impl Editor {
                         painter.text(
                             rect.right_center() - egui::vec2(10.0, 0.0),
                             egui::Align2::RIGHT_CENTER,
-                            if current { "New chat" } else { "Chat ↗" },
+                            tr(if current { "New chat" } else { "Chat ↗" }),
                             egui::FontId::proportional(SMALL),
                             super::motion::blend(colors().muted, colors().accent_hover, hover),
                         );
@@ -697,7 +697,7 @@ impl Editor {
             self.tools.log_agent("General agent request started");
         }
         if !available {
-            ui.label(muted("Install the CLI to start this conversation."));
+            ui.label(muted(tr("Install the CLI to start this conversation.")));
         }
     }
 
@@ -723,7 +723,7 @@ impl Editor {
                 && !matches!(self.hub.workflow, Some(Workflow::ExternalReview { .. })),
             |ui| {
                 if let Some(name) = active {
-                    checkbox(ui, &mut self.include_active_file, "Active file").on_hover_text(
+                    checkbox(ui, &mut self.include_active_file, tr("Active file")).on_hover_text(
                         "Attach up to 24 KB from the current buffer, including unsaved edits.",
                     );
                     if self.include_active_file && ui.available_width() > 92.0 {
@@ -746,14 +746,14 @@ impl Editor {
                 "Ask creates a plan and review. Assist proposes a change to your active file.",
             ));
             ui.add_space(12.0);
-            ui.label(secondary("Task"));
+            ui.label(secondary(tr("Task")));
             if self.root.is_none() {
-                ui.label(muted("Open a workspace to run a task."));
+                ui.label(muted(tr("Open a workspace to run a task.")));
                 return;
             }
             ui.add(
                 TextEdit::multiline(&mut self.hub.task_request)
-                    .hint_text("Describe the task…")
+                    .hint_text(tr("Describe the task…"))
                     .desired_rows(3)
                     .desired_width(f32::INFINITY)
                     .char_limit(4000),
@@ -764,7 +764,7 @@ impl Editor {
                     && self.hub.proposal.is_none()
                     && !self.hub.task_request.trim().is_empty();
                 if ui
-                    .add_enabled(ready, primary("Ask · plan and review"))
+                    .add_enabled(ready, primary(tr("Ask · plan and review")))
                     .clicked()
                 {
                     self.start_task(ui.ctx(), TaskMode::Ask);
@@ -772,7 +772,7 @@ impl Editor {
                 if ui
                     .add_enabled(
                         ready && self.active.is_some(),
-                        egui::Button::new("Assist · propose edit"),
+                        egui::Button::new(tr("Assist · propose edit")),
                     )
                     .clicked()
                 {
@@ -782,14 +782,14 @@ impl Editor {
                     && ui
                         .add_enabled(
                             ready && self.active.is_some(),
-                            egui::Button::new("Auto · edit buffer"),
+                            egui::Button::new(tr("Auto · edit buffer")),
                         )
                         .clicked()
                 {
                     self.start_task(ui.ctx(), TaskMode::Auto);
                 }
                 if let Some(run) = self.chat.run.as_ref().or(self.hub.reviewer.run.as_ref())
-                    && ui.button("Stop").clicked()
+                    && ui.button(tr("Stop")).clicked()
                 {
                     run.cancel();
                     self.chat.activity = "Stopping";
@@ -799,7 +799,7 @@ impl Editor {
                 checkbox(
                     ui,
                     &mut self.hub.independent_review,
-                    "Ask Claude to review the Codex plan",
+                    tr("Ask Claude to review the Codex plan"),
                 )
                 .on_hover_text(
                     "Sends the task text and generated plan to Claude in an isolated directory.",
@@ -808,15 +808,15 @@ impl Editor {
             if let Some(proposal) = &self.hub.proposal {
                 ui.separator();
                 ui.label(RichText::new(format!("Review {}", proposal.path.display())).strong());
-                ui.label(muted("Before"));
+                ui.label(muted(tr("Before")));
                 code_block(ui, &proposal.edit.before, "");
-                ui.label(muted("After"));
+                ui.label(muted(tr("After")));
                 code_block(ui, &proposal.edit.after, "");
                 ui.horizontal(|ui| {
-                    if ui.add(primary("Apply to editor buffer")).clicked() {
+                    if ui.add(primary(tr("Apply to editor buffer"))).clicked() {
                         self.resolve_proposal(true);
                     }
-                    if ui.button("Reject").clicked() {
+                    if ui.button(tr("Reject")).clicked() {
                         self.resolve_proposal(false);
                     }
                 });
@@ -834,7 +834,7 @@ impl Editor {
             }
             if self.hub.workflow.is_some() || !self.hub.tasks.is_empty() {
                 ui.add_space(8.0);
-                if ui.button("View Codex conversation").clicked() {
+                if ui.button(tr("View Codex conversation")).clicked() {
                     self.hub.tab = HubTab::Conversations;
                     self.hub.general = false;
                 }
@@ -844,29 +844,29 @@ impl Editor {
 
     fn memory_panel(&mut self, ui: &mut Ui) {
         let Some(root) = &self.root else {
-            ui.label(muted("Open a workspace to keep project notes."));
+            ui.label(muted(tr("Open a workspace to keep project notes.")));
             return;
         };
         ui.label(secondary(
             "Choose whether these saved notes are included in an agent task.",
         ));
         ui.add_space(16.0);
-        ui.label(secondary("Project notes"));
+        ui.label(secondary(tr("Project notes")));
         ui.add(
             TextEdit::multiline(&mut self.hub.note)
-                .hint_text("Goals, decisions, and references…")
+                .hint_text(tr("Goals, decisions, and references…"))
                 .desired_width(f32::INFINITY)
                 .desired_rows(9)
                 .char_limit(6000),
         );
-        if ui.add(primary("Save project notes")).clicked() {
+        if ui.add(primary(tr("Save project notes"))).clicked() {
             self.preferences.set_note(root, self.hub.note.clone());
             self.notice = Some((false, "Project notes saved locally".into()));
         }
         checkbox(
             ui,
             &mut self.include_project_note,
-            "Include saved notes in agent tasks",
+            tr("Include saved notes in agent tasks"),
         );
     }
 
@@ -893,7 +893,7 @@ impl Editor {
                 return;
             };
             if doc.text.len() > 24_000 || !doc.path.starts_with(&root) {
-                self.error("Assist requires a workspace file under 24 KB.");
+                self.error(tr("Assist requires a workspace file under 24 KB."));
                 return;
             }
             let input = assistant::with_file_context(
@@ -1072,7 +1072,9 @@ Plan:
             .find(|(_, doc)| doc.path == proposal.path && doc.text == proposal.snapshot)
         else {
             self.hub.status(proposal.task, "Buffer changed");
-            self.error("The proposed edit was based on a different buffer. Request a fresh edit.");
+            self.error(tr(
+                "The proposed edit was based on a different buffer. Request a fresh edit.",
+            ));
             self.save_task_history();
             return;
         };
@@ -1136,9 +1138,9 @@ fn chat_box(
             if ui
                 .add_enabled(
                     !running && !chat.messages.is_empty(),
-                    egui::Button::new(secondary("New chat")).frame(false),
+                    egui::Button::new(secondary(tr("New chat"))).frame(false),
                 )
-                .on_hover_text("Start a fresh conversation")
+                .on_hover_text(tr("Start a fresh conversation"))
                 .clicked()
             {
                 *reset = true;
@@ -1190,9 +1192,9 @@ fn chat_box(
                     ui.add_space(14.0);
                     ui.label(
                         RichText::new(if available {
-                            format!("Message {}", brand.name)
+                            trf("Message {name}", &[("name", brand.name.into())])
                         } else {
-                            "Open a workspace".to_owned()
+                            tr("Open a workspace").to_owned()
                         })
                         .size(HEADING)
                         .color(colors().text),
@@ -1238,7 +1240,7 @@ fn chat_box(
                             .show(ui, |ui| {
                                 ui.set_width(ui.available_width());
                                 ui.label(
-                                    RichText::new("Something went wrong")
+                                    RichText::new(tr("Something went wrong"))
                                         .strong()
                                         .color(colors().error),
                                 );
@@ -1261,7 +1263,7 @@ fn chat_box(
             }
         });
     if let Some(text) = suggestion {
-        chat.prompt = text.to_owned();
+        chat.prompt = tr(text).to_owned();
         chat.revision = chat.revision.wrapping_add(1);
     }
     ui.add_space(8.0);
@@ -1301,7 +1303,7 @@ fn chat_box(
                 TextEdit::multiline(&mut chat.prompt)
                     .id(composer_id)
                     .frame(false)
-                    .hint_text(format!("Message {}…", brand.name))
+                    .hint_text(trf("Message {name}…", &[("name", brand.name.into())]))
                     .desired_rows(3)
                     .char_limit(12_000)
                     .desired_width(f32::INFINITY)
@@ -1341,7 +1343,7 @@ fn chat_box(
 /// Small rounded metadata tag.
 fn tag(ui: &mut Ui, text: &str) {
     let galley = ui.painter().layout_no_wrap(
-        text.to_owned(),
+        tr(text).to_owned(),
         egui::FontId::proportional(11.0),
         colors().muted,
     );
@@ -1359,7 +1361,7 @@ fn tag(ui: &mut Ui, text: &str) {
 
 fn suggestion_chip(ui: &mut Ui, text: &str) -> egui::Response {
     let galley = ui.painter().layout_no_wrap(
-        text.to_owned(),
+        tr(text).to_owned(),
         egui::FontId::proportional(BODY),
         colors().secondary,
     );
@@ -1418,7 +1420,7 @@ fn user_bubble(ui: &mut Ui, text: &str) {
                 );
             });
         shown.response.context_menu(|ui| {
-            if ui.button("Copy").clicked() {
+            if ui.button(tr("Copy")).clicked() {
                 ui.ctx().copy_text(text.to_owned());
                 ui.close();
             }
@@ -1449,8 +1451,8 @@ fn assistant_message(
                 if !streaming {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui
-                            .add(egui::Button::new(muted("Copy")).frame(false))
-                            .on_hover_text("Copy message")
+                            .add(egui::Button::new(muted(tr("Copy"))).frame(false))
+                            .on_hover_text(tr("Copy message"))
                             .clicked()
                         {
                             ui.ctx().copy_text(text.to_owned());
@@ -1571,7 +1573,7 @@ fn round_button(ui: &mut Ui, send: bool, enabled: bool, label: &str) -> egui::Re
         );
     }
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
-    response.on_hover_text(label)
+    response.on_hover_text(tr(label))
 }
 
 fn markdown(ui: &mut Ui, text: &str) {

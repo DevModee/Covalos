@@ -59,12 +59,12 @@ impl Pattern {
     ];
     pub(super) fn name(self) -> &'static str {
         match self {
-            Self::Waves => "Waves",
-            Self::Geometry => "Geometry",
-            Self::Particles => "Particles",
-            Self::Orbits => "Orbits",
-            Self::Network => "Network",
-            Self::Sequence => "Sequence",
+            Self::Waves => "Nebula",
+            Self::Geometry => "Prism",
+            Self::Particles => "Drift",
+            Self::Orbits => "Orbit",
+            Self::Network => "Contour",
+            Self::Sequence => "Signal",
         }
     }
 }
@@ -454,98 +454,190 @@ impl Identity {
                 }
             }
             Background::Ascii => {
-                // ASCII Flow: a full-field glyph grid driven by drifting fractal noise.
-                // The cursor acts as a lens (repulsion plus a bright rim), clicks send a
-                // shockwave through the field, and everything relaxes back to the flow.
-                let step = (17.0 - prefs.density * 6.0).clamp(10.0, 17.0);
-                let cols = ((rect.width() / step) as usize).min(220);
-                let rows = ((rect.height() / (step * 1.25)) as usize).min(110);
-                if cols < 2 || rows < 2 {
-                    return;
-                }
+                // ASCII Flow. Two layers: a quiet dot-grid paper and a composed glyph field.
+                // Every preset is weighted by a soft stage to the right of the content
+                // column, so the left side stays calm and the composition has a focus.
+                let dark = palette.canvas.r() < 128;
+                let gain = if dark { 1.0 } else { 2.4 };
+                let ink_base = if dark {
+                    tint
+                } else {
+                    super::motion::blend(tint, palette.text, 0.55)
+                };
+                let step = (16.0 - prefs.density * 5.0).clamp(10.0, 16.0);
+                let row_h = step * 1.3;
+                let cols = ((rect.width() / step) as usize + 1).min(240);
+                let rows = ((rect.height() / row_h) as usize + 1).min(120);
                 let glyphs = [' ', '.', '·', ':', '-', '=', '+', '*', '#', '%', '@'];
-                let font = FontId::monospace(step * 0.86);
+                let font = FontId::monospace(step * 0.92);
                 let galleys =
                     glyphs.map(|c| p.layout_no_wrap(c.to_string(), font.clone(), Color32::WHITE));
                 let ripple = self.ripple.map(|(o, s)| (o, (self.now - s) as f32));
-                let half = egui::vec2(step * 0.5, step * 0.62);
+                let stage = rect.center()
+                    + egui::vec2(rect.width() * 0.2, -rect.height() * 0.04)
+                    + if self.scene_active {
+                        self.pointer * 10.0
+                    } else {
+                        egui::Vec2::ZERO
+                    };
+                let stage_r = rect.width().min(rect.height()) * 0.62;
+                let far = if self.scene_active {
+                    self.pointer * 3.0
+                } else {
+                    egui::Vec2::ZERO
+                };
+                let near = if self.scene_active {
+                    self.pointer * 9.0
+                } else {
+                    egui::Vec2::ZERO
+                };
+                // Prism: a rotating lit sphere with a tilted ring, sampled per cell.
+                let sphere_r = stage_r * 0.42;
+                let (ls, lc) = (t * 0.35).sin_cos();
+                let light = egui::vec2(-0.55 + ls * 0.35, -0.6 + lc * 0.2);
                 for y in 0..rows {
                     for x in 0..cols {
-                        let base =
-                            rect.min + egui::vec2(x as f32 * step, y as f32 * step * 1.25) + half;
-                        let mut sample = egui::vec2(x as f32, y as f32 * 1.25) * 0.075;
+                        let base = rect.min + egui::vec2(x as f32 * step, y as f32 * row_h);
+                        let cell_c = base + egui::vec2(step * 0.5, row_h * 0.5);
+                        // Paper layer: every other cell carries a faint dot.
+                        if (x + y) % 2 == 0 {
+                            p.circle_filled(
+                                cell_c + far,
+                                0.55,
+                                ink_base.gamma_multiply((prefs.intensity * 0.55 * gain).min(1.0)),
+                            );
+                        }
+                        let d = cell_c - stage;
+                        let stage_w = (1.0 - (d.length() / stage_r).powf(1.6)).clamp(0.0, 1.0);
+                        let mut sample = egui::vec2(x as f32, y as f32 * 1.3) * 0.07;
                         let mut lens = 0.0;
                         if let Some(c) = self.influence {
-                            let d = base - c;
-                            let dist = d.length();
-                            if dist < 190.0 {
-                                let k = 1.0 - dist / 190.0;
-                                // Push the sampled field away from the cursor.
-                                sample -= d / dist.max(1.0) * k * k * 1.6;
-                                lens = (1.0 - ((dist - 70.0) / 38.0).abs()).max(0.0) * 0.55
-                                    + k * k * 0.25;
+                            let dc = cell_c - c;
+                            let dist = dc.length();
+                            if dist < 200.0 {
+                                let k = 1.0 - dist / 200.0;
+                                sample -= dc / dist.max(1.0) * k * k * 1.4;
+                                lens = (1.0 - ((dist - 64.0) / 30.0).abs()).max(0.0) * 0.5
+                                    + k * k * 0.18;
                             }
                         }
                         let mut wave = 0.0;
                         if let Some((o, age)) = ripple {
-                            let r = age * 520.0;
-                            let dist = base.distance(o);
-                            wave = (1.0 - ((dist - r) / 34.0).abs()).max(0.0)
+                            let dist = cell_c.distance(o);
+                            wave = (1.0 - ((dist - age * 560.0) / 30.0).abs()).max(0.0)
                                 * (1.0 - age / 1.1).max(0.0);
                         }
-                        let v = match prefs.pattern {
-                            Pattern::Waves => flow(sample, t),
+                        let (v, tile) = match prefs.pattern {
+                            Pattern::Waves => {
+                                // Nebula: halftone clouds drawn as dots, no glyphs.
+                                let n = flow(sample * 0.8, t * 0.6);
+                                let v = (n * (0.35 + stage_w * 0.9) + lens + wave).min(1.0);
+                                if v > 0.08 {
+                                    let r = (step * 0.42 * v.powf(0.8)).max(0.6);
+                                    let hot = lens + wave;
+                                    p.circle_filled(
+                                        cell_c + near * v,
+                                        r,
+                                        super::motion::blend(ink_base, palette.text, hot.min(0.6))
+                                            .gamma_multiply(
+                                                (prefs.intensity
+                                                    * gain
+                                                    * (1.2 + v * 2.2 + hot * 2.0))
+                                                    .min(1.0),
+                                            ),
+                                    );
+                                }
+                                continue;
+                            }
                             Pattern::Geometry => {
-                                let a = sample.x - 6.0;
-                                let b = sample.y - 4.0;
-                                ((a.abs() + b.abs()) * 1.6 - t * 0.6).sin() * 0.5 + 0.5
+                                let q = (cell_c - stage) / sphere_r;
+                                let r2 = q.x * q.x + q.y * q.y;
+                                let mut v: f32 = 0.0;
+                                if r2 < 1.0 {
+                                    let z = (1.0 - r2).sqrt();
+                                    let lambert =
+                                        (-(q.x * light.x + q.y * light.y) + z * 0.6).max(0.0);
+                                    // Longitude bands give the surface a sense of rotation.
+                                    let lon = q.x.atan2(z) + t * 0.5;
+                                    let bands = ((lon * 6.0).sin() * 0.5 + 0.5) * 0.25;
+                                    v = (lambert * 0.85 + bands).min(1.0);
+                                }
+                                // Tilted ring around the sphere, hidden behind it.
+                                let (rs, rc) = (-0.42_f32).sin_cos();
+                                let rx = q.x * rc + q.y * rs;
+                                let ry = -q.x * rs + q.y * rc;
+                                let e = (rx / 1.65).powi(2) + (ry / 0.42).powi(2);
+                                let front = ry > 0.0 || r2 > 1.0;
+                                if (e - 1.0).abs() < 0.09 && front {
+                                    let a = ry.atan2(rx) - t * 0.8;
+                                    v = v.max(0.55 + 0.4 * (a * 3.0).sin().abs());
+                                }
+                                ((v + lens + wave).min(0.999), v > 0.7)
                             }
                             Pattern::Particles => {
-                                let n = flow(sample * 2.4, t * 1.6);
-                                (n - 0.45).max(0.0) * 2.0
+                                // Drift: flow bands; dense cells become tinted tiles.
+                                let n = flow(sample, t);
+                                let band = ((sample.y * 0.9 + n * 2.4 - t * 0.12).sin() * 0.5
+                                    + 0.5)
+                                    .powf(3.0);
+                                let v = (n * band * 1.5 * (0.3 + stage_w) + lens + wave).min(0.999);
+                                (v, v > 0.62)
                             }
                             Pattern::Orbits => {
-                                let c = egui::vec2(
-                                    cols as f32 * 0.075 * 0.62,
-                                    rows as f32 * 0.075 * 0.6,
-                                );
-                                let d = (sample - c).length();
-                                ((d * 3.2 - t * 0.9).sin() * 0.5 + 0.5) * (1.0 - d / 9.0).max(0.0)
+                                let dist = d.length() / stage_r;
+                                let ring = ((dist * 14.0 - t * 1.2).sin() * 0.5 + 0.5).powf(4.0);
+                                ((ring * stage_w * 1.1 + lens + wave).min(0.999), false)
                             }
                             Pattern::Network => {
-                                let n = flow(sample * 0.7, t * 0.5);
-                                if (n * 9.0).sin().abs() < 0.22 {
-                                    n * 1.6
-                                } else {
-                                    0.0
-                                }
+                                // Contour: topographic iso-lines of the flow field.
+                                let n = flow(sample * 0.6, t * 0.4);
+                                let iso = 1.0 - ((n * 7.0).fract() - 0.5).abs() * 2.0;
+                                (
+                                    (iso.powf(6.0) * (0.25 + stage_w) + lens + wave).min(0.999),
+                                    false,
+                                )
                             }
                             Pattern::Sequence => {
-                                ((sample.x + sample.y) * 2.2 - t * 0.8).sin() * 0.5 + 0.5
+                                // Signal: a travelling waveform across the stage.
+                                let u = d.x / stage_r;
+                                let amp = (1.0 - u.abs()).max(0.0) * (0.5 + 0.5 * (t * 0.7).sin());
+                                let wave_y = (u * 9.0 - t * 1.6).sin() * amp * 0.35
+                                    + (u * 23.0 + t).sin() * amp * 0.06;
+                                let dy = d.y / stage_r - wave_y;
+                                let v = ((1.0 - dy.abs() * 9.0).max(0.0)
+                                    * (1.0 - u.abs()).max(0.0)
+                                    + lens
+                                    + wave)
+                                    .min(0.999);
+                                (v, false)
                             }
                         };
-                        let v = (v * (0.55 + prefs.density * 0.6) + lens + wave * 0.8)
-                            .clamp(0.0, 0.999);
                         let index = (v * glyphs.len() as f32) as usize;
                         if index == 0 {
                             continue;
                         }
-                        let pos = if self.scene_active {
-                            base + self.pointer * (4.0 + v * 6.0)
-                        } else {
-                            base
-                        } - half;
                         let hot = lens + wave;
-                        let ink = if hot > 0.35 {
-                            super::motion::blend(tint, palette.text, (hot - 0.35).min(0.5))
+                        if tile {
+                            p.rect_filled(
+                                egui::Rect::from_min_size(
+                                    base + near * 0.5,
+                                    egui::vec2(step - 1.0, row_h - 1.0),
+                                ),
+                                1,
+                                ink_base
+                                    .gamma_multiply((prefs.intensity * gain * 0.55 * v).min(1.0)),
+                            );
+                        }
+                        let ink = if hot > 0.3 {
+                            super::motion::blend(ink_base, palette.text, (hot - 0.3).min(0.55))
                         } else {
-                            tint
+                            ink_base
                         };
                         p.galley_with_override_text_color(
-                            pos,
+                            base + near * v + egui::vec2(step * 0.04, row_h * 0.08),
                             galleys[index].clone(),
                             ink.gamma_multiply(
-                                (prefs.intensity * (0.8 + v * 2.6 + hot * 3.0)).min(1.0),
+                                (prefs.intensity * gain * (1.0 + v * 3.0 + hot * 3.0)).min(1.0),
                             ),
                         );
                     }

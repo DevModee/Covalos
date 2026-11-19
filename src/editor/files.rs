@@ -32,17 +32,17 @@ pub(super) fn tree_menu(
     } else {
         format!("{}/", relative.display())
     };
-    if ui.button("New file here…").clicked() {
+    if ui.button(tr("New file here…")).clicked() {
         action = Some(TreeAction::CreateFile(prefix.clone()));
     }
-    if ui.button("New folder here…").clicked() {
+    if ui.button(tr("New folder here…")).clicked() {
         action = Some(TreeAction::CreateFolder(prefix));
     }
     if !root_item {
-        if ui.button("Rename or move…").clicked() {
+        if ui.button(tr("Rename or move…")).clicked() {
             action = Some(TreeAction::Move(path.to_owned()));
         }
-        if ui.button("Delete…").clicked() {
+        if ui.button(tr("Delete…")).clicked() {
             action = Some(TreeAction::Delete(path.to_owned()));
         }
     }
@@ -88,7 +88,7 @@ impl Editor {
                     .iter()
                     .any(|doc| doc.path == path && doc.dirty)
                 {
-                    self.error("Save or close the modified file before deleting it.");
+                    self.error(tr("Save or close the modified file before deleting it."));
                     return;
                 }
                 self.pending_delete = Some(path);
@@ -111,7 +111,7 @@ impl Editor {
                     }
                     let input = ui.add(
                         TextEdit::singleline(&mut name)
-                            .hint_text("Path relative to the workspace")
+                            .hint_text(tr("Path relative to the workspace"))
                             .desired_width(340.0)
                             .char_limit(512),
                     );
@@ -121,11 +121,11 @@ impl Editor {
                     let enter =
                         input.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
                     ui.horizontal(|ui| {
-                        if ui.button("Cancel").clicked() {
+                        if ui.button(tr("Cancel")).clicked() {
                             return Some(false);
                         }
                         if (ui
-                            .add_enabled(!name.trim().is_empty(), primary("Confirm"))
+                            .add_enabled(!name.trim().is_empty(), primary(tr("Confirm")))
                             .clicked()
                             || enter)
                             && !name.trim().is_empty()
@@ -150,13 +150,13 @@ impl Editor {
                 .show(ctx, |ui| {
                     ui.heading(format!("Delete {}?", workspace::filename(&path)));
                     ui.label(muted(path.display().to_string()));
-                    ui.label("This permanently deletes a file or an empty folder.");
+                    ui.label(tr("This permanently deletes a file or an empty folder."));
                     ui.horizontal(|ui| {
-                        if ui.button("Cancel").clicked() {
+                        if ui.button(tr("Cancel")).clicked() {
                             return Some(false);
                         }
                         if ui
-                            .button(RichText::new("Delete").color(colors().error))
+                            .button(RichText::new(tr("Delete")).color(colors().error))
                             .clicked()
                         {
                             return Some(true);

@@ -8,6 +8,7 @@ use std::{
 #[serde(default)]
 pub(super) struct Preferences {
     pub(super) theme: super::theme::Theme,
+    pub(super) language: super::i18n::Language,
     pub(super) identity: super::identity::IdentityPreferences,
     pub(super) font_size: f32,
     pub(super) compact: bool,
@@ -31,6 +32,7 @@ impl Default for Preferences {
     fn default() -> Self {
         Self {
             theme: super::theme::Theme::Dark,
+            language: super::i18n::Language::system(),
             identity: super::identity::IdentityPreferences::default(),
             font_size: 14.0,
             compact: false,

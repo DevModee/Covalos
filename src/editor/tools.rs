@@ -224,16 +224,16 @@ impl Editor {
     }
 
     pub(super) fn git_panel(&mut self, ui: &mut Ui) {
-        ui.label(RichText::new("Source control").strong().size(17.0));
+        ui.label(RichText::new(tr("Source control")).strong().size(17.0));
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
-            if ui.button("Status").clicked() {
+            if ui.button(tr("Status")).clicked() {
                 self.git_refresh(ui.ctx(), None);
             }
-            if ui.button("Diff").clicked() {
+            if ui.button(tr("Diff")).clicked() {
                 self.git_refresh(ui.ctx(), Some(false));
             }
-            if ui.button("Staged").clicked() {
+            if ui.button(tr("Staged")).clicked() {
                 self.git_refresh(ui.ctx(), Some(true));
             }
         });
@@ -285,12 +285,12 @@ impl Editor {
                         }
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.button("Hide").clicked() {
+                        if ui.button(tr("Hide")).clicked() {
                             self.preferences.tools_open = false;
                         }
                         if let Some(job) = &self.tools.process
                             && self.tools.tab == Tab::Terminal
-                            && ui.button("Stop").clicked()
+                            && ui.button(tr("Stop")).clicked()
                         {
                             job.stop.store(true, Ordering::Relaxed);
                         }
@@ -333,7 +333,7 @@ impl Editor {
                         can_run,
                         TextEdit::singleline(&mut self.tools.command)
                             .font(egui::TextStyle::Monospace)
-                            .hint_text("Enter a command…")
+                            .hint_text(tr("Enter a command…"))
                             .desired_width(f32::INFINITY)
                             .char_limit(4096),
                     );

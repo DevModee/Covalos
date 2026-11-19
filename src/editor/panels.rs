@@ -102,17 +102,20 @@ impl Editor {
                         draw_icon(ui.painter(), mark.center(), Icon::Brand, colors().accent);
                         ui.label(RichText::new(BRAND).size(LEAD).strong());
                         ui.add_space(8.0);
-                        ui.menu_button("File", |ui| {
-                            if ui.button("Open folder…").clicked() {
+                        ui.menu_button(tr("File"), |ui| {
+                            if ui.button(tr("Open folder…")).clicked() {
                                 ui.close();
                                 self.pick_workspace(ctx);
                             }
-                            if ui.button("Open file…").clicked() {
+                            if ui.button(tr("Open file…")).clicked() {
                                 ui.close();
                                 self.pick_file();
                             }
                             if ui
-                                .add_enabled(self.root.is_some(), egui::Button::new("New file…"))
+                                .add_enabled(
+                                    self.root.is_some(),
+                                    egui::Button::new(tr("New file…")),
+                                )
                                 .clicked()
                             {
                                 ui.close();
@@ -120,7 +123,7 @@ impl Editor {
                             }
                             ui.separator();
                             if ui
-                                .add_enabled(self.active.is_some(), egui::Button::new("Save"))
+                                .add_enabled(self.active.is_some(), egui::Button::new(tr("Save")))
                                 .clicked()
                             {
                                 ui.close();
@@ -129,7 +132,7 @@ impl Editor {
                             if ui
                                 .add_enabled(
                                     !self.documents.is_empty(),
-                                    egui::Button::new("Save all"),
+                                    egui::Button::new(tr("Save all")),
                                 )
                                 .clicked()
                             {
@@ -139,7 +142,10 @@ impl Editor {
                                 }
                             }
                             if ui
-                                .add_enabled(self.active.is_some(), egui::Button::new("Close tab"))
+                                .add_enabled(
+                                    self.active.is_some(),
+                                    egui::Button::new(tr("Close tab")),
+                                )
                                 .clicked()
                                 && let Some(index) = self.active
                             {
@@ -176,9 +182,9 @@ impl Editor {
                         response.rect.left_center() + egui::vec2(32.0, 0.0),
                         egui::Align2::LEFT_CENTER,
                         if command_width > 320.0 {
-                            "Search files and commands"
+                            tr("Search files and commands")
                         } else {
-                            "Quick access"
+                            tr("Quick access")
                         },
                         egui::FontId::proportional(BODY),
                         colors().secondary,
@@ -326,7 +332,7 @@ impl Editor {
                             ui.add(egui::Label::new(muted(name)).truncate())
                                 .on_hover_text(root.display().to_string());
                         } else {
-                            ui.label(muted("Open a workspace"));
+                            ui.label(muted(tr("Open a workspace")));
                         }
                     },
                 );
@@ -339,13 +345,13 @@ impl Editor {
                         .layout(Layout::right_to_left(Align::Center)),
                     |ui| {
                         if ui
-                            .selectable_label(self.preferences.tools_open, muted("Terminal"))
+                            .selectable_label(self.preferences.tools_open, muted(tr("Terminal")))
                             .clicked()
                         {
                             self.preferences.tools_open = !self.preferences.tools_open;
                         }
                         if let Some(doc) = self.active.map(|index| &self.documents[index]) {
-                            ui.label(muted("UTF-8"));
+                            ui.label(muted(tr("UTF-8")));
                             let (line, col) = workspace::cursor_position(&doc.text, self.cursor);
                             ui.label(muted(format!("Ln {line}, Col {col}")));
                         }
@@ -426,10 +432,10 @@ impl Editor {
         }
         dock.vertical(|ui| {
             ui.add_space(6.0);
-            ui.label(RichText::new("Luma").strong().color(colors().secondary));
+            ui.label(RichText::new(tr("Luma")).strong().color(colors().secondary));
             ui.add(egui::Label::new(muted(mood.name())).truncate());
             if ui
-                .add(egui::Button::new(muted("Companion ↗")).frame(false))
+                .add(egui::Button::new(muted(tr("Companion ↗"))).frame(false))
                 .clicked()
             {
                 self.companion.open = true;
@@ -458,7 +464,7 @@ impl Editor {
                             ui.set_min_width(ui.available_width());
                             ui.add(
                                 egui::Label::new(
-                                    RichText::new(label).strong().color(colors().secondary),
+                                    RichText::new(tr(label)).strong().color(colors().secondary),
                                 )
                                 .truncate(),
                             );
@@ -474,7 +480,7 @@ impl Editor {
                 });
                 ui.add_space(12.0);
                 let Some(root) = self.root.clone() else {
-                    ui.label(muted("Open a folder to browse files."));
+                    ui.label(muted(tr("Open a folder to browse files.")));
                     return;
                 };
                 match self.sidebar {
@@ -536,7 +542,7 @@ impl Editor {
     fn search_panel(&mut self, ui: &mut Ui, root: &Path) {
         let response = ui.add(
             TextEdit::singleline(&mut self.workspace_query)
-                .hint_text("Find text in files")
+                .hint_text(tr("Find text in files"))
                 .desired_width(f32::INFINITY)
                 .char_limit(200),
         );
@@ -544,7 +550,7 @@ impl Editor {
             response.request_focus();
         }
         if (response.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter)))
-            || ui.button("Search workspace").clicked()
+            || ui.button(tr("Search workspace")).clicked()
         {
             self.start_search(ui.ctx());
         }
@@ -778,8 +784,7 @@ impl Editor {
                         };
                         (lo..=hi).all(|r| level_at(r).is_none_or(|l| l > col))
                     };
-                    for i in first..last {
-                        let row = &rows[i];
+                    for (i, row) in rows.iter().enumerate().take(last).skip(first) {
                         let level = level_at(i).unwrap_or(0);
                         let y = origin.y + row.pos.y;
                         let mut col = 0;
@@ -941,7 +946,7 @@ impl Editor {
                                 close = Some(index);
                             }
                             response.on_hover_text(document.path.display().to_string());
-                            close_response.on_hover_text("Close tab");
+                            close_response.on_hover_text(tr("Close tab"));
                         }
                         if let Some(rect) = indicator {
                             let left = super::motion::value(
@@ -977,7 +982,7 @@ impl Editor {
         ui.horizontal(|ui| {
             let response = ui.add(
                 TextEdit::singleline(&mut self.find_query)
-                    .hint_text("Find in file")
+                    .hint_text(tr("Find in file"))
                     .desired_width(210.0)
                     .char_limit(200),
             );
@@ -992,7 +997,7 @@ impl Editor {
             if entered
                 || ui
                     .small_button("↓")
-                    .on_hover_text("Next match (F3)")
+                    .on_hover_text(tr("Next match (F3)"))
                     .clicked()
             {
                 self.find(false);
@@ -1000,18 +1005,22 @@ impl Editor {
             }
             if ui
                 .small_button("↑")
-                .on_hover_text("Previous match (Shift+F3)")
+                .on_hover_text(tr("Previous match (Shift+F3)"))
                 .clicked()
             {
                 self.find(true);
                 response.request_focus();
             }
-            if ui.small_button("×").on_hover_text("Close find").clicked() {
+            if ui
+                .small_button("×")
+                .on_hover_text(tr("Close find"))
+                .clicked()
+            {
                 self.find_open = false;
                 self.focus_editor = true;
             }
             if self.find_empty {
-                ui.label(muted("No matches"));
+                ui.label(muted(tr("No matches")));
             }
         });
     }
@@ -1096,13 +1105,13 @@ impl Editor {
                     });
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        if ui.add(primary("Save")).clicked() {
+                        if ui.add(primary(tr("Save"))).clicked() {
                             return Some(true);
                         }
-                        if ui.button("Discard").clicked() {
+                        if ui.button(tr("Discard")).clicked() {
                             return Some(false);
                         }
-                        if ui.button("Cancel").clicked() {
+                        if ui.button(tr("Cancel")).clicked() {
                             ui.close();
                         }
                         None
@@ -1138,13 +1147,13 @@ impl Editor {
             let modal = egui::Modal::new(Id::new("new_file"))
                 .frame(modal_frame())
                 .show(ctx, |ui| {
-                    ui.heading("New file");
+                    ui.heading(tr("New file"));
                     if let Some((true, message)) = &self.notice {
                         ui.label(RichText::new(message).color(colors().error));
                     }
                     let input = ui.add(
                         TextEdit::singleline(&mut name)
-                            .hint_text("Path relative to the workspace")
+                            .hint_text(tr("Path relative to the workspace"))
                             .desired_width(310.0)
                             .char_limit(260),
                     );
@@ -1155,11 +1164,11 @@ impl Editor {
                         input.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
                     ui.add_space(5.0);
                     ui.horizontal(|ui| {
-                        if ui.button("Cancel").clicked() {
+                        if ui.button(tr("Cancel")).clicked() {
                             return Some(false);
                         }
                         if ui
-                            .add_enabled(!name.trim().is_empty(), primary("Create"))
+                            .add_enabled(!name.trim().is_empty(), primary(tr("Create")))
                             .clicked()
                             || (enter && !name.trim().is_empty())
                         {
@@ -1378,7 +1387,7 @@ fn tree(
     let loading = |ui: &mut Ui| {
         ui.horizontal(|ui| {
             ui.add_space(12.0 + depth as f32 * TREE_INDENT);
-            ui.label(muted("Loading…"));
+            ui.label(muted(tr("Loading…")));
         });
     };
     let entries = match directories.remove(path) {
