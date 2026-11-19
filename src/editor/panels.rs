@@ -1427,11 +1427,7 @@ fn tree(
                         ui,
                         depth,
                         &name,
-                        if openness > 0.5 {
-                            "default_folder_opened"
-                        } else {
-                            "default_folder"
-                        },
+                        super::assets::folder_name(&entry.path, openness > 0.5),
                         Some(openness),
                         false,
                     )
