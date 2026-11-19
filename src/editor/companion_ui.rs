@@ -124,15 +124,33 @@ impl Editor {
         let (running, waiting) = self.companion.counts();
         if waiting > 0 || self.hub.approval_pending() {
             let n = waiting.max(1);
-            let s = if n == 1 { "" } else { "s" };
-            (format!("{n} approval{s} needed"), State::Waiting)
+            (
+                trf(
+                    if n == 1 {
+                        "{n} approval needed"
+                    } else {
+                        "{n} approvals needed"
+                    },
+                    &[("n", n.to_string())],
+                ),
+                State::Waiting,
+            )
         } else if running > 0 {
-            let s = if running == 1 { "" } else { "s" };
-            (format!("{running} agent{s} working"), State::Running)
+            (
+                trf(
+                    if running == 1 {
+                        "{n} agent working"
+                    } else {
+                        "{n} agents working"
+                    },
+                    &[("n", running.to_string())],
+                ),
+                State::Running,
+            )
         } else if let Some(n) = self.companion.history.front() {
             (n.text.clone(), n.state)
         } else {
-            ("All quiet".into(), State::Idle)
+            (tr("All quiet").into(), State::Idle)
         }
     }
 
@@ -159,27 +177,39 @@ impl Editor {
             ui.vertical(|ui| {
                 ui.add_space(6.0);
                 ui.label(
-                    RichText::new("LUMA  ·  COMPANION")
+                    RichText::new(tr("LUMA  ·  COMPANION"))
                         .size(10.0)
                         .color(colors().muted),
                 );
                 ui.label(
-                    RichText::new(if waiting > 0 {
+                    RichText::new(tr(if waiting > 0 {
                         "Your decision is needed"
                     } else if running > 0 {
                         "Work in motion"
                     } else {
                         "A quiet workspace"
-                    })
+                    }))
                     .size(20.0)
                     .strong(),
                 );
                 ui.add_space(2.0);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
-                    chip(ui, &format!("{running} running"), colors().accent);
-                    chip(ui, &format!("{waiting} waiting"), colors().warning);
-                    chip(ui, &format!("{completed} done"), colors().success);
+                    chip(
+                        ui,
+                        &trf("{n} running", &[("n", running.to_string())]),
+                        colors().accent,
+                    );
+                    chip(
+                        ui,
+                        &trf("{n} waiting", &[("n", waiting.to_string())]),
+                        colors().warning,
+                    );
+                    chip(
+                        ui,
+                        &trf("{n} done", &[("n", completed.to_string())]),
+                        colors().success,
+                    );
                 });
             });
             ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
@@ -196,7 +226,7 @@ impl Editor {
                 .inner_margin(egui::Margin::same(16))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    ui.label(RichText::new("No agents running").strong());
+                    ui.label(RichText::new(tr("No agents running")).strong());
                     ui.add_space(4.0);
                     ui.add(
                         egui::Label::new(secondary(
@@ -234,7 +264,7 @@ impl Editor {
                         ui.vertical(|ui| {
                             ui.label(RichText::new(&session.label).strong());
                             ui.label(
-                                RichText::new(session.state.label())
+                                RichText::new(tr(session.state.label()))
                                     .size(SMALL)
                                     .color(color),
                             );
@@ -295,7 +325,10 @@ impl Editor {
                                 ui.add_space(6.0);
                                 ui.horizontal(|ui| {
                                     if ui
-                                        .add(primary("Allow once").min_size(egui::vec2(96.0, 30.0)))
+                                        .add(
+                                            primary(tr("Allow once"))
+                                                .min_size(egui::vec2(96.0, 30.0)),
+                                        )
                                         .clicked()
                                     {
                                         action =
@@ -303,7 +336,7 @@ impl Editor {
                                     }
                                     if ui
                                         .add(
-                                            egui::Button::new("Deny")
+                                            egui::Button::new(tr("Deny"))
                                                 .min_size(egui::vec2(72.0, 30.0)),
                                         )
                                         .clicked()
@@ -313,27 +346,32 @@ impl Editor {
                                     }
                                 });
                             } else {
-                                ui.label(muted("Answer this request in its original terminal."));
+                                ui.label(muted(tr(
+                                    "Answer this request in its original terminal.",
+                                )));
                             }
                         }
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
                             if ui
-                                .add(egui::Button::new(muted("Copy session ID")).frame(false))
+                                .add(egui::Button::new(muted(tr("Copy session ID"))).frame(false))
                                 .clicked()
                             {
                                 ui.ctx().copy_text(external.id.clone());
                             }
                             if !external.scope.is_empty()
                                 && ui
-                                    .add(egui::Button::new(muted("Open workspace ↗")).frame(false))
+                                    .add(
+                                        egui::Button::new(muted(tr("Open workspace ↗")))
+                                            .frame(false),
+                                    )
                                     .clicked()
                             {
                                 action = Some(CompanionAction::Workspace(external.scope.clone()));
                             }
                         });
                     } else if ui
-                        .add(egui::Button::new(muted("Open in Agent Hub ↗")).frame(false))
+                        .add(egui::Button::new(muted(tr("Open in Agent Hub ↗"))).frame(false))
                         .clicked()
                     {
                         action = Some(CompanionAction::Focus(session.id.clone()));
@@ -345,7 +383,7 @@ impl Editor {
         if self.hub.approval_pending() {
             card_frame(true).show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.label(RichText::new("Buffer change ready for review").strong());
+                ui.label(RichText::new(tr("Buffer change ready for review")).strong());
                 ui.add(
                     egui::Label::new(secondary(
                         "The proposed edit is staged in Agent Hub. Nothing has been saved to disk.",
@@ -353,7 +391,7 @@ impl Editor {
                     .wrap(),
                 );
                 ui.add_space(8.0);
-                if ui.add(primary("Review change")).clicked() {
+                if ui.add(primary(tr("Review change"))).clicked() {
                     self.hub.focus_approvals();
                     self.hub_open = true;
                     self.companion.open = false;
@@ -363,7 +401,11 @@ impl Editor {
         }
         if !self.companion.history.is_empty() {
             ui.add_space(6.0);
-            ui.label(RichText::new("ACTIVITY").size(10.0).color(colors().muted));
+            ui.label(
+                RichText::new(tr("ACTIVITY"))
+                    .size(10.0)
+                    .color(colors().muted),
+            );
             ui.add_space(4.0);
             for notice in self.companion.history.iter().take(6) {
                 ui.horizontal(|ui| {
@@ -419,7 +461,7 @@ impl Editor {
                 if path.is_dir() {
                     self.request(Pending::OpenWorkspace(path), ctx);
                 } else {
-                    self.error("The reported workspace is unavailable.");
+                    self.error(tr("The reported workspace is unavailable."));
                 }
             }
             CompanionAction::Focus(id) => {
@@ -651,13 +693,17 @@ impl Editor {
                                 }
                             }
                             ui.vertical(|ui| {
-                                ui.label(RichText::new(notice.state.label()).strong().color(color));
+                                ui.label(
+                                    RichText::new(tr(notice.state.label()))
+                                        .strong()
+                                        .color(color),
+                                );
                                 ui.add(egui::Label::new(secondary(&notice.text)).truncate());
                             });
                         });
                         ui.add_space(4.0);
                         if ui
-                            .add(egui::Button::new(muted("Show agents ↗")).frame(false))
+                            .add(egui::Button::new(muted(tr("Show agents ↗"))).frame(false))
                             .clicked()
                         {
                             self.companion.open = true;

@@ -184,7 +184,7 @@ impl Editor {
             ui.label(muted(
                 "Review GitHub instructions before enabling them for tasks.",
             ));
-            ui.label(secondary("GitHub skill URL"));
+            ui.label(secondary(tr("GitHub skill URL")));
             ui.horizontal(|ui| {
                 ui.add(
                     TextEdit::singleline(&mut self.skills.source)
@@ -195,7 +195,7 @@ impl Editor {
                 if ui
                     .add_enabled(
                         self.skills.download.is_none() && !self.skills.source.trim().is_empty(),
-                        egui::Button::new("Fetch preview"),
+                        egui::Button::new(tr("Fetch preview")),
                     )
                     .clicked()
                 {
@@ -231,7 +231,7 @@ impl Editor {
                                 .selectable(true),
                         );
                     });
-                if ui.button("Install disabled").clicked()
+                if ui.button(tr("Install disabled")).clicked()
                     && let Some(skill) = self.skills.preview.take()
                 {
                     self.preferences.skills.retain(|entry| entry.id != skill.id);
@@ -248,7 +248,7 @@ impl Editor {
                         ui.label(&skill.description);
                     }
                     ui.horizontal_wrapped(|ui| {
-                        checkbox(ui, &mut skill.enabled, "Enabled");
+                        checkbox(ui, &mut skill.enabled, tr("Enabled"));
                         let selected = self.skills.selected.as_ref() == Some(&skill.id);
                         if ui
                             .add_enabled(
@@ -263,7 +263,7 @@ impl Editor {
                         {
                             self.skills.selected = (!selected).then(|| skill.id.clone());
                         }
-                        if ui.small_button("Review").clicked() {
+                        if ui.small_button(tr("Review")).clicked() {
                             self.skills.preview = Some(skill.clone());
                         }
                     });

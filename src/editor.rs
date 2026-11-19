@@ -6,6 +6,7 @@ mod brands;
 mod companion;
 mod files;
 mod hub;
+mod i18n;
 mod icons;
 mod identity;
 mod mascot;
@@ -19,6 +20,7 @@ mod syntax;
 mod theme;
 mod tools;
 
+use i18n::tr;
 use preferences::Preferences;
 pub(crate) use theme::TITLE;
 
@@ -210,7 +212,7 @@ impl Editor {
     fn open_workspace(&mut self, path: PathBuf) {
         let root = match path.canonicalize() {
             Ok(root) if root.is_dir() => root,
-            Ok(_) => return self.error("Choose a directory to open as a workspace."),
+            Ok(_) => return self.error(tr("Choose a directory to open as a workspace.")),
             Err(error) => return self.error(format!("Could not open workspace. {error}")),
         };
         if self.root.as_ref() == Some(&root) {
@@ -495,23 +497,23 @@ impl Editor {
         if !self.conversation_exit_warning {
             return;
         }
-        egui::Window::new("Conversation could not be saved")
+        egui::Window::new(tr("Conversation could not be saved"))
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
-                ui.label("Your latest chat changes are still in memory.");
+                ui.label(tr("Your latest chat changes are still in memory."));
                 ui.horizontal(|ui| {
-                    if ui.button("Retry save and close").clicked() {
+                    if ui.button(tr("Retry save and close")).clicked() {
                         self.conversation_exit_warning = false;
                         self.perform(Pending::Exit, ctx);
                     }
-                    if ui.button("Close without saving chat").clicked() {
+                    if ui.button(tr("Close without saving chat")).clicked() {
                         self.conversation_exit_warning = false;
                         self.chat_saved_revision = self.chat.revision;
                         self.perform(Pending::Exit, ctx);
                     }
-                    if ui.button("Keep editing").clicked() {
+                    if ui.button(tr("Keep editing")).clicked() {
                         self.conversation_exit_warning = false;
                     }
                 });
@@ -657,6 +659,7 @@ impl Editor {
     }
 
     fn render(&mut self, ctx: &egui::Context) {
+        i18n::set(self.preferences.language);
         let focused = ctx.input(|input| input.focused);
         ctx.style_mut(|style| {
             style.animation_time = if focused && !self.preferences.reduce_motion {
