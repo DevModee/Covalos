@@ -1,0 +1,107 @@
+{
+  "captures": [
+    {
+      "file": "01-home/home-dark-orbital-1366x768@125.png",
+      "language": "English",
+      "ms_since_last_action": 868,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.25,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1092.8125,
+        614.40625
+      ]
+    },
+    {
+      "file": "01-home/home-card-hover-1366x768@125.png",
+      "language": "English",
+      "ms_since_last_action": 1403,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.25,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1092.8125,
+        614.40625
+      ]
+    },
+    {
+      "file": "02-explorer/explorer-expanded-1366x768@125.png",
+      "language": "English",
+      "ms_since_last_action": 542,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.25,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1092.8125,
+        614.40625
+      ]
+    },
+    {
+      "file": "03-editor/rust/editor-rust-dark-1366x768@125.png",
+      "language": "English",
+      "ms_since_last_action": 639,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.25,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1092.8125,
+        614.40625
+      ]
+    },
+    {
+      "file": "04-agent-hub/agent-hub-dark-1366x768@125.png",
+      "language": "English",
+      "ms_since_last_action": 641,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.25,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1092.8125,
+        614.40625
+      ]
+    },
+    {
+      "file": "09-settings-es/settings-es-1366x768@125.png",
+      "language": "Español",
+      "ms_since_last_action": 643,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.25,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1092.8125,
+        614.40625
+      ]
+    }
+  ],
+  "input": "eframe raw_input_hook in a native window (not OS-level SendInput)",
+  "ui_build_cpu_ms": {
+    "max": 56.2886,
+    "p50": 1.2121,
+    "p95": 1.4771,
+    "samples": 974
+  }
+}

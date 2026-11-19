@@ -1,0 +1,939 @@
+{
+  "captures": [
+    {
+      "file": "01-home/home-dark-orbital-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 868,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "01-home/home-card-hover-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 1410,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "02-explorer/explorer-expanded-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 539,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "03-editor/rust/editor-rust-dark-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 640,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "03-editor/typescript/editor-typescript-dark-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 644,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "03-editor/python/editor-python-dark-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 640,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "03-editor/rust/editor-toml-dark-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 543,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "10-motion/tab-switch-1-early-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 174,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "10-motion/tab-switch-2-mid-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 275,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "10-motion/tab-switch-3-settled-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 694,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "10-motion/palette-1-opening-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 162,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "03-editor/command-palette-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 532,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "04-agent-hub/agent-hub-conversation-dark-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 637,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "04-agent-hub/agent-hub-tasks-dark-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 542,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "04-agent-hub/codex-panel-empty-dark-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 540,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "05-companion/companion-compact-approval-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 2598,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "10-motion/companion-open-1-early-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 177,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "10-motion/companion-open-2-mid-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 259,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "05-companion/companion-expanded-approval-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 785,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "10-motion/companion-close-1-early-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 200,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "06-mascot/luma-idle-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 447,
+      "pixels": [
+        420,
+        440
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": true,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "06-mascot/luma-thinking-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 447,
+      "pixels": [
+        420,
+        440
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": true,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "06-mascot/luma-coding-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 445,
+      "pixels": [
+        420,
+        440
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": true,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "06-mascot/luma-searching-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 444,
+      "pixels": [
+        420,
+        440
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": true,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "06-mascot/luma-waiting-approval-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 446,
+      "pixels": [
+        420,
+        440
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": true,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "06-mascot/luma-success-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 444,
+      "pixels": [
+        420,
+        440
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": true,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "06-mascot/luma-error-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 443,
+      "pixels": [
+        420,
+        440
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": true,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "06-mascot/luma-sleeping-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 441,
+      "pixels": [
+        420,
+        440
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": true,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "06-mascot/luma-hover-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 563,
+      "pixels": [
+        420,
+        440
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": true,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "06-mascot/luma-click-bounce-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 281,
+      "pixels": [
+        420,
+        440
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": true,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "07-themes/editor-aeros-dark-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 553,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "07-themes/editor-aeros-midnight-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 539,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Midnight",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "07-themes/editor-aeros-violet-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 537,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Violet",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "07-themes/editor-aeros-light-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 541,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Light",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "07-themes/editor-high-contrast-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 543,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "High Contrast",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "07-themes/home-high-contrast-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 541,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "High Contrast",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "07-themes/home-aeros-light-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 553,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Light",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "08-ascii-backgrounds/orbital-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 974,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "08-ascii-backgrounds/neural-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 965,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "08-ascii-backgrounds/void-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 968,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "08-ascii-backgrounds/minimal-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 962,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "08-ascii-backgrounds/ascii-nebula-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 970,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "08-ascii-backgrounds/ascii-prism-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 967,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "08-ascii-backgrounds/ascii-drift-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 1117,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "08-ascii-backgrounds/ascii-orbit-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 983,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "08-ascii-backgrounds/ascii-contour-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 980,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "08-ascii-backgrounds/ascii-signal-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 967,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "10-motion/ascii-prism-rest-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 799,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "10-motion/ascii-prism-lens-entering-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 1019,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "10-motion/ascii-prism-lens-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 1539,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "10-motion/ascii-prism-click-wave-1-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 260,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "10-motion/ascii-prism-click-wave-2-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 530,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "08-ascii-backgrounds/ascii-nebula-light-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 871,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Light",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "09-settings-es/settings-es-1366x768@100.png",
+      "language": "Español",
+      "ms_since_last_action": 644,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "09-settings-es/home-es-1366x768@100.png",
+      "language": "Español",
+      "ms_since_last_action": 443,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "09-settings-es/editor-es-1366x768@100.png",
+      "language": "Español",
+      "ms_since_last_action": 539,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "09-settings-es/agent-hub-es-1366x768@100.png",
+      "language": "Español",
+      "ms_since_last_action": 544,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "09-settings-es/companion-es-1366x768@100.png",
+      "language": "Español",
+      "ms_since_last_action": 641,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Dark",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    }
+  ],
+  "input": "eframe raw_input_hook in a native window (not OS-level SendInput)",
+  "ui_build_cpu_ms": {
+    "max": 55.7934,
+    "p50": 2.2125,
+    "p95": 4.6197,
+    "samples": 6815
+  }
+}
