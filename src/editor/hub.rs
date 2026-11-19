@@ -1720,21 +1720,28 @@ fn code_block(ui: &mut Ui, text: &str, language: &str) {
                     ScrollArea::horizontal()
                         .id_salt(("code", text.len(), language))
                         .show(ui, |ui| {
-                            let theme = egui_extras::syntax_highlighting::CodeTheme::dark(12.0);
-                            let mut job = egui_extras::syntax_highlighting::highlight(
+                            let lower = language.to_ascii_lowercase();
+                            let extension = match lower.as_str() {
+                                "rust" => "rs",
+                                "python" => "py",
+                                "typescript" => "ts",
+                                "javascript" => "js",
+                                "csharp" | "c#" => "cs",
+                                "c++" => "cpp",
+                                "bash" | "shell" | "zsh" => "sh",
+                                "markdown" => "md",
+                                "yml" => "yaml",
+                                "" => "txt",
+                                // Fence labels are usually extensions already.
+                                other => other,
+                            };
+                            let job = super::syntax::highlight(
                                 ui.ctx(),
-                                ui.style(),
-                                &theme,
                                 text,
-                                if language.is_empty() { "txt" } else { language },
+                                extension,
+                                12.0,
+                                12.0 * CODE_LINE_HEIGHT,
                             );
-                            for section in &mut job.sections {
-                                section.format.font_id = egui::FontId::monospace(12.0);
-                                section.format.line_height = Some(12.0 * CODE_LINE_HEIGHT);
-                                section.format.color =
-                                    syntax_color(section.format.color, section.format.italics);
-                            }
-                            job.wrap.max_width = f32::INFINITY;
                             ui.add(egui::Label::new(job).selectable(true).extend());
                         });
                 });

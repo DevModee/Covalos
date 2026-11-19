@@ -427,6 +427,7 @@ fn capture_precision_interactions() -> Result<(), Box<dyn std::error::Error>> {
         Key(Key, bool),
         Text(&'static str),
         Move(egui::Pos2),
+        Tap(egui::Pos2),
         Capture(&'static str),
         Check(u8),
         DismissFixtureCompanion,
@@ -479,13 +480,24 @@ fn capture_precision_interactions() -> Result<(), Box<dyn std::error::Error>> {
         Capture("neural-right"),
         Click("Settings"),
         Click("Background selector"),
-        Click("Background ASCII"),
+        Click("Background ASCII Flow"),
         Check(9),
         Click("Settings"),
         Move(egui::pos2(420.0, 290.0)),
         Capture("ascii-left"),
         Move(egui::pos2(880.0, 480.0)),
         Capture("ascii-right"),
+        Tap(egui::pos2(760.0, 560.0)),
+        Capture("ascii-ripple"),
+        Move(egui::pos2(480.0, 310.0)),
+        Capture("home-card-hover"),
+        Move(egui::pos2(88.0, 690.0)),
+        Capture("luma-hover-home"),
+        Click("Luma"),
+        Capture("companion-opening"),
+        Capture("companion-open"),
+        Key(Key::Escape, false),
+        Capture("companion-closing"),
     ];
     struct Interaction {
         editor: Editor,
@@ -565,6 +577,8 @@ fn capture_precision_interactions() -> Result<(), Box<dyn std::error::Error>> {
             let delay = match self.steps[self.stage] {
                 Capture("tab-moving") => 0.035,
                 Capture("tab-settled") => 0.4,
+                Capture("ascii-ripple") => 0.18,
+                Capture("companion-opening") | Capture("companion-closing") => 0.07,
                 _ => 0.35,
             };
             if self.at.elapsed().as_secs_f32() < delay || self.requested {
@@ -623,6 +637,21 @@ fn capture_precision_interactions() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Text(text) => self.queued.push(Event::Text(text.into())),
                 Move(pos) => self.queued.push(Event::PointerMoved(pos)),
+                Tap(pos) => self.queued.extend([
+                    Event::PointerMoved(pos),
+                    Event::PointerButton {
+                        pos,
+                        button: PointerButton::Primary,
+                        pressed: true,
+                        modifiers: Modifiers::NONE,
+                    },
+                    Event::PointerButton {
+                        pos,
+                        button: PointerButton::Primary,
+                        pressed: false,
+                        modifiers: Modifiers::NONE,
+                    },
+                ]),
                 Capture(_) => {
                     ctx.send_viewport_cmd(ViewportCommand::Screenshot(UserData::default()));
                     self.requested = true;
