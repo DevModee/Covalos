@@ -198,8 +198,8 @@ pub(super) fn paint(painter: &Painter, rect: Rect, pose: Pose) {
     // Pod body: a lit squircle mesh. Normal from the superellipse, light from the upper left
     // and slightly opposite the gaze, so turning reads as a real rotation.
     let mut mesh = Mesh::default();
-    let rings = 9;
-    let slices = 56;
+    let rings = 8;
+    let slices = 44;
     let light_dir = {
         let v = [-0.45 - yaw * 0.25, -0.65 - pitch * 0.2, 0.62];
         let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();

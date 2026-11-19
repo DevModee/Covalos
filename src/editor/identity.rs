@@ -152,6 +152,7 @@ pub(super) struct Identity {
     orbital_cache: Option<OrbitalCache>,
     mascot_click: f64,
     mood: (Mood, f64),
+    awake_until: f64,
 }
 struct OrbitalCache {
     key: [u32; 4],
@@ -205,11 +206,24 @@ impl Identity {
                 i.pointer.primary_clicked(),
             )
         });
+        let first = self.last.is_none();
         let dt = (now - self.last.unwrap_or(now)).clamp(0.0, 0.1) as f32;
         self.last = Some(now);
         self.now = now;
+        let typing = ctx.input(|i| {
+            i.events.iter().any(|e| {
+                matches!(
+                    e,
+                    egui::Event::Key { .. } | egui::Event::Text(_) | egui::Event::MouseWheel { .. }
+                )
+            })
+        });
         if pointer != self.previous_pointer && pointer.is_some() || click {
             self.until = now + 1.2;
+        }
+        if first || typing || pointer != self.previous_pointer || click {
+            // Luma stays animated for a while after any input, then rests in a still pose.
+            self.awake_until = now + 8.0;
         }
         self.previous_pointer = pointer;
         let target = if prefs.interactive && visible {
@@ -244,16 +258,29 @@ impl Identity {
             && background_visible
             && prefs.animated
             && prefs.background.animated();
+        if first {
+            // The initial mood is not a change; no reaction burst at startup.
+            self.mood = (mood, now - 10.0);
+        } else if self.mood.0 != mood {
+            // Only one-shot reactions (hop, shake, attention) need the fast frame window;
+            // waking from Sleeping or switching between work moods does not.
+            let reacts = matches!(mood, Mood::Success | Mood::Error | Mood::Approval);
+            self.mood = (mood, if reacts { now } else { now - 10.0 });
+            self.awake_until = self.awake_until.max(now + 3.0);
+        }
+        let hovering = self.mascot_hover;
+        self.mascot_hover = false;
         let mascot_active = visible
             && !reduce
             && prefs.mascot
             && prefs.mascot_motion
-            && prefs.mascot_intensity > 0.0;
-        if self.mood.0 != mood {
-            self.mood = (mood, now);
-        }
-        let hovering = self.mascot_hover;
-        self.mascot_hover = false;
+            && prefs.mascot_intensity > 0.0
+            && (now < self.awake_until
+                || mood.busy()
+                || mood == Mood::Approval
+                || now - self.mood.1 < 1.6
+                || hovering
+                || now - self.mascot_click < 0.6);
         self.clock.advance(now, background_active, prefs.speed);
         self.mascot_clock.advance(now, mascot_active, 1.0);
         if background_active || mascot_active {
