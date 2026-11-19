@@ -7,6 +7,7 @@ mod companion;
 mod files;
 mod hub;
 mod identity;
+mod mascot;
 mod motion;
 mod panels;
 mod preferences;

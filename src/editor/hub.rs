@@ -533,45 +533,108 @@ impl Editor {
         }
         Frame::new()
             .fill(colors().surface)
-            .inner_margin(Margin::same(16))
-            .corner_radius(PANEL_RADIUS)
+            .stroke(egui::Stroke::new(
+                1.0_f32,
+                colors().border.gamma_multiply(0.8),
+            ))
+            .inner_margin(Margin::same(14))
+            .corner_radius(14)
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Installed agents").strong());
-                    if ui.small_button("Refresh").clicked() {
-                        self.hub.providers =
-                            Some(Provider::ALL.map(|provider| provider.discover().is_some()));
-                    }
+                    ui.label(RichText::new("AGENTS").size(10.0).color(colors().muted));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if icon_button(ui, Icon::Refresh, "Detect installed agents", false)
+                            .clicked()
+                        {
+                            self.hub.providers =
+                                Some(Provider::ALL.map(|provider| provider.discover().is_some()));
+                        }
+                    });
                 });
+                ui.add_space(4.0);
                 for (provider, installed) in Provider::ALL
                     .into_iter()
                     .zip(self.hub.providers.unwrap_or_default())
                 {
-                    ui.separator();
-                    ui.horizontal_wrapped(|ui| {
-                        super::brands::title(ui, provider);
-                        let status = match (provider.supported(), installed) {
-                            (true, true) => "CLI available",
-                            (true, false) => "CLI missing",
-                            (false, true) => "Detected · adapter pending",
-                            (false, false) => "Adapter pending",
-                        };
-                        ui.label(muted(status));
-                    });
-                    if provider.supported()
-                        && installed
-                        && (provider == Provider::Claude || self.hub.general)
-                        && ui
-                            .small_button(
-                                if self.hub.general_chat.provider == provider && self.hub.general {
-                                    "New general chat"
-                                } else {
-                                    "Open general chat"
-                                },
-                            )
-                            .clicked()
-                    {
+                    let brand = super::brands::get(provider);
+                    let ready = provider.supported() && installed;
+                    let (status, color) = match (provider.supported(), installed) {
+                        (true, true) => ("Ready", colors().success),
+                        (true, false) => ("CLI not found", colors().warning),
+                        (false, true) => ("Detected · adapter pending", colors().muted),
+                        (false, false) => ("Adapter pending", colors().muted),
+                    };
+                    let can_chat = ready && (provider == Provider::Claude || self.hub.general);
+                    let current = self.hub.general && self.hub.general_chat.provider == provider;
+                    let (rect, response) = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), 50.0),
+                        if can_chat {
+                            egui::Sense::click()
+                        } else {
+                            egui::Sense::hover()
+                        },
+                    );
+                    let hover = super::motion::state(
+                        ui,
+                        response.id.with("hover"),
+                        response.hovered() && can_chat,
+                        super::motion::HOVER,
+                    );
+                    ui.painter().rect_filled(
+                        rect,
+                        10,
+                        if current {
+                            colors().accent_bg
+                        } else {
+                            colors().hover.gamma_multiply(hover)
+                        },
+                    );
+                    let tile = egui::Rect::from_center_size(
+                        rect.left_center() + egui::vec2(22.0, 0.0),
+                        egui::vec2(30.0, 30.0),
+                    );
+                    super::brands::avatar(ui, tile, provider, false);
+                    let painter = ui.painter_at(rect);
+                    painter.text(
+                        rect.left_center() + egui::vec2(46.0, -8.0),
+                        egui::Align2::LEFT_CENTER,
+                        brand.name,
+                        egui::FontId::proportional(BODY + 0.5),
+                        if ready {
+                            colors().text
+                        } else {
+                            colors().secondary
+                        },
+                    );
+                    painter.circle_filled(rect.left_center() + egui::vec2(49.0, 10.0), 2.5, color);
+                    painter.text(
+                        rect.left_center() + egui::vec2(57.0, 10.0),
+                        egui::Align2::LEFT_CENTER,
+                        status,
+                        egui::FontId::proportional(SMALL - 0.5),
+                        colors().muted,
+                    );
+                    if can_chat {
+                        painter.text(
+                            rect.right_center() - egui::vec2(10.0, 0.0),
+                            egui::Align2::RIGHT_CENTER,
+                            if current { "New chat" } else { "Chat ↗" },
+                            egui::FontId::proportional(SMALL),
+                            super::motion::blend(colors().muted, colors().accent_hover, hover),
+                        );
+                    }
+                    let response = response.on_hover_text(format!(
+                        "{} · {}{}",
+                        brand.owner,
+                        brand.name,
+                        if can_chat {
+                            "\nOpen an isolated general chat"
+                        } else {
+                            ""
+                        }
+                    ));
+                    if response.clicked() {
                         self.hub.general_chat = Chat {
                             provider,
                             ..Default::default()
@@ -1049,144 +1112,188 @@ fn chat_box(
     context: impl FnOnce(&mut Ui),
     reset: &mut bool,
 ) -> bool {
-    ui.label(
-        RichText::new("AEROS  /  ASSISTANT")
-            .size(10.0)
-            .color(colors().muted),
-    );
-    ui.add_space(7.0);
+    let brand = super::brands::get(chat.provider);
+    let running = chat.run.is_some();
+    // Header: provider identity, scope and session actions.
     ui.horizontal(|ui| {
-        super::brands::title(ui, chat.provider);
-        if chat.connected {
-            let (_, dot) = ui.allocate_space(egui::vec2(10.0, 10.0));
-            ui.painter()
-                .circle_filled(dot.center(), 2.5, colors().success);
-        }
+        let (tile, _) = ui.allocate_exact_size(egui::vec2(30.0, 30.0), egui::Sense::hover());
+        super::brands::avatar(ui, tile, chat.provider, running);
+        ui.add_space(2.0);
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 1.0;
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(brand.name).size(LEAD).strong())
+                    .on_hover_text(format!("{} · {}", brand.owner, brand.name));
+                if chat.connected {
+                    let (_, dot) = ui.allocate_space(egui::vec2(8.0, 8.0));
+                    ui.painter()
+                        .circle_filled(dot.center(), 3.0, colors().success);
+                }
+            });
+            ui.label(muted(label));
+        });
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if ui
                 .add_enabled(
-                    chat.run.is_none() && !chat.messages.is_empty(),
-                    egui::Button::new("New chat").frame(false),
+                    !running && !chat.messages.is_empty(),
+                    egui::Button::new(secondary("New chat")).frame(false),
                 )
+                .on_hover_text("Start a fresh conversation")
                 .clicked()
             {
                 *reset = true;
             }
         });
     });
-    ui.label(muted(label));
+    let mut meta = Vec::new();
     if chat.restored {
-        ui.label(muted("Restored conversation · Send to reconnect"));
+        meta.push("Restored · send to reconnect".to_owned());
     }
     if let Some(model) = &chat.model {
-        ui.label(muted(model));
+        meta.push(model.clone());
     }
     if let Some((input, output)) = chat.usage {
-        ui.label(muted(format!("{input} input / {output} output tokens")));
+        meta.push(format!("{input} in · {output} out"));
     }
-    ui.add_space(16.0);
+    if !meta.is_empty() {
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            for m in meta {
+                tag(ui, &m);
+            }
+        });
+    }
+    ui.add_space(10.0);
+    let line = ui.available_rect_before_wrap();
+    ui.painter().hline(
+        line.x_range(),
+        line.top(),
+        egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.7)),
+    );
+    ui.add_space(6.0);
     let history_height = (ui.available_height() - CHAT_COMPOSER_HEIGHT - 16.0).max(24.0);
+    let mut suggestion = None;
     ScrollArea::vertical()
         .id_salt("chat-history")
         .max_height(history_height)
         .auto_shrink([false, false])
         .stick_to_bottom(true)
         .show(ui, |ui| {
-            if chat.messages.is_empty() {
-                ui.add_space(28.0);
-                let (_, art) = ui.allocate_space(egui::vec2(62.0, 62.0));
-                super::assets::luma_badge(ui, art);
-                ui.add_space(16.0);
-                ui.label(
-                    RichText::new(if available {
-                        "A clear place to think."
-                    } else {
-                        "Open a workspace"
-                    })
-                    .size(LEAD)
-                    .color(colors().text),
-                );
-                ui.add_space(8.0);
-                ui.add(
-                    egui::Label::new(secondary(if available {
-                        "Explore a file, work through an idea, or plan your next change."
-                    } else {
-                        "Choose a project to give this conversation context."
-                    }))
-                    .wrap(),
-                );
+            if chat.messages.is_empty() && chat.partial.is_empty() {
+                let top = (history_height * 0.16).clamp(12.0, 80.0);
+                ui.add_space(top);
+                ui.vertical_centered(|ui| {
+                    let (tile, _) =
+                        ui.allocate_exact_size(egui::vec2(48.0, 48.0), egui::Sense::hover());
+                    super::brands::avatar(ui, tile, chat.provider, false);
+                    ui.add_space(14.0);
+                    ui.label(
+                        RichText::new(if available {
+                            format!("Message {}", brand.name)
+                        } else {
+                            "Open a workspace".to_owned()
+                        })
+                        .size(HEADING)
+                        .color(colors().text),
+                    );
+                    ui.add_space(6.0);
+                    ui.add(
+                        egui::Label::new(secondary(if available {
+                            "Explore a file, work through an idea or plan your next change."
+                        } else {
+                            "Choose a project to give this conversation context."
+                        }))
+                        .wrap(),
+                    );
+                    if available {
+                        ui.add_space(18.0);
+                        for text in [
+                            "Explain the active file",
+                            "Find risky code paths",
+                            "Summarize this project",
+                        ] {
+                            if suggestion_chip(ui, text).clicked() {
+                                suggestion = Some(text);
+                            }
+                            ui.add_space(6.0);
+                        }
+                    }
+                });
             }
             for (index, message) in chat.messages.iter().enumerate() {
                 ui.push_id(index, |ui| {
                     super::motion::enter(ui, ui.id().with("message-entry"), super::motion::PANEL);
-                    let is_user = message.author == "You";
-                    let color = if message.author == "Error" {
-                        colors().error
-                    } else if is_user {
-                        colors().secondary
-                    } else {
-                        colors().accent_hover
-                    };
-                    let frame = Frame::new()
-                        .fill(if is_user {
-                            colors().elevated
-                        } else {
-                            egui::Color32::TRANSPARENT
-                        })
-                        .inner_margin(Margin::same(12))
-                        .corner_radius(CONTROL_RADIUS);
-                    frame.show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new(message.author)
-                                    .size(SMALL)
-                                    .strong()
-                                    .color(color),
-                            );
-                            ui.add_space((ui.available_width() - 40.0).max(0.0));
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if ui
-                                    .add(egui::Button::new(muted("Copy")).frame(false))
-                                    .clicked()
-                                {
-                                    ui.ctx().copy_text(message.text.clone());
-                                }
+                    if message.author == "You" {
+                        user_bubble(ui, &message.text);
+                    } else if message.author == "Error" {
+                        Frame::new()
+                            .fill(colors().error.gamma_multiply(0.10))
+                            .stroke(egui::Stroke::new(
+                                1.0_f32,
+                                colors().error.gamma_multiply(0.4),
+                            ))
+                            .corner_radius(10)
+                            .inner_margin(Margin::same(12))
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                ui.label(
+                                    RichText::new("Something went wrong")
+                                        .strong()
+                                        .color(colors().error),
+                                );
+                                ui.add(
+                                    egui::Label::new(secondary(&message.text))
+                                        .wrap()
+                                        .selectable(true),
+                                );
                             });
-                        });
-                        ui.add_space(4.0);
-                        if is_user || message.author == "Error" {
-                            ui.add(egui::Label::new(&message.text).wrap().selectable(true));
-                        } else {
-                            markdown(ui, &message.text);
-                        }
-                    });
-                    ui.add_space(12.0);
+                    } else {
+                        assistant_message(ui, chat.provider, message.author, &message.text, false);
+                    }
+                    ui.add_space(14.0);
                 });
             }
             if !chat.partial.is_empty() {
-                markdown(ui, &chat.partial);
-            }
-            if chat.run.is_some() {
-                ui.horizontal(|ui| {
-                    busy_indicator(ui);
-                    ui.label(muted(chat.activity));
-                });
+                assistant_message(ui, chat.provider, brand.name, &chat.partial, true);
+            } else if running {
+                thinking_row(ui, chat.provider, chat.activity);
             }
         });
+    if let Some(text) = suggestion {
+        chat.prompt = text.to_owned();
+        chat.revision = chat.revision.wrapping_add(1);
+    }
     ui.add_space(8.0);
     let composer_id = ui.id().with("chat-composer");
     let focus = ui.ctx().memory(|m| m.has_focus(composer_id));
     let progress =
         super::motion::state(ui, composer_id.with("focus"), focus, super::motion::CONTROL);
+    // Enter sends, Shift+Enter inserts a new line.
+    let enter_send = focus
+        && available
+        && !running
+        && !chat.prompt.trim().is_empty()
+        && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
     Frame::new()
         .fill(colors().inset)
-        .inner_margin(Margin::same(14))
-        .corner_radius(PANEL_RADIUS)
+        .inner_margin(Margin {
+            left: 14,
+            right: 10,
+            top: 12,
+            bottom: 10,
+        })
+        .corner_radius(14)
         .stroke(egui::Stroke::new(
-            1.0_f32,
+            1.0_f32 + progress * 0.5,
             super::motion::blend(colors().control_border, colors().accent, progress),
         ))
+        .shadow(egui::Shadow {
+            offset: [0, 4],
+            blur: (10.0 + progress * 10.0) as u8,
+            spread: 0,
+            color: colors().accent.gamma_multiply(0.10 * progress),
+        })
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             let response = ui.add_enabled(
@@ -1194,7 +1301,7 @@ fn chat_box(
                 TextEdit::multiline(&mut chat.prompt)
                     .id(composer_id)
                     .frame(false)
-                    .hint_text("Ask about your code…")
+                    .hint_text(format!("Message {}…", brand.name))
                     .desired_rows(3)
                     .char_limit(12_000)
                     .desired_width(f32::INFINITY)
@@ -1203,13 +1310,13 @@ fn chat_box(
             if response.changed() {
                 chat.revision = chat.revision.wrapping_add(1);
             }
-            ui.add_space(8.0);
+            ui.add_space(6.0);
             let footer = ui.available_rect_before_wrap();
-            let context_width = (footer.width() - 72.0).max(80.0);
-            let mut send = false;
+            let context_width = (footer.width() - 44.0).max(80.0);
+            let mut send = enter_send;
             ui.horizontal(|ui| {
                 ui.allocate_ui_with_layout(
-                    egui::vec2(context_width, 28.0),
+                    egui::vec2(context_width, 30.0),
                     Layout::left_to_right(Align::Center),
                     |ui| {
                         ui.set_min_width(context_width);
@@ -1217,19 +1324,254 @@ fn chat_box(
                     },
                 );
                 if let Some(run) = &chat.run {
-                    if ui.button("Stop").clicked() {
+                    if round_button(ui, false, true, "Stop").clicked() {
                         run.cancel();
                         chat.activity = "Stopping";
                     }
                 } else {
-                    send = ui
-                        .add_enabled(available && !chat.prompt.trim().is_empty(), primary("Send"))
-                        .clicked();
+                    let ready = available && !chat.prompt.trim().is_empty();
+                    send |= round_button(ui, true, ready, "Send · Enter").clicked() && ready;
                 }
             });
             send
         })
         .inner
+}
+
+/// Small rounded metadata tag.
+fn tag(ui: &mut Ui, text: &str) {
+    let galley = ui.painter().layout_no_wrap(
+        text.to_owned(),
+        egui::FontId::proportional(11.0),
+        colors().muted,
+    );
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(galley.size().x + 14.0, 18.0),
+        egui::Sense::hover(),
+    );
+    ui.painter().rect_filled(rect, 9, colors().elevated);
+    ui.painter().galley(
+        rect.left_center() + egui::vec2(7.0, -galley.size().y / 2.0),
+        galley,
+        colors().muted,
+    );
+}
+
+fn suggestion_chip(ui: &mut Ui, text: &str) -> egui::Response {
+    let galley = ui.painter().layout_no_wrap(
+        text.to_owned(),
+        egui::FontId::proportional(BODY),
+        colors().secondary,
+    );
+    let size = egui::vec2(galley.size().x + 28.0, 30.0);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    let hover = super::motion::state(
+        ui,
+        response.id.with("hover"),
+        response.hovered(),
+        super::motion::HOVER,
+    );
+    ui.painter().rect(
+        rect,
+        15,
+        super::motion::blend(colors().elevated, colors().hover, hover),
+        egui::Stroke::new(
+            1.0_f32,
+            super::motion::blend(colors().border, colors().accent.gamma_multiply(0.6), hover),
+        ),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().galley(
+        rect.center() - galley.size() / 2.0,
+        galley,
+        if response.hovered() {
+            colors().text
+        } else {
+            colors().secondary
+        },
+    );
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+fn user_bubble(ui: &mut Ui, text: &str) {
+    let max = (ui.available_width() * 0.86).max(120.0);
+    ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+        let shown = Frame::new()
+            .fill(super::motion::blend(
+                colors().elevated,
+                colors().accent,
+                0.14,
+            ))
+            .corner_radius(egui::CornerRadius {
+                nw: 14,
+                ne: 14,
+                sw: 14,
+                se: 4,
+            })
+            .inner_margin(Margin::symmetric(14, 10))
+            .show(ui, |ui| {
+                ui.set_max_width(max - 28.0);
+                ui.add(
+                    egui::Label::new(RichText::new(text).color(colors().text))
+                        .wrap()
+                        .selectable(true),
+                );
+            });
+        shown.response.context_menu(|ui| {
+            if ui.button("Copy").clicked() {
+                ui.ctx().copy_text(text.to_owned());
+                ui.close();
+            }
+        });
+    });
+}
+
+fn assistant_message(
+    ui: &mut Ui,
+    provider: crate::assistant::Provider,
+    author: &str,
+    text: &str,
+    streaming: bool,
+) {
+    ui.horizontal_top(|ui| {
+        let (tile, _) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::hover());
+        super::brands::avatar(ui, tile, provider, streaming);
+        ui.add_space(4.0);
+        ui.vertical(|ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(author)
+                        .size(SMALL)
+                        .strong()
+                        .color(colors().secondary),
+                );
+                if !streaming {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui
+                            .add(egui::Button::new(muted("Copy")).frame(false))
+                            .on_hover_text("Copy message")
+                            .clicked()
+                        {
+                            ui.ctx().copy_text(text.to_owned());
+                        }
+                    });
+                }
+            });
+            ui.add_space(2.0);
+            markdown(ui, text);
+            if streaming {
+                caret(ui);
+            }
+        });
+    });
+}
+
+fn caret(ui: &mut Ui) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 14.0), egui::Sense::hover());
+    let live = ui.style().animation_time > 0.0;
+    let on = !live || (ui.input(|i| i.time) * 2.0).fract() < 0.6;
+    if on {
+        ui.painter()
+            .rect_filled(rect.shrink2(egui::vec2(1.0, 0.0)), 1, colors().accent);
+    }
+    if live {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(120));
+    }
+}
+
+fn thinking_row(ui: &mut Ui, provider: crate::assistant::Provider, activity: &str) {
+    ui.horizontal(|ui| {
+        let (tile, _) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::hover());
+        super::brands::avatar(ui, tile, provider, true);
+        ui.add_space(4.0);
+        let (dots, _) = ui.allocate_exact_size(egui::vec2(30.0, 24.0), egui::Sense::hover());
+        let live = ui.style().animation_time > 0.0;
+        let t = ui.input(|i| i.time) as f32;
+        for i in 0..3 {
+            let k = if live {
+                ((t * 5.0 - i as f32 * 0.7).sin() * 0.5 + 0.5).powf(2.0)
+            } else {
+                0.5
+            };
+            ui.painter().circle_filled(
+                dots.left_center() + egui::vec2(5.0 + i as f32 * 9.0, -k * 3.0),
+                2.6,
+                colors().accent.gamma_multiply(0.4 + 0.6 * k),
+            );
+        }
+        ui.label(muted(activity));
+        if live {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(33));
+        }
+    });
+}
+
+/// Round icon button for the composer: an arrow to send or a square to stop.
+fn round_button(ui: &mut Ui, send: bool, enabled: bool, label: &str) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(30.0, 30.0),
+        if enabled {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        },
+    );
+    #[cfg(test)]
+    super::motion::record(ui, label, rect);
+    let hover = super::motion::state(
+        ui,
+        response.id.with("hover"),
+        response.hovered() && enabled,
+        super::motion::HOVER,
+    );
+    let press = super::motion::state(
+        ui,
+        response.id.with("press"),
+        response.is_pointer_button_down_on(),
+        super::motion::HOVER,
+    );
+    let fill = if !enabled {
+        colors().elevated
+    } else if send {
+        super::motion::blend(colors().accent, colors().accent_hover, hover)
+    } else {
+        super::motion::blend(colors().elevated, colors().hover, hover)
+    };
+    let r = rect.shrink(press * 1.5);
+    ui.painter()
+        .circle_filled(r.center(), r.width() / 2.0, fill);
+    let ink = if !enabled {
+        colors().disabled
+    } else if send {
+        colors().canvas
+    } else {
+        colors().text
+    };
+    let c = r.center();
+    if send {
+        let s = egui::Stroke::new(1.8_f32, ink);
+        ui.painter()
+            .line_segment([c + egui::vec2(0.0, 6.0), c + egui::vec2(0.0, -6.0)], s);
+        ui.painter().add(egui::Shape::line(
+            vec![
+                c + egui::vec2(-5.0, -1.0),
+                c + egui::vec2(0.0, -6.0),
+                c + egui::vec2(5.0, -1.0),
+            ],
+            s,
+        ));
+    } else {
+        ui.painter().rect_filled(
+            egui::Rect::from_center_size(c, egui::vec2(9.0, 9.0)),
+            2,
+            ink,
+        );
+    }
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+    response.on_hover_text(label)
 }
 
 fn markdown(ui: &mut Ui, text: &str) {
@@ -1250,12 +1592,29 @@ fn markdown(ui: &mut Ui, text: &str) {
             && !marker.is_empty()
             && marker.chars().all(|c| c == '#')
         {
-            ui.label(RichText::new(heading).strong().size(15.0));
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(heading)
+                    .strong()
+                    .size(LEAD)
+                    .color(colors().text),
+            );
+            ui.add_space(2.0);
+        } else if let Some(item) = line
+            .trim_start()
+            .strip_prefix("- ")
+            .or_else(|| line.trim_start().strip_prefix("* "))
+        {
+            ui.horizontal_top(|ui| {
+                let (dot, _) = ui.allocate_exact_size(egui::vec2(12.0, 18.0), egui::Sense::hover());
+                ui.painter()
+                    .circle_filled(dot.center(), 2.0, colors().accent);
+                ui.add(egui::Label::new(inline(item)).wrap().selectable(true));
+            });
+        } else if line.trim().is_empty() {
+            ui.add_space(6.0);
         } else {
-            let line = line
-                .strip_prefix("- ")
-                .map_or_else(|| line.to_owned(), |item| format!("• {item}"));
-            ui.add(egui::Label::new(line).wrap().selectable(true));
+            ui.add(egui::Label::new(inline(line)).wrap().selectable(true));
         }
     }
     if let Some(language) = language {
@@ -1263,28 +1622,124 @@ fn markdown(ui: &mut Ui, text: &str) {
     }
 }
 
+/// Inline code spans rendered in the monospace face with a soft background.
+fn inline(line: &str) -> egui::text::LayoutJob {
+    let tick = char::from(96u8);
+    let mut job = egui::text::LayoutJob::default();
+    for (i, part) in line.split(tick).enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        let code = i % 2 == 1;
+        job.append(
+            part,
+            0.0,
+            egui::TextFormat {
+                font_id: if code {
+                    egui::FontId::monospace(BODY - 0.5)
+                } else {
+                    egui::FontId::proportional(BODY)
+                },
+                color: if code {
+                    colors().accent_hover
+                } else {
+                    colors().text
+                },
+                background: if code {
+                    colors().elevated
+                } else {
+                    egui::Color32::TRANSPARENT
+                },
+                line_height: Some(BODY * 1.5),
+                ..Default::default()
+            },
+        );
+    }
+    job
+}
+
 fn code_block(ui: &mut Ui, text: &str, language: &str) {
+    ui.add_space(4.0);
     Frame::new()
         .fill(colors().canvas)
-        .inner_margin(Margin::same(8))
-        .corner_radius(8)
+        .stroke(egui::Stroke::new(1.0_f32, colors().border))
+        .corner_radius(10)
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(muted(if language.is_empty() {
-                    "Code"
-                } else {
-                    language
-                }));
-                if ui.small_button("Copy code").clicked() {
-                    ui.ctx().copy_text(text.to_owned());
-                }
-            });
-            ui.add(
-                egui::Label::new(RichText::new(text).monospace().small())
-                    .wrap()
-                    .selectable(true),
-            );
+            ui.set_width(ui.available_width());
+            Frame::new()
+                .fill(colors().inset)
+                .corner_radius(egui::CornerRadius {
+                    nw: 10,
+                    ne: 10,
+                    sw: 0,
+                    se: 0,
+                })
+                .inner_margin(Margin::symmetric(12, 6))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(if language.is_empty() {
+                                "code"
+                            } else {
+                                language
+                            })
+                            .monospace()
+                            .size(11.0)
+                            .color(colors().muted),
+                        );
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            let copied_id = ui.id().with(("copied", text.len()));
+                            let now = ui.input(|i| i.time);
+                            let copied = ui
+                                .ctx()
+                                .data(|d| d.get_temp::<f64>(copied_id))
+                                .is_some_and(|t| now - t < 1.4);
+                            if ui
+                                .add(
+                                    egui::Button::new(muted(if copied {
+                                        "Copied"
+                                    } else {
+                                        "Copy"
+                                    }))
+                                    .frame(false),
+                                )
+                                .clicked()
+                            {
+                                ui.ctx().copy_text(text.to_owned());
+                                ui.ctx().data_mut(|d| d.insert_temp(copied_id, now));
+                                ui.ctx()
+                                    .request_repaint_after(std::time::Duration::from_millis(1500));
+                            }
+                        });
+                    });
+                });
+            Frame::new()
+                .inner_margin(Margin::symmetric(12, 10))
+                .show(ui, |ui| {
+                    ScrollArea::horizontal()
+                        .id_salt(("code", text.len(), language))
+                        .show(ui, |ui| {
+                            let theme = egui_extras::syntax_highlighting::CodeTheme::dark(12.0);
+                            let mut job = egui_extras::syntax_highlighting::highlight(
+                                ui.ctx(),
+                                ui.style(),
+                                &theme,
+                                text,
+                                if language.is_empty() { "txt" } else { language },
+                            );
+                            for section in &mut job.sections {
+                                section.format.font_id = egui::FontId::monospace(12.0);
+                                section.format.line_height = Some(12.0 * CODE_LINE_HEIGHT);
+                                section.format.color =
+                                    syntax_color(section.format.color, section.format.italics);
+                            }
+                            job.wrap.max_width = f32::INFINITY;
+                            ui.add(egui::Label::new(job).selectable(true).extend());
+                        });
+                });
         });
+    ui.add_space(4.0);
 }
 
 #[cfg(test)]

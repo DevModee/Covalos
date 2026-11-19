@@ -17,7 +17,6 @@ pub(super) const STATUS_HEIGHT: f32 = 25.0;
 pub(super) const PANEL_PADDING: i8 = 12;
 pub(super) const CONTROL_RADIUS: u8 = 6;
 pub(super) const CHECKBOX_RADIUS: u8 = 2;
-pub(super) const PANEL_RADIUS: u8 = 10;
 pub(super) const MODAL_RADIUS: u8 = 12;
 pub(super) const HOVER_SECONDS: f32 = super::motion::HOVER;
 pub(super) const MIN_EDITOR_WIDTH: f32 = 320.0;

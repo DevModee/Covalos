@@ -29,7 +29,7 @@ impl Background {
             Self::Orbital => "Orbital",
             Self::Neural => "Neural",
             Self::Void => "Void",
-            Self::Ascii => "ASCII",
+            Self::Ascii => "ASCII Flow",
             Self::Minimal => "Minimal",
         }
     }
@@ -151,6 +151,7 @@ pub(super) struct Identity {
     scene_active: bool,
     orbital_cache: Option<OrbitalCache>,
     mascot_click: f64,
+    mood: (Mood, f64),
 }
 struct OrbitalCache {
     key: [u32; 4],
@@ -247,20 +248,28 @@ impl Identity {
             && !reduce
             && prefs.mascot
             && prefs.mascot_motion
-            && prefs.mascot_intensity > 0.0
-            && (mood.busy()
-                || self.mascot_hover
-                || now < self.until
-                || now - self.mascot_click < 0.6);
+            && prefs.mascot_intensity > 0.0;
+        if self.mood.0 != mood {
+            self.mood = (mood, now);
+        }
+        let hovering = self.mascot_hover;
         self.mascot_hover = false;
         self.clock.advance(now, background_active, prefs.speed);
         self.mascot_clock.advance(now, mascot_active, 1.0);
         if background_active || mascot_active {
-            let interacting = now < self.until || now - self.mascot_click < 0.6;
+            let interacting = now < self.until
+                || now - self.mascot_click < 0.6
+                || now - self.mood.1 < 1.6
+                || hovering;
             let fps = if interacting {
                 60
-            } else {
+            } else if background_active {
                 prefs.fps.clamp(5, 60)
+            } else if mood.busy() || mood == Mood::Approval {
+                24
+            } else {
+                // Idle breathing and blinking only; keep the cost negligible.
+                12
             };
             ctx.request_repaint_after(std::time::Duration::from_secs_f64(1.0 / f64::from(fps)));
         }
@@ -282,8 +291,7 @@ impl Identity {
         p
     }
     pub(super) fn paint(&mut self, ui: &Ui, rect: Rect, prefs: &IdentityPreferences, _mood: Mood) {
-        if matches!(prefs.background, Background::Off | Background::Minimal) || rect.width() < 80.0
-        {
+        if prefs.background == Background::Off || rect.width() < 80.0 {
             return;
         }
         let p = ui.painter_at(rect);
@@ -446,46 +454,131 @@ impl Identity {
                 }
             }
             Background::Ascii => {
-                let columns = (42.0 + prefs.density * 22.0) as usize;
-                let rows = 22;
-                let step = (rect.width().min(780.0) / (columns as f32)).clamp(7.0, 15.0);
-                let origin =
-                    center - egui::vec2(columns as f32 * step * 0.5, rows as f32 * step * 0.65);
-                let glyphs = [' ', '.', ':', '+', '*', '#'];
-                let font = FontId::monospace(step * 0.84);
+                // ASCII Flow: a full-field glyph grid driven by drifting fractal noise.
+                // The cursor acts as a lens (repulsion plus a bright rim), clicks send a
+                // shockwave through the field, and everything relaxes back to the flow.
+                let step = (17.0 - prefs.density * 6.0).clamp(10.0, 17.0);
+                let cols = ((rect.width() / step) as usize).min(220);
+                let rows = ((rect.height() / (step * 1.25)) as usize).min(110);
+                if cols < 2 || rows < 2 {
+                    return;
+                }
+                let glyphs = [' ', '.', '·', ':', '-', '=', '+', '*', '#', '%', '@'];
+                let font = FontId::monospace(step * 0.86);
                 let galleys =
                     glyphs.map(|c| p.layout_no_wrap(c.to_string(), font.clone(), Color32::WHITE));
+                let ripple = self.ripple.map(|(o, s)| (o, (self.now - s) as f32));
+                let half = egui::vec2(step * 0.5, step * 0.62);
                 for y in 0..rows {
-                    for x in 0..columns {
-                        let base = origin + egui::vec2(x as f32 * step, y as f32 * step * 1.3);
-                        let pos = self.displace(base, 0.8);
-                        let a = (x as f32 - columns as f32 * 0.5) / 13.0;
-                        let b = (y as f32 - rows as f32 * 0.5) / 7.0;
-                        let distance = self.influence.map_or(900.0, |c| base.distance(c));
-                        let influence = (1.0 - distance / 180.0).max(0.0);
-                        let wave = match prefs.pattern {
-                            Pattern::Waves => (a * 2.4 - t * 0.7).sin() * (b * 2.0 + t * 0.2).cos(),
-                            Pattern::Geometry => (a.abs() + b.abs() - t * 0.3).sin(),
-                            Pattern::Particles => {
-                                (a * 7.0 + b * 11.0 + t * 0.4).sin() * (b * 4.0 - a).cos()
+                    for x in 0..cols {
+                        let base =
+                            rect.min + egui::vec2(x as f32 * step, y as f32 * step * 1.25) + half;
+                        let mut sample = egui::vec2(x as f32, y as f32 * 1.25) * 0.075;
+                        let mut lens = 0.0;
+                        if let Some(c) = self.influence {
+                            let d = base - c;
+                            let dist = d.length();
+                            if dist < 190.0 {
+                                let k = 1.0 - dist / 190.0;
+                                // Push the sampled field away from the cursor.
+                                sample -= d / dist.max(1.0) * k * k * 1.6;
+                                lens = (1.0 - ((dist - 70.0) / 38.0).abs()).max(0.0) * 0.55
+                                    + k * k * 0.25;
                             }
-                            Pattern::Orbits => ((a * a + b * b).sqrt() * 5.0 - t).cos(),
-                            Pattern::Network => (a * 3.0 + t * 0.2).sin() * (b * 5.0).sin(),
-                            Pattern::Sequence => ((a + b) * 3.0 - t * 0.5).sin(),
-                        };
-                        let v = ((wave + 1.0) * 0.5 + influence * 0.5).clamp(0.0, 0.999);
-                        let index = (v * 5.0) as usize;
-                        if index > 0 && v > 0.5 - prefs.density * 0.3 {
-                            p.galley_with_override_text_color(
-                                pos,
-                                galleys[index].clone(),
-                                color.gamma_multiply(0.6 + v + influence),
-                            );
                         }
+                        let mut wave = 0.0;
+                        if let Some((o, age)) = ripple {
+                            let r = age * 520.0;
+                            let dist = base.distance(o);
+                            wave = (1.0 - ((dist - r) / 34.0).abs()).max(0.0)
+                                * (1.0 - age / 1.1).max(0.0);
+                        }
+                        let v = match prefs.pattern {
+                            Pattern::Waves => flow(sample, t),
+                            Pattern::Geometry => {
+                                let a = sample.x - 6.0;
+                                let b = sample.y - 4.0;
+                                ((a.abs() + b.abs()) * 1.6 - t * 0.6).sin() * 0.5 + 0.5
+                            }
+                            Pattern::Particles => {
+                                let n = flow(sample * 2.4, t * 1.6);
+                                (n - 0.45).max(0.0) * 2.0
+                            }
+                            Pattern::Orbits => {
+                                let c = egui::vec2(
+                                    cols as f32 * 0.075 * 0.62,
+                                    rows as f32 * 0.075 * 0.6,
+                                );
+                                let d = (sample - c).length();
+                                ((d * 3.2 - t * 0.9).sin() * 0.5 + 0.5) * (1.0 - d / 9.0).max(0.0)
+                            }
+                            Pattern::Network => {
+                                let n = flow(sample * 0.7, t * 0.5);
+                                if (n * 9.0).sin().abs() < 0.22 {
+                                    n * 1.6
+                                } else {
+                                    0.0
+                                }
+                            }
+                            Pattern::Sequence => {
+                                ((sample.x + sample.y) * 2.2 - t * 0.8).sin() * 0.5 + 0.5
+                            }
+                        };
+                        let v = (v * (0.55 + prefs.density * 0.6) + lens + wave * 0.8)
+                            .clamp(0.0, 0.999);
+                        let index = (v * glyphs.len() as f32) as usize;
+                        if index == 0 {
+                            continue;
+                        }
+                        let pos = if self.scene_active {
+                            base + self.pointer * (4.0 + v * 6.0)
+                        } else {
+                            base
+                        } - half;
+                        let hot = lens + wave;
+                        let ink = if hot > 0.35 {
+                            super::motion::blend(tint, palette.text, (hot - 0.35).min(0.5))
+                        } else {
+                            tint
+                        };
+                        p.galley_with_override_text_color(
+                            pos,
+                            galleys[index].clone(),
+                            ink.gamma_multiply(
+                                (prefs.intensity * (0.8 + v * 2.6 + hot * 3.0)).min(1.0),
+                            ),
+                        );
                     }
                 }
             }
-            Background::Off | Background::Minimal => {}
+            Background::Minimal => {
+                // A quiet dot grid with a soft spotlight under the cursor.
+                let step = 22.0;
+                let cols = (rect.width() / step) as usize + 1;
+                let rows = (rect.height() / step) as usize + 1;
+                let dot = tint.gamma_multiply(prefs.intensity * 1.4);
+                for y in 0..rows.min(80) {
+                    for x in 0..cols.min(140) {
+                        let base =
+                            rect.min + egui::vec2(x as f32 * step + 11.0, y as f32 * step + 11.0);
+                        let k = self
+                            .influence
+                            .map_or(0.0, |c| (1.0 - base.distance(c) / 150.0).max(0.0));
+                        let pos = if let Some(c) = self.influence {
+                            let d = base - c;
+                            base + d / d.length().max(1.0) * k * k * 6.0
+                        } else {
+                            base
+                        };
+                        p.circle_filled(
+                            pos,
+                            0.8 + k * 1.1,
+                            dot.gamma_multiply((1.0 + k * 3.0).min(4.0)),
+                        );
+                    }
+                }
+            }
+            Background::Off => {}
         }
         if prefs.animated
             && let Some((origin, start)) = self.ripple
@@ -526,94 +619,16 @@ impl Identity {
             self.mascot_click = self.now;
             ui.ctx().request_repaint();
         }
-        let animated = prefs.mascot_motion && !reduce && self.mascot_clock.active;
-        let intensity = if prefs.mascot_motion && !reduce {
-            prefs.mascot_intensity
-        } else {
-            0.0
-        };
-        let hover = if intensity > 0.0 && prefs.interactive {
-            super::motion::state(
-                ui,
-                response.id.with("curious"),
-                response.hovered(),
-                super::motion::CONTROL,
-            ) * intensity
-        } else {
-            0.0
-        };
-        let bob = if animated {
-            (self.mascot_clock.phase * 2.1).sin() * 0.8 * intensity
-        } else {
-            0.0
-        };
-        let click_age = (self.now - self.mascot_click) as f32;
-        let bounce = if animated && (0.0..0.6).contains(&click_age) {
-            (click_age / 0.6 * std::f32::consts::PI).sin() * 3.0 * intensity
-        } else {
-            0.0
-        };
-        let art = Rect::from_center_size(
-            rect.center() + egui::vec2(0.0, bob - bounce - hover),
-            egui::vec2(size * (1.0 + hover * 0.04), size),
+        let pose = self.pose(
+            ui,
+            response.id,
+            rect.center(),
+            prefs,
+            mood,
+            reduce,
+            response.hovered(),
         );
-        super::assets::paint(ui, art, "luma");
-        let face = art.min + egui::vec2(art.width() * 0.5, art.height() * 0.365);
-        let mut pointer = if prefs.interactive && prefs.mascot_motion && !reduce {
-            self.pointer * size * 0.016 * intensity
-        } else {
-            egui::Vec2::ZERO
-        };
-        if animated {
-            match mood {
-                Mood::Thinking => pointer.y -= size * 0.018,
-                Mood::Coding => pointer.y += size * 0.012,
-                Mood::Searching => {
-                    pointer.x += (self.mascot_clock.phase * 1.8).sin() * size * 0.035
-                }
-                _ => {}
-            }
-        }
-        let ink = Color32::from_rgb(39, 29, 57);
-        let p = ui.painter_at(rect);
-        let eye_r = (size * 0.025).max(1.1);
-        for x in [-size * 0.067, size * 0.067] {
-            let c = face + egui::vec2(x, 0.0) + pointer;
-            if mood == Mood::Sleeping {
-                p.line_segment(
-                    [c - egui::vec2(eye_r, 0.0), c + egui::vec2(eye_r, 0.0)],
-                    Stroke::new(1.1_f32, ink),
-                );
-            } else if mood == Mood::Success {
-                p.add(egui::Shape::line(
-                    vec![
-                        c + egui::vec2(-eye_r, 0.0),
-                        c + egui::vec2(0.0, -eye_r),
-                        c + egui::vec2(eye_r, 0.0),
-                    ],
-                    Stroke::new(1.2_f32, ink),
-                ));
-            } else {
-                p.circle_filled(c, eye_r * (1.0 + hover * 0.18), ink);
-                p.circle_filled(
-                    c - egui::vec2(eye_r * 0.2, eye_r * 0.3),
-                    eye_r * 0.25,
-                    Color32::WHITE,
-                );
-            }
-        }
-        let mouth = face + egui::vec2(0.0, size * 0.055);
-        if mood == Mood::Approval || mood == Mood::Error {
-            p.circle_stroke(mouth, size * 0.018, Stroke::new(1.0_f32, ink));
-        } else {
-            p.line_segment(
-                [
-                    mouth - egui::vec2(size * 0.018, 0.0),
-                    mouth + egui::vec2(size * 0.018, 0.0),
-                ],
-                Stroke::new(0.9_f32, ink),
-            );
-        }
+        super::mascot::paint(&ui.painter_at(rect.expand(6.0)), rect, pose);
         response.widget_info(|| {
             egui::WidgetInfo::labeled(
                 egui::WidgetType::Button,
@@ -624,6 +639,74 @@ impl Identity {
         response
             .on_hover_text(format!("Luma · {}\nOpen agent companion", mood.name()))
             .clicked()
+    }
+}
+impl Identity {
+    #[allow(clippy::too_many_arguments)]
+    fn pose(
+        &self,
+        ui: &Ui,
+        id: egui::Id,
+        center: Pos2,
+        prefs: &IdentityPreferences,
+        mood: Mood,
+        reduce: bool,
+        hovered: bool,
+    ) -> super::mascot::Pose {
+        let motion = if prefs.mascot_motion && !reduce {
+            prefs.mascot_intensity.max(0.2)
+        } else {
+            0.0
+        };
+        let live = motion > 0.0 && prefs.interactive && self.mascot_clock.active;
+        let look = super::mascot::look(
+            ui.ctx(),
+            id.with("look"),
+            center,
+            self.previous_pointer,
+            live,
+        );
+        let hover = if motion > 0.0 && prefs.interactive {
+            super::motion::state(ui, id.with("curious"), hovered, super::motion::CONTROL)
+        } else {
+            0.0
+        };
+        super::mascot::Pose {
+            look,
+            t: if motion > 0.0 {
+                self.mascot_clock.phase
+            } else {
+                0.0
+            },
+            hover,
+            click: if motion > 0.0 {
+                (self.now - self.mascot_click) as f32
+            } else {
+                99.0
+            },
+            mood_age: if motion > 0.0 {
+                (self.now - self.mood.1) as f32
+            } else {
+                99.0
+            },
+            mood,
+            motion,
+        }
+    }
+    /// A larger, non-interactive Luma for empty states and the Companion.
+    pub(super) fn portrait(
+        &self,
+        ui: &Ui,
+        rect: Rect,
+        prefs: &IdentityPreferences,
+        mood: Mood,
+        reduce: bool,
+    ) {
+        let id = ui
+            .id()
+            .with(("luma-portrait", rect.min.x as i32, rect.min.y as i32));
+        let pose = self.pose(ui, id, rect.center(), prefs, mood, reduce, false);
+        super::mascot::paint(&ui.painter_at(rect.expand(8.0)), rect, pose);
     }
 }
 fn sphere(
@@ -685,6 +768,35 @@ fn star(rect: Rect, i: usize, t: f32) -> Pos2 {
     let y = (s * 0.414_214 + 0.15 + (t + s).sin() * 0.012).rem_euclid(1.0);
     rect.min + egui::vec2(x * rect.width(), y * rect.height())
 }
+fn hash(x: i32, y: i32) -> f32 {
+    let mut h = (x as u32).wrapping_mul(0x8da6_b343) ^ (y as u32).wrapping_mul(0xd816_3841);
+    h ^= h >> 13;
+    h = h.wrapping_mul(0x85eb_ca6b);
+    h ^= h >> 16;
+    (h & 0xffff) as f32 / 65535.0
+}
+fn value_noise(p: egui::Vec2) -> f32 {
+    let (x0, y0) = (p.x.floor(), p.y.floor());
+    let (fx, fy) = (p.x - x0, p.y - y0);
+    let (sx, sy) = (fx * fx * (3.0 - 2.0 * fx), fy * fy * (3.0 - 2.0 * fy));
+    let (xi, yi) = (x0 as i32, y0 as i32);
+    let a = hash(xi, yi);
+    let b = hash(xi + 1, yi);
+    let c = hash(xi, yi + 1);
+    let d = hash(xi + 1, yi + 1);
+    egui::lerp(egui::lerp(a..=b, sx)..=egui::lerp(c..=d, sx), sy)
+}
+/// Organic drifting field in 0..1: domain-warped fractal value noise.
+fn flow(p: egui::Vec2, t: f32) -> f32 {
+    let warp = egui::vec2(
+        value_noise(p * 0.6 + egui::vec2(t * 0.11, 3.1)),
+        value_noise(p * 0.6 + egui::vec2(7.4, -t * 0.09)),
+    );
+    let q = p + warp * 2.2 + egui::vec2(t * 0.05, -t * 0.03);
+    let n = value_noise(q) * 0.55 + value_noise(q * 2.1) * 0.3 + value_noise(q * 4.3) * 0.15;
+    ((n - 0.32) * 1.9).clamp(0.0, 1.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -135,6 +135,13 @@ impl Editor {
             egui::pos2(area.center().x - width * 0.5, area.top() + top),
             egui::vec2(width, (area.height() - top).max(1.0)),
         );
+        // Reading scrim: the background stays alive at the edges and calms behind content.
+        super::mascot::soft_ellipse(
+            ui.painter(),
+            egui::pos2(rect.center().x, area.top() + top + 190.0),
+            egui::vec2(width * 0.85, 300.0),
+            colors().canvas.gamma_multiply(0.92),
+        );
         ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
             ui.set_width(width);
             ScrollArea::vertical().id_salt("welcome").show(ui, |ui| {
@@ -171,40 +178,42 @@ impl Editor {
                     );
                 });
                 ui.add_space(24.0);
-                ui.add_space(4.0);
-                if row(
-                    ui,
-                    "Open folder",
-                    if cfg!(target_os = "macos") {
-                        "⌘ O"
-                    } else {
-                        "Ctrl O"
-                    },
-                    false,
-                )
-                .clicked()
-                {
-                    self.pick_workspace(ui.ctx());
+                let mac = cfg!(target_os = "macos");
+                let cards = [
+                    (
+                        Icon::Explorer,
+                        "Open folder",
+                        if mac { "⌘ O" } else { "Ctrl O" },
+                    ),
+                    (
+                        Icon::Code,
+                        "Open file",
+                        if mac { "⇧ ⌘ O" } else { "Ctrl Shift O" },
+                    ),
+                    (Icon::Add, "Create project", "New folder"),
+                    (Icon::Hub, "Agent Hub", "Codex · Claude"),
+                ];
+                let columns = if width > 440.0 { 2 } else { 1 };
+                let gap = 10.0;
+                let card_w = (width - gap * (columns as f32 - 1.0)) / columns as f32;
+                let mut clicked = None;
+                for chunk in cards.chunks(columns) {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = gap;
+                        for &(icon, title, detail) in chunk {
+                            if home_card(ui, card_w, icon, title, detail).clicked() {
+                                clicked = Some(title);
+                            }
+                        }
+                    });
+                    ui.add_space(gap - 4.0);
                 }
-                if row(
-                    ui,
-                    "Open file",
-                    if cfg!(target_os = "macos") {
-                        "⇧ ⌘ O"
-                    } else {
-                        "Ctrl Shift O"
-                    },
-                    false,
-                )
-                .clicked()
-                {
-                    self.pick_file();
-                }
-                if row(ui, "Create project", "", false).clicked() {
-                    self.pick_new_project(ui.ctx());
-                }
-                if row(ui, "Open Agent Hub", "", false).clicked() {
-                    self.hub_open = true;
+                match clicked {
+                    Some("Open folder") => self.pick_workspace(ui.ctx()),
+                    Some("Open file") => self.pick_file(),
+                    Some("Create project") => self.pick_new_project(ui.ctx()),
+                    Some(_) => self.hub_open = true,
+                    None => {}
                 }
                 if !self.preferences.recent.is_empty() {
                     ui.add_space(28.0);
@@ -502,6 +511,99 @@ impl Editor {
             None => {}
         }
     }
+}
+
+/// Home action card: icon tile, title, shortcut; lifts and lights its border on hover.
+fn home_card(ui: &mut Ui, width: f32, icon: Icon, title: &str, detail: &str) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 64.0), egui::Sense::click());
+    #[cfg(test)]
+    super::motion::record(ui, format!("Home {title}"), rect);
+    let hover = super::motion::state(
+        ui,
+        response.id.with("card-hover"),
+        response.hovered() || response.has_focus(),
+        super::motion::CONTROL,
+    );
+    let press = super::motion::state(
+        ui,
+        response.id.with("card-press"),
+        response.is_pointer_button_down_on(),
+        super::motion::HOVER,
+    );
+    let r = rect.translate(egui::vec2(0.0, -2.0 * hover + press * 1.5));
+    let painter = ui.painter();
+    if hover > 0.01 {
+        painter.add(
+            egui::Shadow {
+                offset: [0, 6],
+                blur: 18,
+                spread: 0,
+                color: egui::Color32::from_black_alpha((60.0 * hover) as u8),
+            }
+            .as_shape(r, 12),
+        );
+    }
+    painter.rect(
+        r,
+        12,
+        super::motion::blend(
+            colors().surface.gamma_multiply(0.92),
+            colors().elevated,
+            hover,
+        ),
+        egui::Stroke::new(
+            1.0_f32,
+            super::motion::blend(colors().border, colors().accent.gamma_multiply(0.7), hover),
+        ),
+        egui::StrokeKind::Inside,
+    );
+    let tile = egui::Rect::from_center_size(
+        r.left_center() + egui::vec2(32.0, 0.0),
+        egui::vec2(36.0, 36.0),
+    );
+    painter.rect_filled(
+        tile,
+        10,
+        super::motion::blend(colors().inset, colors().accent_bg, hover),
+    );
+    draw_icon(
+        painter,
+        tile.center(),
+        icon,
+        super::motion::blend(colors().secondary, colors().accent_hover, hover),
+    );
+    let text = r.left_center() + egui::vec2(62.0, 0.0);
+    painter.text(
+        text - egui::vec2(0.0, 9.0),
+        egui::Align2::LEFT_CENTER,
+        title,
+        egui::FontId::proportional(BODY + 1.0),
+        colors().text,
+    );
+    painter.text(
+        text + egui::vec2(0.0, 10.0),
+        egui::Align2::LEFT_CENTER,
+        detail,
+        egui::FontId::proportional(SMALL),
+        colors().muted,
+    );
+    // Arrow nudges right on hover.
+    let arrow = r.right_center() - egui::vec2(20.0 - hover * 4.0, 0.0);
+    let s = egui::Stroke::new(1.4_f32, colors().muted.gamma_multiply(0.4 + 0.6 * hover));
+    painter.line_segment(
+        [arrow - egui::vec2(5.0, 0.0), arrow + egui::vec2(4.0, 0.0)],
+        s,
+    );
+    painter.add(egui::Shape::line(
+        vec![
+            arrow + egui::vec2(0.5, -3.5),
+            arrow + egui::vec2(4.0, 0.0),
+            arrow + egui::vec2(0.5, 3.5),
+        ],
+        s,
+    ));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, title));
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 #[cfg(test)]
