@@ -1,10 +1,13 @@
 #[cfg(test)]
 mod visual_tests;
 
+mod assets;
+mod brands;
 mod companion;
 mod files;
 mod hub;
 mod identity;
+mod motion;
 mod panels;
 mod preferences;
 mod sessions;
@@ -705,9 +708,7 @@ impl Editor {
             }
             self.activity_rail(ctx);
             self.sidebar(ctx);
-            if self.preferences.assistant_open {
-                self.assistant_panel(ctx);
-            }
+            self.assistant_panel(ctx);
             egui::CentralPanel::default()
                 .frame(egui::Frame::new().fill(theme::colors().canvas))
                 .show(ctx, |ui| self.editor_panel(ui));

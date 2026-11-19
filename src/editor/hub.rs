@@ -424,6 +424,7 @@ impl Editor {
             let nav =
                 egui::Rect::from_min_size(content.min, egui::vec2(nav_width, content.height()));
             ui.scope_builder(egui::UiBuilder::new().max_rect(nav), |ui| {
+                self.luma_dock(ui);
                 ui.add_space(8.0);
                 ui.label(RichText::new("Agent Hub").size(HEADING).strong());
                 ui.add_space(24.0);
@@ -489,6 +490,11 @@ impl Editor {
                             egui::pos2(body.right() - providers_width - 32.0, body.bottom()),
                         );
                         ui.scope_builder(egui::UiBuilder::new().max_rect(conversation), |ui| {
+                            ui.painter().rect_filled(
+                                conversation.expand(12.0),
+                                10,
+                                colors().canvas.gamma_multiply(0.96),
+                            );
                             ui.set_width(conversation.width());
                             ui.horizontal(|ui| {
                                 if ui
@@ -544,7 +550,7 @@ impl Editor {
                 {
                     ui.separator();
                     ui.horizontal_wrapped(|ui| {
-                        ui.label(RichText::new(provider.label()).strong());
+                        super::brands::title(ui, provider);
                         let status = match (provider.supported(), installed) {
                             (true, true) => "CLI available",
                             (true, false) => "CLI missing",
@@ -1043,10 +1049,14 @@ fn chat_box(
     context: impl FnOnce(&mut Ui),
     reset: &mut bool,
 ) -> bool {
+    ui.label(
+        RichText::new("AEROS  /  ASSISTANT")
+            .size(10.0)
+            .color(colors().muted),
+    );
+    ui.add_space(7.0);
     ui.horizontal(|ui| {
-        let (_, mark) = ui.allocate_space(egui::vec2(20.0, 28.0));
-        draw_icon(ui.painter(), mark.center(), Icon::Hub, colors().accent);
-        ui.label(RichText::new(chat.provider.label()).size(LEAD).strong());
+        super::brands::title(ui, chat.provider);
         if chat.connected {
             let (_, dot) = ui.allocate_space(egui::vec2(10.0, 10.0));
             ui.painter()
@@ -1083,10 +1093,13 @@ fn chat_box(
         .stick_to_bottom(true)
         .show(ui, |ui| {
             if chat.messages.is_empty() {
-                ui.add_space(32.0);
+                ui.add_space(28.0);
+                let (_, art) = ui.allocate_space(egui::vec2(62.0, 62.0));
+                super::assets::luma_badge(ui, art);
+                ui.add_space(16.0);
                 ui.label(
                     RichText::new(if available {
-                        "What are you working on?"
+                        "A clear place to think."
                     } else {
                         "Open a workspace"
                     })
@@ -1096,7 +1109,7 @@ fn chat_box(
                 ui.add_space(8.0);
                 ui.add(
                     egui::Label::new(secondary(if available {
-                        "Ask about your code or work through a change."
+                        "Explore a file, work through an idea, or plan your next change."
                     } else {
                         "Choose a project to give this conversation context."
                     }))
@@ -1105,6 +1118,7 @@ fn chat_box(
             }
             for (index, message) in chat.messages.iter().enumerate() {
                 ui.push_id(index, |ui| {
+                    super::motion::enter(ui, ui.id().with("message-entry"), super::motion::PANEL);
                     let is_user = message.author == "You";
                     let color = if message.author == "Error" {
                         colors().error
@@ -1161,16 +1175,24 @@ fn chat_box(
             }
         });
     ui.add_space(8.0);
+    let composer_id = ui.id().with("chat-composer");
+    let focus = ui.ctx().memory(|m| m.has_focus(composer_id));
+    let progress =
+        super::motion::state(ui, composer_id.with("focus"), focus, super::motion::CONTROL);
     Frame::new()
-        .fill(colors().elevated)
-        .inner_margin(Margin::same(12))
+        .fill(colors().inset)
+        .inner_margin(Margin::same(14))
         .corner_radius(PANEL_RADIUS)
-        .stroke(egui::Stroke::new(1.0_f32, colors().control_border))
+        .stroke(egui::Stroke::new(
+            1.0_f32,
+            super::motion::blend(colors().control_border, colors().accent, progress),
+        ))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             let response = ui.add_enabled(
                 available,
                 TextEdit::multiline(&mut chat.prompt)
+                    .id(composer_id)
                     .frame(false)
                     .hint_text("Ask about your code…")
                     .desired_rows(3)

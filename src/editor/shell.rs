@@ -8,7 +8,7 @@ use std::{
     thread,
 };
 
-use eframe::egui::{self, Id, Key, RichText, ScrollArea, Sense, Stroke, TextEdit, Ui};
+use eframe::egui::{self, Id, Key, RichText, ScrollArea, TextEdit, Ui};
 
 use super::{Editor, Pending, theme::*};
 use crate::workspace;
@@ -120,6 +120,7 @@ impl Editor {
     }
 
     pub(super) fn welcome(&mut self, ui: &mut Ui) {
+        enter(ui, Id::new("workspace-home-entry"));
         let area = ui.available_rect_before_wrap();
         let mood = self.agent_mood(ui.input(|i| i.focused));
         self.identity
@@ -143,7 +144,7 @@ impl Editor {
                     .map(workspace::filename)
                     .unwrap_or_else(|| format!("Welcome to {BRAND}"));
                 ui.horizontal(|ui| {
-                    let text_width = if width > 400.0 { width - 132.0 } else { width };
+                    let text_width = width;
                     ui.allocate_ui_with_layout(
                         egui::vec2(text_width, 112.0),
                         egui::Layout::top_down(egui::Align::Min),
@@ -168,9 +169,6 @@ impl Editor {
                             );
                         },
                     );
-                    if width > 400.0 {
-                        constellation(ui, 112.0, 104.0);
-                    }
                 });
                 ui.add_space(24.0);
                 ui.add_space(4.0);
@@ -272,6 +270,14 @@ impl Editor {
                         .show_ui(ui, |ui| {for theme in Theme::ALL {ui.selectable_value(&mut self.preferences.theme,theme,theme.name());}});
                 });
                 ui.add_space(8.0);
+                ui.horizontal_wrapped(|ui| { for theme in Theme::ALL {
+                    let selected=self.preferences.theme==theme;
+                    let response=ui.add_sized([72.0,42.0],egui::Button::new("").fill(theme.colors().canvas).stroke(egui::Stroke::new(if selected{2.0_f32}else{1.0_f32},if selected{colors().accent}else{colors().border})));
+                    let p=ui.painter_at(response.rect);p.rect_filled(egui::Rect::from_min_size(response.rect.min+egui::vec2(8.0,9.0),egui::vec2(8.0,23.0)),2,theme.colors().surface);for (y,w,c) in [(10.0,34.0,theme.colors().accent),(17.0,42.0,theme.colors().secondary),(24.0,28.0,theme.colors().syntax_string)]{p.line_segment([response.rect.min+egui::vec2(22.0,y),response.rect.min+egui::vec2(22.0+w,y)],egui::Stroke::new(2.0_f32,c));}
+                    #[cfg(test)] super::motion::record(ui,format!("Theme {}",theme.name()),response.rect);
+                    if response.on_hover_text(theme.name()).clicked(){self.preferences.theme=theme;}
+                }});
+                ui.add_space(8.0);
                 ui.add(egui::Slider::new(&mut self.preferences.font_size,11.0..=26.0).step_by(1.0).text("Editor font size").suffix(" pt"));
                 checkbox(ui,&mut self.preferences.high_contrast,"High contrast controls");
                 checkbox(ui,&mut self.preferences.compact,"Compact interface");
@@ -285,15 +291,18 @@ impl Editor {
                     let prefs=&mut self.preferences.identity;
                     ui.horizontal(|ui| {
                         ui.label(secondary("Preset"));
-                        egui::ComboBox::from_id_salt("background-preset").selected_text(prefs.background.name()).show_ui(ui, |ui| {
-                            for preset in super::identity::Background::ALL {ui.selectable_value(&mut prefs.background,preset,preset.name());}
+                        let selector=egui::ComboBox::from_id_salt("background-preset").selected_text(prefs.background.name()).show_ui(ui, |ui| {
+                            for preset in super::identity::Background::ALL {let response=ui.selectable_value(&mut prefs.background,preset,preset.name()); #[cfg(test)] super::motion::record(ui,format!("Background {}",preset.name()),response.rect); let _=response;}
                         });
+                        #[cfg(test)] super::motion::record(ui,"Background selector",selector.response.rect);
+                        let _=selector;
                     });
                     let (_,preview)=ui.allocate_space(egui::vec2(ui.available_width(),100.0));
                     ui.painter().rect_filled(preview,6,colors().canvas);
                     self.identity.paint(ui,preview,prefs,super::identity::Mood::Idle);
                     checkbox(ui,&mut prefs.animated,"Animate backgrounds");
-                    ui.add(egui::Slider::new(&mut prefs.fps,5..=30).text("Maximum FPS"));
+                    checkbox(ui,&mut prefs.interactive,"Pointer reactions");
+                    ui.add(egui::Slider::new(&mut prefs.fps,5..=60).text("Ambient FPS").suffix(" fps"));
                     ui.add(egui::Slider::new(&mut prefs.speed,0.1..=2.0).text("Speed"));
                     ui.add(egui::Slider::new(&mut prefs.density,0.1..=1.0).text("Density"));
                     ui.add(egui::Slider::new(&mut prefs.intensity,0.02..=0.4).text("Intensity"));
@@ -309,11 +318,12 @@ impl Editor {
                 ui.add_space(12.0);
                 egui::CollapsingHeader::new("Luma companion").show(ui, |ui| {
                     let prefs=&mut self.preferences.identity;
-                    checkbox(ui,&mut prefs.mascot,"Show Luma");
-                    checkbox(ui,&mut prefs.mascot_motion,"Animate activity");
+                    checkbox(ui,&mut prefs.mascot,"Show Luma in workspace");
+                    checkbox(ui,&mut prefs.mascot_motion,"Animate Luma");
+                    ui.add(egui::Slider::new(&mut prefs.mascot_intensity,0.0..=1.0).text("Motion intensity"));
                     checkbox(ui,&mut prefs.interactive,"Follow pointer and open companion");
-                    ui.add(egui::Slider::new(&mut prefs.mascot_size,18.0..=32.0).text("Size").suffix(" pt"));
-                    ui.label(muted("A kite-shaped orbital probe. Its state follows actual agent and search activity."));
+                    ui.add(egui::Slider::new(&mut prefs.mascot_size,40.0..=80.0).text("Size").suffix(" pt"));
+                    ui.label(muted("Original celestial silk moth. Its state follows actual agent and search activity."));
                 });
                 ui.add_space(16.0);
                 checkbox(ui,&mut self.preferences.quiet_notifications,"Quiet agent notifications");
@@ -340,7 +350,7 @@ impl Editor {
             .frame(modal_frame())
             .area(area)
             .show(ctx, |ui| {
-                enter(ui, Id::new("quick-access-entry"));
+                super::motion::enter(ui, Id::new("quick-access-entry"), 0.20);
                 ui.set_width(palette_width);
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Quick access").strong().size(LEAD));
@@ -492,29 +502,6 @@ impl Editor {
             None => {}
         }
     }
-}
-
-fn constellation(ui: &mut Ui, width: f32, height: f32) {
-    let (rect, _) = ui.allocate_at_least(egui::vec2(width, height), Sense::hover());
-    let painter = ui.painter_at(rect);
-    let center = rect.center();
-    for ring in 0..2 {
-        let points = (0..=64)
-            .map(|i| {
-                let a = i as f32 / 64.0 * std::f32::consts::TAU;
-                let x = a.cos() * (42.0 + ring as f32 * 9.0);
-                let y = a.sin() * (16.0 + ring as f32 * 4.0);
-                center + egui::vec2(x * 0.9 + y * 0.43, -x * 0.43 + y * 0.9)
-            })
-            .collect();
-        painter.add(egui::Shape::line(
-            points,
-            Stroke::new(1.0_f32, colors().accent.gamma_multiply(0.28)),
-        ));
-    }
-    painter.circle_filled(center, 19.0, colors().canvas);
-    draw_icon(&painter, center, Icon::Brand, colors().accent);
-    painter.circle_filled(center + egui::vec2(43.0, -16.0), 2.5, colors().accent);
 }
 
 #[cfg(test)]

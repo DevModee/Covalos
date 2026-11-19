@@ -33,6 +33,7 @@ dependencies = [
  "ignore",
  "image",
  "libc",
+ "png",
  "regex",
  "rfd",
  "serde",
