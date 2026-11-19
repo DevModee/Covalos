@@ -7,7 +7,7 @@ use crate::assistant::Provider;
 use eframe::egui::{self, Align, Layout, RichText, ScrollArea, Ui};
 use std::time::{Duration, Instant};
 
-const ISLAND_COMPACT: egui::Vec2 = egui::vec2(256.0, 38.0);
+const ISLAND_COMPACT: egui::Vec2 = egui::vec2(232.0, 21.0);
 const ISLAND_WIDTH: f32 = 468.0;
 
 fn provider_of(label: &str) -> Option<Provider> {
@@ -514,14 +514,16 @@ impl Editor {
             .unwrap_or(320.0)
             .min(screen.height() - CHROME_HEIGHT - 72.0)
             .max(ISLAND_COMPACT.y);
+        // The compact pill lives inside the status bar, centred, so it never covers tabs
+        // or code. The expanded card rises from it and keeps its bottom edge anchored.
         let width = egui::lerp(ISLAND_COMPACT.x..=full_width, eased);
         let height = egui::lerp(ISLAND_COMPACT.y..=target_h, eased);
-        let drop = (1.0 - presence.max(p)) * -12.0;
+        let rise = (1.0 - presence.max(p)) * 10.0;
+        let compact_bottom = screen.bottom() - (STATUS_HEIGHT - ISLAND_COMPACT.y) / 2.0 + rise;
+        let card_bottom = screen.bottom() - STATUS_HEIGHT - 8.0;
+        let bottom = egui::lerp(compact_bottom..=card_bottom, eased);
         let rect = egui::Rect::from_min_size(
-            egui::pos2(
-                screen.center().x - width / 2.0,
-                screen.top() + CHROME_HEIGHT + 8.0 + drop,
-            ),
+            egui::pos2(screen.center().x - width / 2.0, bottom - height),
             egui::vec2(width, height),
         );
         let area = egui::Area::new(id)
@@ -532,7 +534,7 @@ impl Editor {
                 let (outer, response) = ui.allocate_exact_size(rect.size(), egui::Sense::click());
                 #[cfg(test)]
                 super::super::motion::record(ui, "Companion island", outer);
-                let radius = egui::lerp(19.0..=16.0, eased) as u8;
+                let radius = egui::lerp((ISLAND_COMPACT.y / 2.0)..=16.0, eased) as u8;
                 ui.painter().add(
                     egui::Shadow {
                         offset: [0, 10],
@@ -551,15 +553,18 @@ impl Editor {
                 );
                 if eased < 0.999 {
                     let (text, state) = self.island_summary();
-                    let pill = egui::Rect::from_min_size(outer.min, ISLAND_COMPACT);
+                    let pill = egui::Rect::from_min_size(
+                        egui::pos2(outer.min.x, outer.max.y - ISLAND_COMPACT.y),
+                        ISLAND_COMPACT,
+                    );
                     let mut compact = ui.new_child(egui::UiBuilder::new().max_rect(pill));
                     compact.multiply_opacity(1.0 - eased);
                     let mood = self.agent_mood(true);
                     self.identity.portrait(
                         &compact,
                         egui::Rect::from_center_size(
-                            pill.left_center() + egui::vec2(22.0, 0.0),
-                            egui::vec2(28.0, 28.0),
+                            pill.left_center() + egui::vec2(15.0, 0.0),
+                            egui::vec2(20.0, 20.0),
                         ),
                         &self.preferences.identity,
                         mood,
@@ -567,19 +572,19 @@ impl Editor {
                     );
                     let painter = compact
                         .painter()
-                        .with_clip_rect(pill.shrink2(egui::vec2(40.0, 0.0)));
+                        .with_clip_rect(pill.shrink2(egui::vec2(28.0, 0.0)));
                     painter.text(
-                        pill.left_center() + egui::vec2(42.0, 0.0),
+                        pill.left_center() + egui::vec2(30.0, 0.0),
                         egui::Align2::LEFT_CENTER,
                         text,
-                        egui::FontId::proportional(BODY),
+                        egui::FontId::proportional(SMALL),
                         colors().text,
                     );
                     activity(
                         &compact,
-                        pill.right_center() - egui::vec2(22.0, 0.0),
+                        pill.right_center() - egui::vec2(16.0, 0.0),
                         state,
-                        0.9,
+                        0.62,
                     );
                     if response.hovered() {
                         ui.painter().rect_stroke(

@@ -269,6 +269,50 @@ const RULES: &[(&str, Token)] = &[
     ("variable", Token::Variable),
 ];
 
+/// TypeScript/JavaScript words the bundled JavaScript grammar can leave unscoped.
+const SCRIPT_DECLARATIONS: &[&str] = &[
+    "class",
+    "interface",
+    "type",
+    "enum",
+    "function",
+    "const",
+    "let",
+    "var",
+    "namespace",
+];
+const SCRIPT_KEYWORDS: &[&str] = &[
+    "export",
+    "import",
+    "from",
+    "async",
+    "await",
+    "return",
+    "extends",
+    "implements",
+    "private",
+    "public",
+    "protected",
+    "readonly",
+    "static",
+    "abstract",
+    "declare",
+    "new",
+    "this",
+    "super",
+    "throw",
+    "default",
+    "as",
+    "of",
+    "in",
+    "instanceof",
+    "typeof",
+    "keyof",
+    "satisfies",
+    "get",
+    "set",
+];
+
 /// Built-in type names that some grammars scope as `storage.type`.
 const PRIMITIVES: &[&str] = &[
     "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize", "f32",
@@ -486,12 +530,30 @@ pub(super) fn tokens(code: &str, language: &str) -> Vec<(usize, usize, Token)> {
             spans.push((cursor, line.len(), classify(stack.as_slice(), &mut cache)));
         }
         refine(&mut spans, line);
+        let script = matches!(
+            language,
+            "js" | "mjs" | "cjs" | "jsx" | "ts" | "tsx" | "mts" | "cts"
+        );
         for span in &mut spans {
             let word = &line[span.0..span.1];
             if span.2 == Token::Function && line[..span.0].trim_end().ends_with('.') {
                 span.2 = Token::Method;
-            } else if span.2 == Token::Declaration && PRIMITIVES.contains(&word) {
+            } else if (span.2 == Token::Declaration && PRIMITIVES.contains(&word))
+                || (span.2 == Token::Constant
+                    && word.len() > 1
+                    && word.as_bytes()[0].is_ascii_uppercase()
+                    && word.bytes().any(|b| b.is_ascii_lowercase()))
+            {
+                // Primitive names scoped as storage, and PascalCase "constants", are types.
                 span.2 = Token::Type;
+            } else if script && matches!(span.2, Token::Text | Token::Variable) {
+                if SCRIPT_DECLARATIONS.contains(&word) {
+                    span.2 = Token::Declaration;
+                } else if SCRIPT_KEYWORDS.contains(&word) {
+                    span.2 = Token::Keyword;
+                } else if PRIMITIVES.contains(&word) && line[..span.0].trim_end().ends_with(':') {
+                    span.2 = Token::Type;
+                }
             }
         }
         for (s, e, t) in spans {
@@ -659,6 +721,14 @@ mod tests {
                 .any(|(s, t)| s.contains("note") && *t == Token::Comment)
         );
         let ts = kinds("const total = items.map((i) => i.price).length;\n", "ts");
+        let decl = kinds(
+            "export class OrderStore {}\nexport async function load() {}\n",
+            "ts",
+        );
+        assert!(has(&decl, "class", Token::Declaration), "{decl:?}");
+        assert!(has(&decl, "export", Token::Keyword), "{decl:?}");
+        assert!(has(&decl, "async", Token::Keyword), "{decl:?}");
+        assert!(has(&decl, "OrderStore", Token::Type), "{decl:?}");
         assert!(
             has(&ts, "map", Token::Method) || has(&ts, "map", Token::Function),
             "{ts:?}"

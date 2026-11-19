@@ -1,3 +1,5 @@
+#[cfg(all(test, windows))]
+mod evidence;
 #[cfg(test)]
 mod visual_tests;
 
@@ -117,6 +119,8 @@ pub struct Editor {
     pending_delete: Option<PathBuf>,
     focus_new_file: bool,
     syntax: egui_extras::syntax_highlighting::CodeTheme,
+    #[cfg(test)]
+    mood_override: Option<identity::Mood>,
 }
 
 impl Editor {
@@ -189,6 +193,8 @@ impl Editor {
             file_change: None,
             pending_delete: None,
             focus_new_file: false,
+            #[cfg(test)]
+            mood_override: None,
             syntax: egui_extras::syntax_highlighting::CodeTheme::dark(
                 egui::TextStyle::Monospace.resolve(&ctx.style()).size,
             ),
@@ -641,6 +647,10 @@ impl Editor {
 
 impl Editor {
     fn agent_mood(&self, focused: bool) -> identity::Mood {
+        #[cfg(test)]
+        if let Some(mood) = self.mood_override {
+            return mood;
+        }
         if !focused {
             return identity::Mood::Sleeping;
         }

@@ -593,7 +593,7 @@ impl Identity {
                                 let n = flow(sample * 0.6, t * 0.4);
                                 let iso = 1.0 - ((n * 7.0).fract() - 0.5).abs() * 2.0;
                                 (
-                                    (iso.powf(6.0) * (0.25 + stage_w) + lens + wave).min(0.999),
+                                    (iso.powf(2.6) * (0.25 + stage_w) + lens + wave).min(0.999),
                                     false,
                                 )
                             }
@@ -604,7 +604,7 @@ impl Identity {
                                 let wave_y = (u * 9.0 - t * 1.6).sin() * amp * 0.35
                                     + (u * 23.0 + t).sin() * amp * 0.06;
                                 let dy = d.y / stage_r - wave_y;
-                                let v = ((1.0 - dy.abs() * 9.0).max(0.0)
+                                let v = ((1.0 - dy.abs() * 4.5).max(0.0)
                                     * (1.0 - u.abs()).max(0.0)
                                     + lens
                                     + wave)
