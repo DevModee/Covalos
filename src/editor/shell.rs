@@ -125,14 +125,26 @@ impl Editor {
         let mood = self.agent_mood(ui.input(|i| i.focused));
         self.identity
             .paint(ui, area, &self.preferences.identity, mood);
-        let width = (area.width() - 64.0).clamp(240.0, 640.0).min(area.width());
+        // Wide windows use a hero layout: content on the left, the background composition
+        // owns the right. Narrow windows centre the column.
+        let wide = area.width() > 980.0;
+        let width = if wide {
+            (area.width() * 0.46).clamp(420.0, 600.0)
+        } else {
+            (area.width() - 64.0).clamp(240.0, 640.0).min(area.width())
+        };
+        let left = if wide {
+            area.left() + (area.width() * 0.07).clamp(40.0, 104.0)
+        } else {
+            area.center().x - width * 0.5
+        };
         let top = if area.height() < 560.0 {
             24.0
         } else {
             (area.height() * 0.16).clamp(24.0, 120.0)
         };
         let rect = egui::Rect::from_min_size(
-            egui::pos2(area.center().x - width * 0.5, area.top() + top),
+            egui::pos2(left, area.top() + top),
             egui::vec2(width, (area.height() - top).max(1.0)),
         );
         // Reading scrim: the background stays alive at the edges and calms behind content.
@@ -144,120 +156,123 @@ impl Editor {
         );
         ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
             ui.set_width(width);
-            ScrollArea::vertical().id_salt("welcome").show(ui, |ui| {
-                let title = self
-                    .root
-                    .as_deref()
-                    .map(workspace::filename)
-                    .unwrap_or_else(|| tr("Welcome to AEROS").to_owned());
-                ui.horizontal(|ui| {
-                    let text_width = width;
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(text_width, 112.0),
-                        egui::Layout::top_down(egui::Align::Min),
-                        |ui| {
-                            ui.add_space(12.0);
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(title)
-                                        .size(if width > 480.0 { DISPLAY } else { 28.0 })
-                                        .strong(),
-                                )
-                                .wrap(),
-                            );
-                            ui.add_space(8.0);
-                            ui.add(
-                                egui::Label::new(secondary(if self.root.is_some() {
-                                    "Find a file or explore your workspace."
-                                } else {
-                                    "Open a project or continue your work."
-                                }))
-                                .wrap(),
-                            );
-                        },
-                    );
-                });
-                ui.add_space(24.0);
-                let mac = cfg!(target_os = "macos");
-                let cards = [
-                    (
-                        Icon::Explorer,
-                        "Open folder",
-                        if mac { "⌘ O" } else { "Ctrl O" },
-                    ),
-                    (
-                        Icon::Code,
-                        "Open file",
-                        if mac { "⇧ ⌘ O" } else { "Ctrl Shift O" },
-                    ),
-                    (Icon::Add, "Create project", "New folder"),
-                    (Icon::Hub, "Agent Hub", "Codex · Claude"),
-                ];
-                let columns = if width > 440.0 { 2 } else { 1 };
-                let gap = 10.0;
-                let card_w = (width - gap * (columns as f32 - 1.0)) / columns as f32;
-                let mut clicked = None;
-                for chunk in cards.chunks(columns) {
+            ScrollArea::vertical()
+                .id_salt("welcome")
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .show(ui, |ui| {
+                    let title = self
+                        .root
+                        .as_deref()
+                        .map(workspace::filename)
+                        .unwrap_or_else(|| tr("Welcome to AEROS").to_owned());
                     ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = gap;
-                        for &(icon, title, detail) in chunk {
-                            if home_card(ui, card_w, icon, title, detail).clicked() {
-                                clicked = Some(title);
-                            }
-                        }
+                        let text_width = width;
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(text_width, 112.0),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                ui.add_space(12.0);
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(title)
+                                            .size(if width > 480.0 { DISPLAY } else { 28.0 })
+                                            .strong(),
+                                    )
+                                    .wrap(),
+                                );
+                                ui.add_space(8.0);
+                                ui.add(
+                                    egui::Label::new(secondary(if self.root.is_some() {
+                                        "Find a file or explore your workspace."
+                                    } else {
+                                        "Open a project or continue your work."
+                                    }))
+                                    .wrap(),
+                                );
+                            },
+                        );
                     });
-                    ui.add_space(gap - 4.0);
-                }
-                match clicked {
-                    Some("Open folder") => self.pick_workspace(ui.ctx()),
-                    Some("Open file") => self.pick_file(),
-                    Some("Create project") => self.pick_new_project(ui.ctx()),
-                    Some(_) => self.hub_open = true,
-                    None => {}
-                }
-                if !self.preferences.recent.is_empty() {
-                    ui.add_space(28.0);
-                    section(ui, tr("Recent projects"), "");
-                    for root in self.preferences.recent.clone() {
-                        let response = ui.add_sized(
-                            [ui.available_width(), 52.0],
-                            egui::Button::new("").frame(false),
-                        );
-                        let painter = ui.painter_at(response.rect);
-                        if response.hovered() {
-                            painter.rect_filled(response.rect, CONTROL_RADIUS, colors().hover);
-                        }
-                        draw_icon(
-                            &painter,
-                            response.rect.left_center() + egui::vec2(16.0, 0.0),
+                    ui.add_space(24.0);
+                    let mac = cfg!(target_os = "macos");
+                    let cards = [
+                        (
                             Icon::Explorer,
-                            colors().muted,
-                        );
-                        let text_rect = response.rect.shrink2(egui::vec2(40.0, 4.0));
-                        let painter = painter.with_clip_rect(text_rect);
-                        painter.text(
-                            text_rect.left_top() + egui::vec2(0.0, 5.0),
-                            egui::Align2::LEFT_TOP,
-                            workspace::filename(&root),
-                            egui::FontId::proportional(BODY),
-                            colors().text,
-                        );
-                        let displayed = root.display().to_string();
-                        let displayed = displayed.strip_prefix(r"\\?\").unwrap_or(&displayed);
-                        painter.text(
-                            text_rect.left_top() + egui::vec2(0.0, 26.0),
-                            egui::Align2::LEFT_TOP,
-                            displayed,
-                            egui::FontId::proportional(SMALL),
-                            colors().muted,
-                        );
-                        if response.clicked() {
-                            self.request(Pending::OpenWorkspace(root.clone()), ui.ctx());
-                        }
-                        response.on_hover_text(root.display().to_string());
+                            "Open folder",
+                            if mac { "⌘ O" } else { "Ctrl O" },
+                        ),
+                        (
+                            Icon::Code,
+                            "Open file",
+                            if mac { "⇧ ⌘ O" } else { "Ctrl Shift O" },
+                        ),
+                        (Icon::Add, "Create project", "New folder"),
+                        (Icon::Hub, "Agent Hub", "Codex · Claude"),
+                    ];
+                    let columns = if width > 440.0 { 2 } else { 1 };
+                    let gap = 10.0;
+                    let card_w = (width - gap * (columns as f32 - 1.0)) / columns as f32;
+                    let mut clicked = None;
+                    for chunk in cards.chunks(columns) {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = gap;
+                            for &(icon, title, detail) in chunk {
+                                if home_card(ui, card_w, icon, title, detail).clicked() {
+                                    clicked = Some(title);
+                                }
+                            }
+                        });
+                        ui.add_space(gap - 4.0);
                     }
-                }
-            });
+                    match clicked {
+                        Some("Open folder") => self.pick_workspace(ui.ctx()),
+                        Some("Open file") => self.pick_file(),
+                        Some("Create project") => self.pick_new_project(ui.ctx()),
+                        Some(_) => self.hub_open = true,
+                        None => {}
+                    }
+                    if !self.preferences.recent.is_empty() {
+                        ui.add_space(28.0);
+                        section(ui, tr("Recent projects"), "");
+                        for root in self.preferences.recent.clone() {
+                            let response = ui.add_sized(
+                                [ui.available_width(), 52.0],
+                                egui::Button::new("").frame(false),
+                            );
+                            let painter = ui.painter_at(response.rect);
+                            if response.hovered() {
+                                painter.rect_filled(response.rect, CONTROL_RADIUS, colors().hover);
+                            }
+                            draw_icon(
+                                &painter,
+                                response.rect.left_center() + egui::vec2(16.0, 0.0),
+                                Icon::Explorer,
+                                colors().muted,
+                            );
+                            let text_rect = response.rect.shrink2(egui::vec2(40.0, 4.0));
+                            let painter = painter.with_clip_rect(text_rect);
+                            painter.text(
+                                text_rect.left_top() + egui::vec2(0.0, 5.0),
+                                egui::Align2::LEFT_TOP,
+                                workspace::filename(&root),
+                                egui::FontId::proportional(BODY),
+                                colors().text,
+                            );
+                            let displayed = root.display().to_string();
+                            let displayed = displayed.strip_prefix(r"\\?\").unwrap_or(&displayed);
+                            painter.text(
+                                text_rect.left_top() + egui::vec2(0.0, 26.0),
+                                egui::Align2::LEFT_TOP,
+                                displayed,
+                                egui::FontId::proportional(SMALL),
+                                colors().muted,
+                            );
+                            if response.clicked() {
+                                self.request(Pending::OpenWorkspace(root.clone()), ui.ctx());
+                            }
+                            response.on_hover_text(root.display().to_string());
+                        }
+                    }
+                });
         });
     }
 

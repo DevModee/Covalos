@@ -498,12 +498,15 @@ impl Editor {
                             ui.set_width(conversation.width());
                             ui.horizontal(|ui| {
                                 if ui
-                                    .selectable_label(!self.hub.general, "Workspace")
+                                    .selectable_label(!self.hub.general, tr("Workspace"))
                                     .clicked()
                                 {
                                     self.hub.general = false;
                                 }
-                                if ui.selectable_label(self.hub.general, "General").clicked() {
+                                if ui
+                                    .selectable_label(self.hub.general, tr("General"))
+                                    .clicked()
+                                {
                                     self.hub.general = true;
                                 }
                             });

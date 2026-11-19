@@ -299,17 +299,6 @@ impl Editor {
                         .layout(Layout::left_to_right(Align::Center)),
                     |ui| {
                         ui.set_clip_rect(left);
-                        let (running, waiting) = self.companion.counts();
-                        if running + waiting > 0
-                            && ui
-                                .selectable_label(
-                                    self.companion.open,
-                                    muted(format!("{running} active · {waiting} approvals")),
-                                )
-                                .clicked()
-                        {
-                            self.companion.open = true;
-                        }
                         if let Some((error, text)) = &self.notice {
                             ui.add(
                                 egui::Label::new(muted(text).color(if *error {
@@ -402,46 +391,47 @@ impl Editor {
         if !self.preferences.identity.mascot {
             return;
         }
-        let full = ui.available_rect_before_wrap();
         let height = (self.preferences.identity.mascot_size + 24.0).max(80.0);
-        if full.height() < height + 70.0 {
+        if ui.available_height() < height + 140.0 {
             return;
         }
-        let footer =
-            egui::Rect::from_min_max(egui::pos2(full.left(), full.bottom() - height), full.max);
-        ui.painter().hline(
-            footer.x_range().shrink(4.0),
-            footer.top(),
-            egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.6)),
-        );
-        let mut dock = ui.new_child(
-            egui::UiBuilder::new()
-                .id_salt("luma-dock")
-                .max_rect(footer.shrink2(egui::vec2(2.0, 8.0)))
-                .layout(Layout::left_to_right(Align::Center)),
-        );
-        dock.set_clip_rect(footer);
-        let mood = self.agent_mood(ui.input(|i| i.focused));
-        if self.identity.mascot(
-            &mut dock,
-            &self.preferences.identity,
-            mood,
-            self.preferences.reduce_motion,
-        ) {
-            self.companion.open = true;
-        }
-        dock.vertical(|ui| {
-            ui.add_space(6.0);
-            ui.label(RichText::new(tr("Luma")).strong().color(colors().secondary));
-            ui.add(egui::Label::new(muted(mood.name())).truncate());
-            if ui
-                .add(egui::Button::new(muted(tr("Companion ↗"))).frame(false))
-                .clicked()
-            {
-                self.companion.open = true;
-            }
-        });
-        ui.set_max_height((full.height() - height - 12.0).max(1.0));
+        // A real bottom panel inside the sidebar: the tree above only receives the space
+        // that remains, so rows never slide underneath Luma.
+        egui::TopBottomPanel::bottom("luma-dock")
+            .exact_height(height)
+            .resizable(false)
+            .show_separator_line(false)
+            .frame(egui::Frame::new().inner_margin(Margin::symmetric(2, 8)))
+            .show_inside(ui, |dock| {
+                let footer = dock.max_rect();
+                dock.painter().hline(
+                    footer.x_range().shrink(4.0),
+                    footer.top() - 8.0,
+                    egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.6)),
+                );
+                dock.with_layout(Layout::left_to_right(Align::Center), |dock| {
+                    let mood = self.agent_mood(dock.input(|i| i.focused));
+                    if self.identity.mascot(
+                        dock,
+                        &self.preferences.identity,
+                        mood,
+                        self.preferences.reduce_motion,
+                    ) {
+                        self.companion.open = true;
+                    }
+                    dock.vertical(|ui| {
+                        ui.add_space(6.0);
+                        ui.label(RichText::new(tr("Luma")).strong().color(colors().secondary));
+                        ui.add(egui::Label::new(muted(mood.name())).truncate());
+                        if ui
+                            .add(egui::Button::new(muted(tr("Companion ↗"))).frame(false))
+                            .clicked()
+                        {
+                            self.companion.open = true;
+                        }
+                    });
+                });
+            });
     }
 
     pub(super) fn sidebar(&mut self, ctx: &Context) {
@@ -770,11 +760,19 @@ impl Editor {
                         carry = level;
                         levels[i - scan_start] = level;
                     }
+                    // Guide spacing follows the file: the smallest indentation in view.
+                    let unit = levels
+                        .iter()
+                        .copied()
+                        .filter(|l| *l > 0)
+                        .min()
+                        .unwrap_or(4)
+                        .clamp(2, 8);
                     let level_at = |i: usize| levels.get(i.wrapping_sub(scan_start)).copied();
                     let active_col = level_at(active_row)
                         .unwrap_or(0)
                         .checked_sub(1)
-                        .map(|c| c - c % 4);
+                        .map(|c| c - c % unit);
                     let in_block = |i: usize| -> bool {
                         let Some(col) = active_col else { return false };
                         let (lo, hi) = if i <= active_row {
@@ -802,7 +800,7 @@ impl Editor {
                                     },
                                 ),
                             ));
-                            col += 4;
+                            col += unit;
                         }
                     }
                     // Bracket matching around the caret.
