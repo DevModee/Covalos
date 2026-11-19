@@ -71,6 +71,10 @@ fn bytes(name: &str) -> &'static [u8] {
         "file_type_docker" => include_bytes!("../../assets/icons/vscode/file_type_docker.png"),
         "file_type_sln" => include_bytes!("../../assets/icons/vscode/file_type_sln.png"),
         "luma" => include_bytes!("../../assets/identity/luma.png"),
+        "brand_claude" => include_bytes!("../../assets/brands/claude.png"),
+        "brand_claudecode" => include_bytes!("../../assets/brands/claudecode.png"),
+        "brand_gemini" => include_bytes!("../../assets/brands/googlegemini.png"),
+        "brand_antigravity" => include_bytes!("../../assets/brands/antigravity.png"),
         _ => include_bytes!("../../assets/icons/vscode/default_file.png"),
     }
 }
@@ -109,31 +113,21 @@ pub(super) fn paint(ui: &egui::Ui, rect: Rect, name: &'static str) {
         },
     );
 }
+/// Paint an embedded RGBA mask tinted with `color`.
+pub(super) fn tinted(painter: &egui::Painter, rect: Rect, name: &'static str, color: Color32) {
+    let texture = texture(painter.ctx(), name);
+    painter.image(
+        texture.id(),
+        rect,
+        Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+        color,
+    );
+}
 pub(super) fn file(ui: &egui::Ui, center: egui::Pos2, path: &Path) {
     paint(
         ui,
         Rect::from_center_size(center, egui::vec2(17.0, 17.0)),
         file_name(path),
-    );
-}
-
-pub(super) fn luma_badge(ui: &egui::Ui, rect: Rect) {
-    paint(ui, rect, "luma");
-    let face = rect.min + egui::vec2(rect.width() * 0.5, rect.height() * 0.365);
-    let ink = Color32::from_rgb(39, 29, 57);
-    for x in [-0.067, 0.067] {
-        ui.painter().circle_filled(
-            face + egui::vec2(rect.width() * x, 0.0),
-            (rect.width() * 0.025).max(1.1),
-            ink,
-        );
-    }
-    ui.painter().line_segment(
-        [
-            face + egui::vec2(-rect.width() * 0.018, rect.height() * 0.055),
-            face + egui::vec2(rect.width() * 0.018, rect.height() * 0.055),
-        ],
-        egui::Stroke::new(0.9_f32, ink),
     );
 }
 
@@ -166,6 +160,10 @@ mod tests {
             "file_type_docker",
             "file_type_sln",
             "luma",
+            "brand_claude",
+            "brand_claudecode",
+            "brand_gemini",
+            "brand_antigravity",
         ] {
             let first = texture(&ctx, name);
             let second = texture(&ctx, name);

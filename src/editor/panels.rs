@@ -93,6 +93,11 @@ impl Editor {
                         .layout(Layout::left_to_right(Align::Center)),
                     |ui| {
                         ui.set_clip_rect(left);
+                        // Chrome controls read as quiet text until hovered.
+                        let w = &mut ui.visuals_mut().widgets;
+                        w.inactive.bg_stroke = egui::Stroke::NONE;
+                        w.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+                        w.hovered.bg_stroke = egui::Stroke::NONE;
                         let (_, mark) = ui.allocate_space(egui::vec2(22.0, 28.0));
                         draw_icon(ui.painter(), mark.center(), Icon::Brand, colors().accent);
                         ui.label(RichText::new(BRAND).size(LEAD).strong());
@@ -509,7 +514,7 @@ impl Editor {
                         let from_tree = ScrollArea::vertical()
                             .id_salt("files")
                             .show(ui, |ui| {
-                                tree(ui, &root, &root, active, &mut self.directories)
+                                tree(ui, &root, &root, active, &mut self.directories, 0)
                             })
                             .inner;
                         if let Some(action) = selected.or(from_tree) {
@@ -1079,12 +1084,143 @@ impl Editor {
     }
 }
 
+const TREE_INDENT: f32 = 14.0;
+const TREE_ROW: f32 = 26.0;
+
+/// One Explorer row: indent guides, animated chevron for folders, upstream file icon,
+/// label, animated hover and selection with an accent marker.
+fn tree_row(
+    ui: &mut Ui,
+    depth: usize,
+    name: &str,
+    icon: &'static str,
+    openness: Option<f32>,
+    selected: bool,
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), TREE_ROW),
+        egui::Sense::click(),
+    );
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::SelectableLabel, true, name));
+    let painter = ui.painter_at(rect);
+    let hover = super::motion::state(
+        ui,
+        response.id.with("tree-hover"),
+        response.hovered(),
+        super::motion::HOVER,
+    );
+    let selection = super::motion::state(
+        ui,
+        response.id.with("tree-selection"),
+        selected,
+        super::motion::CONTROL,
+    );
+    let fill = super::motion::blend(
+        colors().hover.gamma_multiply(hover),
+        colors().accent_bg,
+        selection,
+    );
+    painter.rect_filled(rect, 5, fill);
+    if selection > 0.01 {
+        let h = (TREE_ROW - 10.0) * selection;
+        painter.rect_filled(
+            egui::Rect::from_center_size(
+                rect.left_center() + egui::vec2(1.0, 0.0),
+                egui::vec2(2.0, h),
+            ),
+            1,
+            colors().accent,
+        );
+    }
+    // Indent guides, brighter on the hovered branch.
+    for level in 0..depth {
+        let x = rect.left() + 12.0 + level as f32 * TREE_INDENT;
+        painter.vline(
+            x,
+            rect.y_range(),
+            egui::Stroke::new(
+                1.0_f32,
+                colors()
+                    .border
+                    .gamma_multiply(if hover > 0.0 && level + 1 == depth {
+                        1.6
+                    } else {
+                        0.9
+                    }),
+            ),
+        );
+    }
+    let x = rect.left() + 6.0 + depth as f32 * TREE_INDENT;
+    let center_y = rect.center().y;
+    if let Some(open) = openness {
+        // Chevron rotates from right (closed) to down (open).
+        let c = egui::pos2(x + 6.0, center_y);
+        let angle = open * std::f32::consts::FRAC_PI_2;
+        let (s, co) = angle.sin_cos();
+        let rot = |v: egui::Vec2| c + egui::vec2(v.x * co - v.y * s, v.x * s + v.y * co);
+        painter.add(egui::Shape::line(
+            vec![
+                rot(egui::vec2(-1.5, -3.5)),
+                rot(egui::vec2(2.0, 0.0)),
+                rot(egui::vec2(-1.5, 3.5)),
+            ],
+            egui::Stroke::new(
+                1.4_f32,
+                super::motion::blend(colors().muted, colors().text, hover),
+            ),
+        ));
+    }
+    super::assets::paint(
+        ui,
+        egui::Rect::from_center_size(egui::pos2(x + 23.0, center_y), egui::vec2(16.0, 16.0)),
+        icon,
+    );
+    let label_x = x + 36.0;
+    let max_width = (rect.right() - label_x - 6.0).max(1.0);
+    let galley = ui.fonts_mut(|fonts| {
+        fonts.layout_job(egui::text::LayoutJob {
+            wrap: egui::text::TextWrapping {
+                max_width,
+                max_rows: 1,
+                break_anywhere: true,
+                ..Default::default()
+            },
+            ..egui::text::LayoutJob::simple(
+                name.to_owned(),
+                egui::FontId::proportional(BODY),
+                if selected || hover > 0.5 {
+                    colors().text
+                } else {
+                    super::motion::blend(colors().secondary, colors().text, hover)
+                },
+                max_width,
+            )
+        })
+    });
+    painter.galley(
+        egui::pos2(label_x, center_y - galley.size().y / 2.0),
+        galley,
+        colors().text,
+    );
+    if response.has_focus() {
+        painter.rect_stroke(
+            rect,
+            5,
+            egui::Stroke::new(1.0_f32, colors().accent),
+            egui::StrokeKind::Inside,
+        );
+    }
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 fn tree(
     ui: &mut Ui,
     root: &Path,
     path: &Path,
     active: Option<&Path>,
     directories: &mut std::collections::HashMap<std::path::PathBuf, super::DirectoryLoad>,
+    depth: usize,
 ) -> Option<super::files::TreeAction> {
     use super::{
         DirectoryLoad,
@@ -1092,13 +1228,19 @@ fn tree(
     };
     use std::sync::mpsc::{self, TryRecvError};
 
+    let loading = |ui: &mut Ui| {
+        ui.horizontal(|ui| {
+            ui.add_space(12.0 + depth as f32 * TREE_INDENT);
+            ui.label(muted("Loading…"));
+        });
+    };
     let entries = match directories.remove(path) {
         Some(DirectoryLoad::Ready(entries)) => entries,
         Some(DirectoryLoad::Pending(receiver)) => match receiver.try_recv() {
             Ok(result) => result,
             Err(TryRecvError::Empty) => {
                 directories.insert(path.to_owned(), DirectoryLoad::Pending(receiver));
-                ui.label(muted("Loading…"));
+                loading(ui);
                 return None;
             }
             Err(TryRecvError::Disconnected) => Err("Directory scan was interrupted.".into()),
@@ -1115,34 +1257,38 @@ fn tree(
                 }
             });
             directories.insert(path.to_owned(), DirectoryLoad::Pending(receiver));
-            ui.label(muted("Loading…"));
+            loading(ui);
             return None;
         }
     };
     let mut selected = None;
+    ui.spacing_mut().item_spacing.y = 1.0;
     match &entries {
         Ok(entries) => {
             for entry in entries {
                 let name = workspace::filename(&entry.path);
                 if entry.directory {
-                    let response =
-                        egui::CollapsingHeader::new(RichText::new(name).color(colors().text))
-                            .icon(|ui, openness, response| {
-                                super::assets::paint(
-                                    ui,
-                                    egui::Rect::from_center_size(
-                                        response.rect.center(),
-                                        egui::vec2(17.0, 17.0),
-                                    ),
-                                    if openness > 0.5 {
-                                        "default_folder_opened"
-                                    } else {
-                                        "default_folder"
-                                    },
-                                )
-                            })
-                            .id_salt(&entry.path)
-                            .show(ui, |ui| tree(ui, root, &entry.path, active, directories));
+                    let id = ui.make_persistent_id(("tree", &entry.path));
+                    let mut state =
+                        egui::collapsing_header::CollapsingState::load_with_default_open(
+                            ui.ctx(),
+                            id,
+                            false,
+                        );
+                    let openness = state.openness(ui.ctx());
+                    let response = tree_row(
+                        ui,
+                        depth,
+                        &name,
+                        if openness > 0.5 {
+                            "default_folder_opened"
+                        } else {
+                            "default_folder"
+                        },
+                        Some(openness),
+                        false,
+                    )
+                    .on_hover_text(entry.path.display().to_string());
                     #[cfg(test)]
                     super::motion::record(
                         ui,
@@ -1150,31 +1296,35 @@ fn tree(
                             "Folder {}",
                             entry.path.strip_prefix(root).unwrap().display()
                         ),
-                        response.header_response.rect,
+                        response.rect,
                     );
-                    response.header_response.context_menu(|ui| {
+                    if response.clicked() {
+                        state.toggle(ui);
+                    }
+                    response.context_menu(|ui| {
                         if let Some(action) = tree_menu(ui, root, &entry.path, true) {
                             selected = Some(action);
                         }
                     });
-                    if let Some(Some(action)) = response.body_returned {
+                    state.store(ui.ctx());
+                    if let Some(inner) = state.show_body_unindented(ui, |ui| {
+                        tree(ui, root, &entry.path, active, directories, depth + 1)
+                    }) && let Some(action) = inner.inner
+                    {
                         selected = Some(action);
                     }
                 } else {
-                    let response = row(
+                    let response = tree_row(
                         ui,
-                        &format!("      {name}"),
-                        "",
+                        depth,
+                        &name,
+                        super::assets::file_name(&entry.path),
+                        None,
                         active == Some(entry.path.as_path()),
                     )
                     .on_hover_text(entry.path.display().to_string());
                     #[cfg(test)]
                     super::motion::record(ui, format!("File {}", name), response.rect);
-                    super::assets::file(
-                        ui,
-                        response.rect.left_center() + egui::vec2(17.0, 0.0),
-                        &entry.path,
-                    );
                     if response.clicked() {
                         selected = Some(TreeAction::Open(entry.path.clone()));
                     }
