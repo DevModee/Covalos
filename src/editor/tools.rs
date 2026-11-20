@@ -1,6 +1,5 @@
 use std::{
     io::{BufRead, BufReader, Read},
-    path::Path,
     process::{Command, Stdio},
     sync::{
         Arc,
@@ -12,7 +11,7 @@ use std::{
 };
 
 use eframe::egui::{
-    self, Align, Context, Key, Layout, Margin, RichText, ScrollArea, TextEdit, TopBottomPanel, Ui,
+    self, Align, Context, Layout, Margin, RichText, ScrollArea, TopBottomPanel, Ui,
 };
 
 use super::{Editor, theme::*};
@@ -24,6 +23,7 @@ const MAX_LOG: usize = 140_000;
 enum Tab {
     #[default]
     Terminal,
+    Ports,
     Output,
     AgentLog,
 }
@@ -31,11 +31,8 @@ enum Tab {
 #[derive(Default)]
 pub(super) struct Tools {
     tab: Tab,
-    command: String,
-    terminal: String,
     output: String,
     agent_log: String,
-    process: Option<Job>,
     git: Option<Job>,
     git_view: String,
     git_mode: GitMode,
@@ -168,7 +165,6 @@ impl Tools {
     }
 
     pub(super) fn poll(&mut self) {
-        drain(&mut self.process, &mut self.terminal);
         drain(&mut self.git, &mut self.git_view);
         if self.git.is_none()
             && self.git_mode == GitMode::Status
@@ -301,24 +297,6 @@ fn worker(mut command: Command, ctx: Context, show_status: bool) -> Job {
         send(Event::Finished(status));
     });
     Job { events, stop }
-}
-
-fn user_command(root: &Path, script: &str) -> Command {
-    #[cfg(windows)]
-    let mut command = {
-        use std::os::windows::process::CommandExt;
-        let mut c = Command::new("cmd.exe");
-        c.args(["/d", "/s", "/c"]).raw_arg(format!("\"{script}\""));
-        c
-    };
-    #[cfg(not(windows))]
-    let mut command = {
-        let mut c = Command::new("sh");
-        c.args(["-c", script]);
-        c
-    };
-    command.current_dir(root);
-    command
 }
 
 impl Editor {
@@ -703,18 +681,8 @@ impl Editor {
         }
     }
 
-    fn run_terminal(&mut self, ctx: &Context) {
-        let Some(root) = &self.root else { return };
-        let script = std::mem::take(&mut self.tools.command);
-        if script.trim().is_empty() {
-            return;
-        }
-        append(&mut self.tools.terminal, &format!("\n> {script}\n"));
-        self.tools.process = Some(worker(user_command(root, &script), ctx.clone(), true));
-    }
-
     pub(super) fn tools_panel(&mut self, ctx: &Context) {
-        let max_height = (ctx.content_rect().height() * 0.47).clamp(160.0, 420.0);
+        let max_height = (ctx.content_rect().height() * 0.6).clamp(160.0, 560.0);
         let panel = TopBottomPanel::bottom("tools")
             .resizable(true)
             .default_height(self.preferences.tools_height.min(max_height))
@@ -722,14 +690,18 @@ impl Editor {
             .frame(super::theme::island(Margin::symmetric(12, 8)))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    let (_, mark) = ui.allocate_space(egui::vec2(20.0, 28.0));
+                    let (_, mark) = ui.allocate_space(egui::vec2(20.0, 24.0));
                     draw_icon(ui.painter(), mark.center(), Icon::Terminal, colors().muted);
                     for (tab, label) in [
                         (Tab::Terminal, "Terminal"),
+                        (Tab::Ports, "Ports"),
                         (Tab::Output, "Output"),
                         (Tab::AgentLog, "Agent log"),
                     ] {
-                        if ui.selectable_label(self.tools.tab == tab, label).clicked() {
+                        if ui
+                            .selectable_label(self.tools.tab == tab, tr(label))
+                            .clicked()
+                        {
                             self.tools.tab = tab;
                         }
                     }
@@ -737,60 +709,36 @@ impl Editor {
                         if ui.button(tr("Hide")).clicked() {
                             self.preferences.tools_open = false;
                         }
-                        if let Some(job) = &self.tools.process
-                            && self.tools.tab == Tab::Terminal
-                            && ui.button(tr("Stop")).clicked()
-                        {
-                            job.stop.store(true, Ordering::Relaxed);
-                        }
                     });
                 });
-                ui.separator();
-                let is_terminal = self.tools.tab == Tab::Terminal;
-                let log = match self.tools.tab {
-                    Tab::Terminal => &self.tools.terminal,
-                    Tab::Output => &self.tools.output,
-                    Tab::AgentLog => &self.tools.agent_log,
-                };
-                let height =
-                    (ui.available_height() - if is_terminal { 36.0 } else { 0.0 }).max(18.0);
-                ScrollArea::vertical()
-                    .id_salt(("tool-log", self.tools.tab as u8))
-                    .max_height(height)
-                    .stick_to_bottom(true)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        if log.is_empty() {
-                            ui.label(muted(match self.tools.tab {
-                                Tab::Terminal if self.root.is_none() => {
-                                    "Open a project to run commands."
+                ui.add_space(2.0);
+                match self.tools.tab {
+                    Tab::Terminal => self.terminal_view(ui),
+                    Tab::Ports => self.ports_view(ui),
+                    Tab::Output | Tab::AgentLog => {
+                        let log = if self.tools.tab == Tab::Output {
+                            &self.tools.output
+                        } else {
+                            &self.tools.agent_log
+                        };
+                        ScrollArea::vertical()
+                            .id_salt(("tool-log", self.tools.tab as u8))
+                            .stick_to_bottom(true)
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                if log.is_empty() {
+                                    ui.label(muted(if self.tools.tab == Tab::Output {
+                                        "Editor operations appear here."
+                                    } else {
+                                        "Agent activity appears here."
+                                    }));
                                 }
-                                Tab::Terminal => "Run a command from the project folder.",
-                                Tab::Output => "Editor operations appear here.",
-                                Tab::AgentLog => "Agent activity appears here.",
-                            }));
-                        }
-                        ui.add(
-                            egui::Label::new(RichText::new(log).monospace().small())
-                                .wrap()
-                                .selectable(true),
-                        );
-                    });
-                if is_terminal {
-                    let can_run = self.root.is_some() && self.tools.process.is_none();
-                    let input = ui.add_enabled(
-                        can_run,
-                        TextEdit::singleline(&mut self.tools.command)
-                            .font(egui::TextStyle::Monospace)
-                            .hint_text(tr("Enter a command…"))
-                            .desired_width(f32::INFINITY)
-                            .char_limit(4096),
-                    );
-                    if can_run
-                        && input.lost_focus()
-                        && ui.input(|input| input.key_pressed(Key::Enter))
-                    {
-                        self.run_terminal(ctx);
+                                ui.add(
+                                    egui::Label::new(RichText::new(log).monospace().small())
+                                        .wrap()
+                                        .selectable(true),
+                                );
+                            });
                     }
                 }
             });
@@ -798,6 +746,16 @@ impl Editor {
         if height < max_height {
             self.preferences.tools_height = height;
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn show_tool(&mut self, name: &str) {
+        self.preferences.tools_open = true;
+        self.tools.tab = match name {
+            "ports" => Tab::Ports,
+            "output" => Tab::Output,
+            _ => Tab::Terminal,
+        };
     }
 
     pub(super) fn editor_log(&mut self, message: &str) {
@@ -955,33 +913,5 @@ mod tests {
                 .as_deref(),
             Some("main")
         );
-    }
-
-    #[test]
-    fn shell_runs_at_project_root_and_captures_stdout() -> std::io::Result<()> {
-        let folder = tempfile::tempdir()?;
-        let mut log = String::new();
-        let script = if cfg!(windows) {
-            "echo COVALOS_READY && cd"
-        } else {
-            "echo COVALOS_READY && pwd"
-        };
-        let mut job = Some(worker(
-            user_command(folder.path(), script),
-            Context::default(),
-            true,
-        ));
-        let until = std::time::Instant::now() + Duration::from_secs(5);
-        while job.is_some() && std::time::Instant::now() < until {
-            drain(&mut job, &mut log);
-            thread::sleep(Duration::from_millis(10));
-        }
-        assert!(job.is_none(), "{log}");
-        assert!(log.contains("COVALOS_READY"), "{log}");
-        assert!(
-            log.contains(folder.path().file_name().unwrap().to_str().unwrap()),
-            "{log}"
-        );
-        Ok(())
     }
 }

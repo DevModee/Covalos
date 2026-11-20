@@ -1588,6 +1588,118 @@ fn engine_steps() -> Vec<Step> {
     ]
 }
 
+/// Web workflow on a throwaway Node project: dev server from a terminal tab,
+/// its port in Ports, the WebView2 preview, and a confirmed Cloudflare tunnel.
+fn web_steps() -> Vec<Step> {
+    vec![
+        Act(|e, c, _| {
+            e.show_tool("terminal");
+            e.harness_run("npm run dev", c);
+        }),
+        UntilFor(|e| e.harness_url().is_some(), "dev server address", 90),
+        Wait(1.0),
+        Shot("web/01-terminal-dev-server"),
+        Act(|e, _, _| e.show_tool("ports")),
+        UntilFor(
+            |e| {
+                e.terminals
+                    .ports
+                    .iter()
+                    .any(|p| p.port == 5179 && p.owner.is_some())
+            },
+            "port 5179 owned by a Covalos terminal",
+            30,
+        ),
+        Wait(0.8),
+        Shot("web/02-ports"),
+        Act(|e, _, _| e.open_preview("http://localhost:5179/")),
+        UntilFor(
+            |e| e.harness_preview_url().is_some_and(|u| u.contains("5179")),
+            "WebView2 preview",
+            60,
+        ),
+        Wait(1.5),
+        Act(|e, _, _| eprintln!("preview loaded {:?}", e.harness_preview_url())),
+        Shot("web/03-preview-panel"),
+        Act(|e, _, _| e.harness_ask_tunnel(5179)),
+        Wait(0.8),
+        Shot("web/04-tunnel-confirm"),
+        Act(|e, c, _| e.harness_confirm_tunnel(c)),
+        UntilFor(
+            |e| e.harness_tunnel_url().is_some(),
+            "trycloudflare address",
+            90,
+        ),
+        Wait(0.8),
+        Act(|e, _, _| eprintln!("tunnel {:?}", e.harness_tunnel_url())),
+        Shot("web/05-tunnel-live"),
+        Act(|e, _, _| e.harness_stop_all()),
+        UntilFor(|e| !e.terminals.busy(), "processes stopped", 30),
+        Wait(0.5),
+        Shot("web/06-stopped"),
+    ]
+}
+
+#[test]
+#[ignore = "opens a native window, runs node and cloudflared"]
+fn capture_web_workflow() -> Result<(), Box<dyn std::error::Error>> {
+    use winit::platform::windows::EventLoopBuilderExtWindows;
+    let output =
+        PathBuf::from(std::env::var_os("COVALOS_EVIDENCE_DIR").ok_or("set COVALOS_EVIDENCE_DIR")?);
+    std::fs::create_dir_all(output.join("reports"))?;
+    let project = tempfile::tempdir()?;
+    let root = crate::agents_runtime::plain(&std::fs::canonicalize(project.path())?);
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"covalos-web-check","private":true,"scripts":{"dev":"node server.js"}}"#,
+    )?;
+    std::fs::write(
+        root.join("server.js"),
+        "const http = require('http');\nconst port = 5179;\nhttp.createServer((q, r) => {\n  r.writeHead(200, {'content-type': 'text/html'});\n  r.end('<h1>Covalos preview check</h1>');\n}).listen(port, () => console.log(`  Local:   http://localhost:${port}/`));\n",
+    )?;
+    std::fs::write(root.join("index.html"), "<h1>Covalos</h1>\n")?;
+    let options = eframe::NativeOptions {
+        viewport: ViewportBuilder::default()
+            .with_inner_size([1366.0, 768.0])
+            .with_decorations(false)
+            .with_title("Covalos web workflow"),
+        event_loop_builder: Some(Box::new(|b| {
+            b.with_any_thread(true);
+        })),
+        ..Default::default()
+    };
+    let run_root = root.clone();
+    eframe::run_native(
+        "Covalos web workflow",
+        options,
+        Box::new(move |cc| {
+            let mut preferences = Preferences::default();
+            preferences.language = super::i18n::Language::English;
+            preferences.assistant_open = false;
+            let mut editor = Editor::new(&cc.egui_ctx, Some(run_root.clone()), preferences);
+            editor.open_file(run_root.join("server.js"));
+            Ok(Box::new(Harness {
+                editor,
+                root: run_root,
+                steps: web_steps(),
+                stage: 0,
+                at: Instant::now(),
+                delay: 0.8,
+                queued: Vec::new(),
+                requested: false,
+                output,
+                suffix: String::new(),
+                scale: 1.0,
+                deadline: Instant::now() + Duration::from_secs(600),
+                manifest: Vec::new(),
+                last_action: Instant::now(),
+                render_ms: Vec::new(),
+            }))
+        }),
+    )?;
+    Ok(())
+}
+
 /// Re-renders a finished real run (no provider turns) to review layout at
 /// several window sizes and zoom levels.
 #[test]

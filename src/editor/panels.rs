@@ -668,6 +668,51 @@ impl Editor {
         }
     }
 
+    /// Shown when the active file changed on disk while it had unsaved edits.
+    fn disk_banner(&mut self, ui: &mut Ui) {
+        let Some(index) = self.active else { return };
+        let path = self.documents[index].path.clone();
+        if !self.disk_conflicts.contains(&path) {
+            return;
+        }
+        let mut choice = None;
+        egui::Frame::new()
+            .fill(colors().warning.gamma_multiply(0.14))
+            .inner_margin(Margin::symmetric(12, 6))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(tr(
+                            "This file changed on disk (an agent or another tool edited it) while you have unsaved edits.",
+                        ))
+                        .color(colors().text),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(tr("Keep mine")).clicked() {
+                            choice = Some(false);
+                        }
+                        if ui.button(tr("Reload from disk")).clicked() {
+                            choice = Some(true);
+                        }
+                    });
+                });
+            });
+        match choice {
+            Some(true) => {
+                if let Err(e) = self.documents[index].reload() {
+                    self.error(format!("Could not reload the file. {e}"));
+                }
+                self.disk_conflicts.retain(|p| p != &path);
+            }
+            Some(false) => {
+                self.documents[index].keep_mine();
+                self.disk_conflicts.retain(|p| p != &path);
+            }
+            None => {}
+        }
+    }
+
     pub(super) fn editor_panel(&mut self, ui: &mut Ui) {
         self.clean.dock_target = Some(ui.max_rect());
         if self.sidebar == Sidebar::Git && self.tools.showing_diff() {
@@ -693,6 +738,7 @@ impl Editor {
             );
         }
         self.tabs(ui);
+        self.disk_banner(ui);
         if self.find_open {
             self.find_bar(ui);
             ui.separator();
