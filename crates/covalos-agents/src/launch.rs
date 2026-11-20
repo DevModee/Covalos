@@ -86,10 +86,30 @@ impl LaunchPlan {
 
     pub fn command(&self) -> Command {
         let mut command = Command::new(&self.program);
-        command.args(&self.args);
         for name in &self.env_remove {
             command.env_remove(name);
         }
+        self.finish(command)
+    }
+
+    /// Like `command`, but the child inherits only the named variables from
+    /// this process, so unrelated credentials in the host environment never
+    /// reach the agent.
+    pub fn isolated_command(&self, inherit: &[&str]) -> Command {
+        let mut command = Command::new(&self.program);
+        command.env_clear();
+        for name in inherit {
+            if !self.removes(name)
+                && let Some(value) = std::env::var_os(name)
+            {
+                command.env(name, value);
+            }
+        }
+        self.finish(command)
+    }
+
+    fn finish(&self, mut command: Command) -> Command {
+        command.args(&self.args);
         for (name, value) in &self.env {
             match value {
                 EnvValue::Plain(v) => command.env(name, v),
@@ -502,6 +522,24 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn isolated_command_drops_unlisted_host_variables() {
+        let plan = LaunchPlan {
+            program: "env".into(),
+            args: Vec::new(),
+            cwd: None,
+            interactive: false,
+            env: vec![("COVALOS_PLAN_VAR".into(), EnvValue::Plain("1".into()))],
+            env_remove: Vec::new(),
+        };
+        let output = plan.isolated_command(&["PATH"]).output().unwrap();
+        let env = String::from_utf8(output.stdout).unwrap();
+        assert!(env.contains("COVALOS_PLAN_VAR=1"));
+        assert!(env.contains("PATH="));
+        assert!(!env.contains("CARGO_PKG_NAME"), "{env}");
     }
 
     /// Exercises the real Claude Code binary when it is installed; it only

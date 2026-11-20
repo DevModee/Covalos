@@ -136,6 +136,8 @@ macro_rules! id_type {
 id_type!(AccountId);
 id_type!(SessionId);
 id_type!(TaskId);
+id_type!(RoleId);
+id_type!(PlanId);
 
 pub fn now_ms() -> u64 {
     SystemTime::now()
