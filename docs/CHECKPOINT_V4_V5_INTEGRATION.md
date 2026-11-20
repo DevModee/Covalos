@@ -2,6 +2,22 @@
 
 Leé este archivo primero. Todo lo marcado como **verificado** se ejecutó de verdad en Windows con el CLI real de Codex. Lo marcado como **solo compila** o **no verificado** no tiene evidencia de ejecución.
 
+## Alpha 0.1.0 (2026-11-20, sesión 3) — leer primero
+
+Ejecutable: `E:\workspace\covalos-integration-build\release\covalos.exe` (build interna 0.4.0, nombre público **Alpha 0.1.0**, ver `docs/RELEASE.md`). Material para LinkedIn: `press/alpha-0.1.0/` (capturas reales + textos con límites). Proyecto de prueba: `E:\workspace\covalos-lsp-react` (Vite react-ts, TypeScript 7.0.2, sin git).
+
+Verificado de verdad en esta sesión:
+- Terminal interactiva (`pty.rs`): PowerShell en ConPTY vía `portable-pty` 0.9.0 + `vt100` 0.15.2. Test real: prompt, `cd`, Ctrl+C sobre `ping`, detección de URL, resize. `npm run dev` de Vite desde la terminal, Ports lo atribuye, preview WebView2 lo carga.
+- LSP visual en el editor real (harness `capture_alpha_tour`): subrayado en la posición correcta, Problems con línea:columna y ruta relativa, popup de completado legible, el error desaparece al corregir. Hover y formato (Shift+Alt+F) verificados contra TypeScript 7.
+- Un turno real de Codex (solo lectura) sobre `App.tsx` en el panel lateral.
+- Cierre de procesos: al matar el proceso de Covalos murieron Vite, el servidor TS y la shell (job objects).
+
+Bugs corregidos: handshake de cursor de ConPTY (sin respuesta la shell nunca dibujaba); Ctrl+C ignorado por la marca heredada de grupo de procesos; rutas `\\?\` que hacían fallar a Node (`MODULE_NOT_FOUND`) y rompían URIs del LSP; Codex fallaba en carpetas sin git (`--skip-git-repo-check`); Problems mostraba rutas absolutas; nombre de proyecto truncado en la barra superior.
+
+Limitaciones conocidas: Claude Code instalado pero con login vencido (acción del usuario: `claude auth login`); Gemini CLI no instalado (instalación guiada en Añadir IA); terminal sin selección de texto con el mouse (usar "Copy output"); Ports y preview integrada solo en Windows; sin binarios de Linux/macOS, sin instalador firmado ni avisos de licencias de terceros generados todavía; el formateo usa las opciones del servidor (2 espacios).
+
+Reproducir el tour: `COVALOS_EVIDENCE_DIR`, `COVALOS_LSP_PROJECT`, `COVALOS_AGENT_RUN` (+ `COVALOS_TOUR_SKIP_AGENT=1` para no gastar un turno) y `cargo test --bin covalos capture_alpha_tour -- --ignored`.
+
 ## 0. Developer Preview (2026-11-20, sesión 2) — leer primero
 
 Commits: `544ad08` agents, `2e193da` terminal/ports/preview/tunnel/reload, `e129b70` LSP, más el commit de este checkpoint. Todo en `integration/v4-v5`.

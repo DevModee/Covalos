@@ -137,7 +137,7 @@ impl Editor {
                 if drag.double_clicked() {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
                 }
-                let left_width = if rect.width() > 1100.0 { 280.0 } else { 216.0 };
+                let left_width = if rect.width() > 1100.0 { 330.0 } else { 250.0 };
                 let right_width = if rect.width() > 1000.0 { 312.0 } else { 248.0 };
                 let left =
                     egui::Rect::from_min_size(rect.min, egui::vec2(left_width, rect.height()));
