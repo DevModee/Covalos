@@ -45,21 +45,23 @@ impl Provider {
         }
     }
 
-    fn override_var(self) -> &'static str {
+    fn override_vars(self) -> [&'static str; 2] {
         match self {
-            Self::Codex => "AEROS_CODEX_BIN",
-            Self::Claude => "AEROS_CLAUDE_BIN",
-            Self::Gemini => "AEROS_GEMINI_BIN",
-            Self::Antigravity => "AEROS_AGY_BIN",
+            Self::Codex => ["COVALOS_CODEX_BIN", "AEROS_CODEX_BIN"],
+            Self::Claude => ["COVALOS_CLAUDE_BIN", "AEROS_CLAUDE_BIN"],
+            Self::Gemini => ["COVALOS_GEMINI_BIN", "AEROS_GEMINI_BIN"],
+            Self::Antigravity => ["COVALOS_AGY_BIN", "AEROS_AGY_BIN"],
         }
     }
 
     pub fn discover(self) -> Option<PathBuf> {
-        if let Some(path) = std::env::var_os(self.override_var()).map(PathBuf::from) {
-            return path
-                .is_absolute()
-                .then_some(path)
-                .filter(|path| path.is_file());
+        for var in self.override_vars() {
+            if let Some(path) = std::env::var_os(var).map(PathBuf::from) {
+                return path
+                    .is_absolute()
+                    .then_some(path)
+                    .filter(|path| path.is_file());
+            }
         }
         let name = format!("{}{}", self.executable(), std::env::consts::EXE_SUFFIX);
         if let Some(path) = std::env::var_os("PATH")
