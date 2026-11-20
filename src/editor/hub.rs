@@ -183,10 +183,10 @@ pub(super) struct Hub {
 
 #[derive(Default, PartialEq, Eq)]
 enum HubTab {
-    #[default]
     Conversations,
     Companion,
     Accounts,
+    #[default]
     Sessions,
     Autonomy,
     Tasks,
@@ -271,11 +271,10 @@ impl Hub {
     pub(super) fn focus_approvals(&mut self) {
         self.tab = HubTab::Tasks;
     }
-    #[cfg(test)]
     pub(super) fn focus_agents(&mut self, page: &str) {
         self.tab = match page {
             "accounts" => HubTab::Accounts,
-            "sessions" => HubTab::Sessions,
+            "sessions" | "agents" => HubTab::Sessions,
             _ => HubTab::Autonomy,
         };
     }
@@ -447,11 +446,20 @@ impl Editor {
                 ui.label(RichText::new(tr("Agent Hub")).size(HEADING).strong());
                 ui.add_space(24.0);
                 for (tab, label) in [
-                    (HubTab::Conversations, "Conversations"),
-                    (HubTab::Companion, "Live agents"),
+                    (HubTab::Sessions, "Agents"),
+                    (HubTab::Autonomy, "Orchestrator"),
                     (HubTab::Accounts, "Accounts"),
-                    (HubTab::Sessions, "Agent sessions"),
-                    (HubTab::Autonomy, "Autonomous"),
+                ] {
+                    if row(ui, label, "", self.hub.tab == tab).clicked() {
+                        self.hub.tab = tab;
+                    }
+                }
+                ui.add_space(14.0);
+                ui.label(muted(tr("Workspace")).size(SMALL));
+                ui.add_space(4.0);
+                for (tab, label) in [
+                    (HubTab::Companion, "Live agents"),
+                    (HubTab::Conversations, "Quick chat"),
                     (HubTab::Tasks, "Tasks"),
                     (HubTab::Memory, "Project memory"),
                     (HubTab::Skills, "Skills"),
@@ -486,14 +494,7 @@ impl Editor {
                         self.accounts_panel(ui);
                     }
                     HubTab::Sessions => self.sessions_panel(ui),
-                    HubTab::Autonomy => {
-                        section(
-                            ui,
-                            "Autonomous engine",
-                            "Plan a goal into tasks, assign agents, and supervise budgets, approvals and recovery.",
-                        );
-                        self.autonomy_panel(ui);
-                    }
+                    HubTab::Autonomy => self.autonomy_panel(ui),
                     HubTab::Companion => {
                         egui::ScrollArea::vertical().show(ui, |ui| self.companion_panel(ui));
                     }
@@ -1620,7 +1621,7 @@ fn round_button(ui: &mut Ui, send: bool, enabled: bool, label: &str) -> egui::Re
     response.on_hover_text(tr(label))
 }
 
-fn markdown(ui: &mut Ui, text: &str) {
+pub(super) fn markdown(ui: &mut Ui, text: &str) {
     let fence = char::from(96u8).to_string().repeat(3);
     let mut body = Vec::new();
     let mut language = None;

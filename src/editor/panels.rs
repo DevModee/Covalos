@@ -1252,7 +1252,7 @@ impl Editor {
             );
             content.set_clip_rect(ui.clip_rect());
             content.multiply_opacity(progress);
-            self.workspace_chat(&mut content);
+            self.agent_dock(&mut content);
         });
         let width = result.response.rect.width();
         ctx.layer_painter(egui::LayerId::background()).vline(
