@@ -10,7 +10,6 @@ use eframe::egui::{self, Color32, Context, Id, Ui};
 pub(super) const HOVER: f32 = 0.12;
 pub(super) const CONTROL: f32 = 0.16;
 pub(super) const PANEL: f32 = 0.24;
-pub(super) const VIEW: f32 = 0.28;
 
 thread_local! {
     static INTENSITY: std::cell::Cell<f32> = const { std::cell::Cell::new(1.0) };

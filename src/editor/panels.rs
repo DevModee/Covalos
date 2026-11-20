@@ -16,6 +16,51 @@ impl Editor {
         let shortcut = |modifiers, key| {
             ctx.input_mut(|input| input.consume_shortcut(&KeyboardShortcut::new(modifiers, key)))
         };
+        // Region zoom: the Explorer when the pointer is over it, otherwise the editor.
+        let over_explorer = self.explorer_rect.is_some_and(|r| {
+            ctx.input(|i| i.pointer.hover_pos())
+                .is_some_and(|p| r.contains(p))
+        });
+        let mut step = 0.0_f32;
+        let mut reset = false;
+        if shortcut(Modifiers::COMMAND, Key::Equals) || shortcut(Modifiers::COMMAND, Key::Plus) {
+            step = 1.0;
+        } else if shortcut(Modifiers::COMMAND, Key::Minus) {
+            step = -1.0;
+        } else if shortcut(Modifiers::COMMAND, Key::Num0) {
+            reset = true;
+        }
+        let wheel = ctx.input(|i| i.zoom_delta());
+        if (wheel - 1.0).abs() > 0.001 {
+            step = if wheel > 1.0 { 1.0 } else { -1.0 };
+        }
+        if step != 0.0 || reset {
+            if over_explorer {
+                let (lo, hi) = super::preferences::EXPLORER_ZOOM;
+                self.preferences.explorer_zoom = if reset {
+                    1.0
+                } else {
+                    (self.preferences.explorer_zoom + step * 0.05).clamp(lo, hi)
+                };
+            } else {
+                let (lo, hi) = super::preferences::EDITOR_FONT;
+                self.preferences.font_size = if reset {
+                    14.0
+                } else {
+                    (self.preferences.font_size + step).clamp(lo, hi)
+                };
+                install(
+                    ctx,
+                    self.preferences.font_size,
+                    self.preferences.high_contrast,
+                    self.preferences.theme,
+                );
+            }
+        }
+        if shortcut(Modifiers::COMMAND.plus(Modifiers::SHIFT), Key::A) {
+            self.hub_open = false;
+            self.preferences.assistant_open = !self.preferences.assistant_open;
+        }
         if let Some((modifiers, key)) = parse_shortcut(&self.preferences.library_shortcut)
             && shortcut(modifiers, key)
         {
@@ -177,55 +222,62 @@ impl Editor {
                         }
                     },
                 );
-                let middle = egui::Rect::from_min_max(
-                    egui::pos2(rect.left() + left_width + 12.0, rect.top()),
-                    egui::pos2(rect.right() - right_width - 20.0, rect.bottom()),
+                // The command field is centred on the window, independent of how wide the
+                // side zones are, and shrinks before it would touch them.
+                let side = left_width.max(right_width) + 16.0;
+                let command_width = (rect.width() - 2.0 * side).min(520.0);
+                let command = egui::Rect::from_center_size(
+                    rect.center(),
+                    egui::vec2(command_width.max(0.0), 30.0),
                 );
-                let command_width = middle.width().min(520.0);
-                let command =
-                    egui::Rect::from_center_size(middle.center(), egui::vec2(command_width, 30.0));
-                ui.scope_builder(egui::UiBuilder::new().max_rect(command), |ui| {
-                    let response = ui.add_sized(
-                        command.size(),
-                        egui::Button::new("")
-                            .fill(colors().inset)
-                            .stroke(egui::Stroke::new(1.0_f32, colors().border)),
-                    );
-                    draw_icon(
-                        ui.painter(),
-                        response.rect.left_center() + egui::vec2(16.0, 0.0),
-                        Icon::Search,
-                        colors().muted,
-                    );
-                    ui.painter().text(
-                        response.rect.left_center() + egui::vec2(32.0, 0.0),
-                        egui::Align2::LEFT_CENTER,
-                        if command_width > 320.0 {
-                            tr("Search files and commands")
-                        } else {
-                            tr("Quick access")
-                        },
-                        egui::FontId::proportional(BODY),
-                        colors().secondary,
-                    );
-                    ui.painter().text(
-                        response.rect.right_center() - egui::vec2(12.0, 0.0),
-                        egui::Align2::RIGHT_CENTER,
-                        if cfg!(target_os = "macos") {
-                            "⌘ P"
-                        } else {
-                            "Ctrl P"
-                        },
-                        egui::FontId::proportional(SMALL),
-                        colors().muted,
-                    );
-                    response.widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Quick access")
+                if command_width >= 140.0 {
+                    ui.scope_builder(egui::UiBuilder::new().max_rect(command), |ui| {
+                        let response = ui.add_sized(
+                            command.size(),
+                            egui::Button::new("")
+                                .fill(colors().inset)
+                                .stroke(egui::Stroke::new(1.0_f32, colors().border)),
+                        );
+                        draw_icon(
+                            ui.painter(),
+                            response.rect.left_center() + egui::vec2(16.0, 0.0),
+                            Icon::Search,
+                            colors().muted,
+                        );
+                        ui.painter().text(
+                            response.rect.left_center() + egui::vec2(32.0, 0.0),
+                            egui::Align2::LEFT_CENTER,
+                            if command_width > 320.0 {
+                                tr("Search files and commands")
+                            } else {
+                                tr("Quick access")
+                            },
+                            egui::FontId::proportional(BODY),
+                            colors().secondary,
+                        );
+                        ui.painter().text(
+                            response.rect.right_center() - egui::vec2(12.0, 0.0),
+                            egui::Align2::RIGHT_CENTER,
+                            if cfg!(target_os = "macos") {
+                                "⌘ P"
+                            } else {
+                                "Ctrl P"
+                            },
+                            egui::FontId::proportional(SMALL),
+                            colors().muted,
+                        );
+                        response.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Button,
+                                true,
+                                "Quick access",
+                            )
+                        });
+                        if response.clicked() {
+                            self.open_palette(ctx);
+                        }
                     });
-                    if response.clicked() {
-                        self.open_palette(ctx);
-                    }
-                });
+                }
                 let right = egui::Rect::from_min_max(
                     egui::pos2(rect.right() - right_width, rect.top()),
                     rect.max,
@@ -261,34 +313,24 @@ impl Editor {
                         {
                             self.settings_open = !self.settings_open;
                         }
-                        if rect.width() > 1000.0 {
-                            if ui.selectable_label(self.hub_open, "Agent Hub").clicked() {
-                                self.hub_open = !self.hub_open;
-                            }
-                            if ui
-                                .selectable_label(
-                                    !self.hub_open && self.preferences.assistant_open,
-                                    "Codex",
-                                )
-                                .clicked()
-                            {
-                                self.hub_open = false;
-                                self.preferences.assistant_open = !self.preferences.assistant_open;
-                            }
+                        // One destination for every provider: Agents. Codex, Claude and
+                        // Gemini are providers inside it, not separate places.
+                        let agents = if rect.width() > 900.0 {
+                            ui.selectable_label(self.hub_open, tr("Agents"))
                         } else {
-                            if icon_button(ui, Icon::Hub, "Agent Hub", self.hub_open).clicked() {
-                                self.hub_open = !self.hub_open;
-                            }
-                            if icon_button(
-                                ui,
-                                Icon::Code,
-                                "Toggle Codex panel",
-                                self.preferences.assistant_open,
-                            )
+                            icon_button(ui, Icon::Hub, "Agents", self.hub_open)
+                        };
+                        #[cfg(test)]
+                        super::motion::record(ui, "Agents", agents.rect);
+                        if agents
+                            .on_hover_text(tr(
+                                "Agents — sessions, providers and the side chat (Ctrl+Shift+A)",
+                            ))
                             .clicked()
-                            {
-                                self.hub_open = false;
-                                self.preferences.assistant_open = !self.preferences.assistant_open;
+                        {
+                            self.hub_open = !self.hub_open;
+                            if self.hub_open {
+                                self.studio_open = false;
                             }
                         }
                     },
@@ -404,9 +446,6 @@ impl Editor {
                             self.open_library();
                         }
                     }
-                    if icon_button(ui, Icon::Hub, "Agent Hub", false).clicked() {
-                        self.hub_open = true;
-                    }
                     if icon_button(ui, Icon::Settings, "Settings", self.settings_open).clicked() {
                         self.settings_open = !self.settings_open;
                     }
@@ -462,9 +501,20 @@ impl Editor {
     }
 
     pub(super) fn sidebar(&mut self, ctx: &Context) {
+        let zoom = self.preferences.explorer_zoom;
+        EXPLORER_ZOOM.with(|z| z.set(zoom));
+        // Bounds: never squeeze the editor below its minimum, never collapse the tree.
+        let assistant = if self.preferences.assistant_open {
+            self.preferences.assistant_width
+        } else {
+            0.0
+        };
+        let max = (ctx.content_rect().width() - RAIL_WIDTH - MIN_EDITOR_WIDTH - assistant)
+            .clamp(180.0, 480.0);
+        let min = (150.0 * zoom).min(max);
         let panel = SidePanel::left("workspace")
-            .default_width(self.preferences.sidebar_width)
-            .width_range(155.0..=340.0)
+            .default_width(self.preferences.sidebar_width.clamp(min, max))
+            .width_range(min..=max)
             .frame(island(Margin::same(PANEL_PADDING)))
             .show(ctx, |ui| {
                 self.luma_dock(ui);
@@ -549,6 +599,7 @@ impl Editor {
                 }
             });
         self.preferences.sidebar_width = panel.response.rect.width();
+        self.explorer_rect = Some(panel.response.rect);
         ctx.layer_painter(egui::LayerId::background()).vline(
             panel.response.rect.right(),
             panel.response.rect.y_range(),
@@ -618,6 +669,11 @@ impl Editor {
             self.welcome(ui);
             return;
         }
+        super::motion::enter(
+            ui,
+            Id::new("editor-surface-entry"),
+            self.preferences.transitions.seconds(),
+        );
         if self.preferences.identity.behind_code {
             let mood = self.agent_mood(ui.input(|i| i.focused));
             self.identity.paint(
@@ -1351,6 +1407,14 @@ fn matching_bracket(text: &str, cursor: usize) -> Option<(usize, usize)> {
 const TREE_INDENT: f32 = 14.0;
 const TREE_ROW: f32 = 26.0;
 
+thread_local! {
+    static EXPLORER_ZOOM: std::cell::Cell<f32> = const { std::cell::Cell::new(1.0) };
+}
+
+fn explorer_zoom() -> f32 {
+    EXPLORER_ZOOM.with(|z| z.get())
+}
+
 /// One Explorer row: indent guides, animated chevron for folders, upstream file icon,
 /// label, animated hover and selection with an accent marker.
 fn tree_row(
@@ -1361,8 +1425,9 @@ fn tree_row(
     openness: Option<f32>,
     selected: bool,
 ) -> egui::Response {
+    let z = explorer_zoom();
     let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), TREE_ROW),
+        egui::vec2(ui.available_width(), (TREE_ROW * z).round()),
         egui::Sense::click(),
     );
     response
@@ -1387,7 +1452,7 @@ fn tree_row(
     );
     painter.rect_filled(rect, 5, fill);
     if selection > 0.01 {
-        let h = (TREE_ROW - 10.0) * selection;
+        let h = (TREE_ROW * z - 10.0) * selection;
         painter.rect_filled(
             egui::Rect::from_center_size(
                 rect.left_center() + egui::vec2(1.0, 0.0),
@@ -1399,7 +1464,7 @@ fn tree_row(
     }
     // Indent guides, brighter on the hovered branch.
     for level in 0..depth {
-        let x = rect.left() + 12.0 + level as f32 * TREE_INDENT;
+        let x = rect.left() + 12.0 * z + level as f32 * TREE_INDENT * z;
         painter.vline(
             x,
             rect.y_range(),
@@ -1415,7 +1480,7 @@ fn tree_row(
             ),
         );
     }
-    let x = rect.left() + 6.0 + depth as f32 * TREE_INDENT;
+    let x = rect.left() + 6.0 * z + depth as f32 * TREE_INDENT * z;
     let center_y = rect.center().y;
     if let Some(open) = openness {
         // Lucide chevron, rotated from right (closed) to down (open).
@@ -1425,15 +1490,21 @@ fn tree_row(
             .rotate(open * std::f32::consts::FRAC_PI_2, egui::Vec2::splat(0.5))
             .paint_at(
                 ui,
-                egui::Rect::from_center_size(egui::pos2(x + 6.0, center_y), egui::vec2(14.0, 14.0)),
+                egui::Rect::from_center_size(
+                    egui::pos2(x + 6.0 * z, center_y),
+                    egui::vec2(14.0 * z, 14.0 * z),
+                ),
             );
     }
     super::assets::paint(
         ui,
-        egui::Rect::from_center_size(egui::pos2(x + 23.0, center_y), egui::vec2(16.0, 16.0)),
+        egui::Rect::from_center_size(
+            egui::pos2(x + 23.0 * z, center_y),
+            egui::vec2(16.0 * z, 16.0 * z),
+        ),
         icon,
     );
-    let label_x = x + 36.0;
+    let label_x = x + 36.0 * z;
     let max_width = (rect.right() - label_x - 6.0).max(1.0);
     let galley = ui.fonts_mut(|fonts| {
         fonts.layout_job(egui::text::LayoutJob {
@@ -1445,7 +1516,7 @@ fn tree_row(
             },
             ..egui::text::LayoutJob::simple(
                 name.to_owned(),
-                egui::FontId::proportional(BODY),
+                egui::FontId::proportional(BODY * z),
                 if selected || hover > 0.5 {
                     colors().text
                 } else {

@@ -92,6 +92,11 @@ pub(super) struct IdentityPreferences {
     pub(super) mascot_motion: bool,
     pub(super) mascot_intensity: f32,
     pub(super) interactive: bool,
+    /// Set once the user picks a background. Profiles from before Dither Field became
+    /// the default stored the old default (Orbital) without a choice; those move to
+    /// Dither Field once, explicit choices are never overwritten.
+    #[serde(default)]
+    pub(super) background_chosen: bool,
 }
 impl Default for IdentityPreferences {
     fn default() -> Self {
@@ -111,11 +116,15 @@ impl Default for IdentityPreferences {
             mascot_motion: true,
             mascot_intensity: 0.65,
             interactive: true,
+            background_chosen: false,
         }
     }
 }
 impl IdentityPreferences {
     pub(super) fn sanitize(&mut self) {
+        if !self.background_chosen && self.background == Background::Orbital {
+            self.background = Background::Dither;
+        }
         self.fps = self.fps.clamp(5, 60);
         self.speed = finite(self.speed, 0.6).clamp(0.1, 2.0);
         self.density = finite(self.density, 0.45).clamp(0.1, 1.0);

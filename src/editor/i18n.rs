@@ -77,6 +77,44 @@ pub(super) fn trf(template: &'static str, values: &[(&str, String)]) -> String {
 }
 
 const SPANISH: &[(&str, &str)] = &[
+    ("Agents", "Agentes"),
+    (
+        "Agents — sessions, providers and the side chat (Ctrl+Shift+A)",
+        "Agentes — sesiones, proveedores y chat lateral (Ctrl+Shift+A)",
+    ),
+    ("Explorer zoom", "Zoom del Explorador"),
+    ("Interface scale", "Escala de la interfaz"),
+    ("Reset editor zoom", "Restablecer zoom del editor"),
+    ("Reset Explorer zoom", "Restablecer zoom del Explorador"),
+    ("Reset interface scale", "Restablecer escala"),
+    (
+        "Ctrl + wheel or Ctrl +/− zooms the panel under the pointer; Ctrl+0 resets it.",
+        "Ctrl + rueda o Ctrl +/− amplía el panel bajo el puntero; Ctrl+0 lo restablece.",
+    ),
+    ("Navigation transitions", "Transiciones de navegación"),
+    ("Subtle", "Sutiles"),
+    ("Expressive", "Expresivas"),
+    ("Discord Rich Presence", "Discord Rich Presence"),
+    (
+        "Show COVALOS activity in Discord",
+        "Mostrar la actividad de COVALOS en Discord",
+    ),
+    ("Application ID", "Application ID"),
+    ("Show current activity", "Mostrar la actividad actual"),
+    ("Show language", "Mostrar el lenguaje"),
+    ("Show project name", "Mostrar el nombre del proyecto"),
+    ("Show session time", "Mostrar el tiempo de sesión"),
+    ("Discord is not running", "Discord no está abierto"),
+    ("Connected", "Conectado"),
+    (
+        "Enter a valid Application ID",
+        "Ingresá un Application ID válido",
+    ),
+    (
+        "Paths, file names, prompts and accounts are never sent. Only the local Discord app receives the status.",
+        "Nunca se envían rutas, nombres de archivo, prompts ni cuentas. Solo la app local de Discord recibe el estado.",
+    ),
+    ("Claude · Codex · Gemini", "Claude · Codex · Gemini"),
     ("Library Studio", "Library Studio"),
     ("Library Studio shortcut", "Atajo de Library Studio"),
     ("Open Library Studio", "Abrir Library Studio"),

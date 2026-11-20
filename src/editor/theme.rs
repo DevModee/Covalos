@@ -790,11 +790,6 @@ pub(super) fn modal_frame() -> Frame {
         .stroke(Stroke::new(1.0_f32, colors().control_border))
 }
 
-/// Short surface entry; input remains available throughout the transition.
-pub(super) fn enter(ui: &mut egui::Ui, id: egui::Id) {
-    super::motion::enter(ui, id, super::motion::VIEW);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

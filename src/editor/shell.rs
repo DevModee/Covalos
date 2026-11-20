@@ -128,29 +128,30 @@ impl Editor {
     }
 
     pub(super) fn welcome(&mut self, ui: &mut Ui) {
-        enter(ui, Id::new("workspace-home-entry"));
+        super::motion::enter(
+            ui,
+            Id::new(("workspace-home-entry", self.root.clone())),
+            self.preferences.transitions.seconds(),
+        );
         let area = ui.available_rect_before_wrap();
         let mood = self.agent_mood(ui.input(|i| i.focused));
         self.identity
             .paint(ui, area, &self.preferences.identity, mood);
-        // Wide windows use a hero layout: content on the left, the background composition
-        // owns the right. Narrow windows centre the column.
-        let wide = area.width() > 980.0;
-        let width = if wide {
-            (area.width() * 0.46).clamp(420.0, 600.0)
-        } else {
-            (area.width() - 64.0).clamp(240.0, 640.0).min(area.width())
-        };
-        let left = if wide {
-            area.left() + (area.width() * 0.07).clamp(40.0, 104.0)
-        } else {
-            area.center().x - width * 0.5
-        };
-        let top = if area.height() < 560.0 {
-            24.0
-        } else {
-            (area.height() * 0.16).clamp(24.0, 120.0)
-        };
+        // One centred column inside the available content area (not the window), with a
+        // readable maximum width. Its vertical position comes from content known up
+        // front, so loading recents never shifts the layout.
+        let width = (area.width() - 64.0).clamp(240.0, 640.0).min(area.width());
+        let left = area.center().x - width * 0.5;
+        let rows = if width > 440.0 { 2.0 } else { 4.0 };
+        let recent = self.preferences.recent.len().min(8) as f32;
+        let estimate = 136.0
+            + rows * 76.0
+            + if recent > 0.0 {
+                70.0 + recent * 52.0
+            } else {
+                0.0
+            };
+        let top = ((area.height() - estimate) * 0.42).clamp(24.0, 160.0);
         let rect = egui::Rect::from_min_size(
             egui::pos2(left, area.top() + top),
             egui::vec2(width, (area.height() - top).max(1.0)),
@@ -214,7 +215,7 @@ impl Editor {
                             if mac { "⇧ ⌘ O" } else { "Ctrl Shift O" },
                         ),
                         (Icon::Add, "Create project", "New folder"),
-                        (Icon::Hub, "Agent Hub", "Codex · Claude"),
+                        (Icon::Hub, "Agents", "Claude · Codex · Gemini"),
                     ];
                     let columns = if width > 440.0 { 2 } else { 1 };
                     let gap = 10.0;
@@ -358,6 +359,35 @@ impl Editor {
                     ui.selectable_value(&mut self.preferences.compact, false, tr("Comfortable"));
                 });
                 ui.add(egui::Slider::new(&mut self.preferences.motion, 0.0..=1.0).step_by(0.05).text(tr("Motion intensity")));
+                ui.add(egui::Slider::new(&mut self.preferences.explorer_zoom, super::preferences::EXPLORER_ZOOM.0..=super::preferences::EXPLORER_ZOOM.1).step_by(0.05).text(tr("Explorer zoom")));
+                ui.add(egui::Slider::new(&mut self.preferences.ui_scale, super::preferences::UI_SCALE.0..=super::preferences::UI_SCALE.1).step_by(0.05).text(tr("Interface scale")));
+                ui.horizontal_wrapped(|ui| {
+                    if ui.button(tr("Reset editor zoom")).clicked() { self.preferences.font_size = 14.0; }
+                    if ui.button(tr("Reset Explorer zoom")).clicked() { self.preferences.explorer_zoom = 1.0; }
+                    if ui.button(tr("Reset interface scale")).clicked() { self.preferences.ui_scale = 1.0; }
+                });
+                ui.add(egui::Label::new(muted("Ctrl + wheel or Ctrl +/− zooms the panel under the pointer; Ctrl+0 resets it.")).wrap());
+                ui.horizontal(|ui| {
+                    ui.label(secondary(tr("Navigation transitions")));
+                    for t in super::preferences::Transitions::ALL {
+                        ui.selectable_value(&mut self.preferences.transitions, t, tr(t.name()));
+                    }
+                });
+                let status = self.discord.status();
+                egui::CollapsingHeader::new(tr("Discord Rich Presence")).default_open(self.preferences.discord.enabled).show(ui, |ui| {
+                    let d = &mut self.preferences.discord;
+                    checkbox(ui, &mut d.enabled, tr("Show COVALOS activity in Discord"));
+                    ui.horizontal(|ui| {
+                        ui.label(secondary(tr("Application ID")));
+                        ui.add(egui::TextEdit::singleline(&mut d.application_id).desired_width(180.0).hint_text("Discord Developer Portal"));
+                    });
+                    checkbox(ui, &mut d.show_activity, tr("Show current activity"));
+                    checkbox(ui, &mut d.show_language, tr("Show language"));
+                    checkbox(ui, &mut d.show_project, tr("Show project name"));
+                    checkbox(ui, &mut d.show_elapsed, tr("Show session time"));
+                    ui.label(muted(format!("{}: {}", tr("Status"), tr(status))));
+                    ui.add(egui::Label::new(muted("Paths, file names, prompts and accounts are never sent. Only the local Discord app receives the status.")).wrap());
+                });
                 ui.horizontal(|ui| {
                     ui.label(secondary(tr("Library Studio shortcut")));
                     let valid = super::panels::parse_shortcut(&self.preferences.library_shortcut).is_some();
@@ -375,7 +405,7 @@ impl Editor {
                     ui.horizontal(|ui| {
                         ui.label(secondary(tr("Preset")));
                         let selector=egui::ComboBox::from_id_salt("background-preset").selected_text(prefs.background.name()).show_ui(ui, |ui| {
-                            for preset in super::identity::Background::ALL {let response=ui.selectable_value(&mut prefs.background,preset,tr(preset.name())); #[cfg(test)] super::motion::record(ui,format!("Background {}",preset.name()),response.rect); let _=response;}
+                            for preset in super::identity::Background::ALL {let response=ui.selectable_value(&mut prefs.background,preset,tr(preset.name())); if response.clicked() { prefs.background_chosen = true; } #[cfg(test)] super::motion::record(ui,format!("Background {}",preset.name()),response.rect); let _=response;}
                         });
                         #[cfg(test)] super::motion::record(ui,"Background selector",selector.response.rect);
                         let _=selector;
