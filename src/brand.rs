@@ -9,7 +9,11 @@ use std::sync::Arc;
 pub const NAME: &str = "Covalos";
 pub const TITLE: &str = "Covalos";
 pub const DESCRIPTION: &str = "Native Rust IDE with multi-agent orchestration";
+/// Internal build version (Cargo, Windows file version, installer). It keeps
+/// increasing independently of the public release name.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Public release name shown to people. See docs/RELEASE.md.
+pub const RELEASE: &str = "Alpha 0.1.0";
 pub const USER_AGENT: &str = "COVALOS-Library-Studio";
 
 pub const APP_ICON_PNG: &[u8] = include_bytes!("../assets/brand/covalos-app-256.png");

@@ -155,6 +155,8 @@ impl Editor {
                         let (_, mark) = ui.allocate_space(egui::vec2(22.0, 28.0));
                         draw_icon(ui.painter(), mark.center(), Icon::Brand, colors().accent);
                         ui.label(RichText::new(BRAND).size(LEAD).strong());
+                        ui.label(RichText::new("Alpha").size(SMALL).color(colors().muted))
+                            .on_hover_text(crate::brand::RELEASE);
                         ui.add_space(8.0);
                         ui.menu_button(tr("File"), |ui| {
                             if ui.button(tr("Library Studio")).clicked() {

@@ -465,7 +465,11 @@ impl Editor {
                     ui.add_space(12.0);
                     ui.vertical(|ui| {
                         ui.label(RichText::new(crate::brand::NAME).size(HEADING).strong());
-                        ui.label(muted(format!("v{}", crate::brand::VERSION)));
+                        ui.label(muted(format!(
+                            "{} · build {}",
+                            crate::brand::RELEASE,
+                            crate::brand::VERSION
+                        )));
                         ui.add_space(4.0);
                         ui.add(
                             egui::Label::new(secondary(tr(crate::brand::DESCRIPTION))).wrap(),

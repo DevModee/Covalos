@@ -1588,6 +1588,254 @@ fn engine_steps() -> Vec<Step> {
     ]
 }
 
+/// Desktop capture of the harness window: unlike the GL screenshot it
+/// includes native children such as the WebView2 preview.
+fn os_capture(ctx: &egui::Context, path: &Path) {
+    let Some(rect) = ctx.input(|i| i.viewport().outer_rect) else {
+        return;
+    };
+    let ppp = ctx.pixels_per_point();
+    let (x, y) = ((rect.left() * ppp) as i32, (rect.top() * ppp) as i32);
+    let (w, h) = ((rect.width() * ppp) as i32, (rect.height() * ppp) as i32);
+    let _ = std::fs::create_dir_all(path.parent().unwrap_or(path));
+    let script = format!(
+        "Add-Type -AssemblyName System.Drawing; $b = New-Object System.Drawing.Bitmap({w}, {h}); \
+         $g = [System.Drawing.Graphics]::FromImage($b); $g.CopyFromScreen({x}, {y}, 0, 0, $b.Size); \
+         $b.Save('{}', [System.Drawing.Imaging.ImageFormat]::Png)",
+        path.display()
+    );
+    let _ = std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .output();
+}
+
+fn app_tsx(e: &Editor) -> Option<usize> {
+    e.documents.iter().position(|d| d.path.ends_with("App.tsx"))
+}
+
+/// Puts `line` after the first line of App.tsx (in memory only) and moves
+/// the caret to its end.
+fn inject(e: &mut Editor, line: &str) {
+    let Some(i) = app_tsx(e) else { return };
+    let doc = &mut e.documents[i];
+    let first = doc.text.find('\n').map_or(doc.text.len(), |n| n + 1);
+    doc.text.insert_str(first, &format!("{line}\n"));
+    doc.update_dirty();
+    let caret = doc.text[..first].chars().count() + line.chars().count();
+    e.active = Some(i);
+    e.selection = Some((caret, caret));
+    e.focus_editor = true;
+}
+
+fn uninject(e: &mut Editor, line: &str) {
+    let Some(i) = app_tsx(e) else { return };
+    let doc = &mut e.documents[i];
+    doc.text = doc.text.replacen(&format!("{line}\n"), "", 1);
+    doc.update_dirty();
+}
+
+const BAD: &str = "const count: number = \"five\";";
+const PROBE: &str = "const probe = useSt";
+
+/// Alpha tour on a real Vite React-TS project (COVALOS_LSP_PROJECT) with a
+/// recorded agents config (COVALOS_AGENT_RUN): welcome, editor, LSP squiggle,
+/// Problems, completion, fix, one small read-only Codex turn in the dock,
+/// npm run dev with the preview, and the orchestrator. Nothing is saved.
+fn tour_steps() -> Vec<Step> {
+    vec![
+        Wait(1.2),
+        Shot("promo/01-welcome"),
+        Act(|e, _, root| {
+            e.open_workspace(root.to_path_buf());
+            e.open_file(root.join("src").join("App.tsx"));
+        }),
+        UntilFor(
+            |e| app_tsx(e).is_some_and(|i| e.lsp.harness_ready(&e.documents[i].path)),
+            "TypeScript server",
+            90,
+        ),
+        Wait(1.5),
+        Shot("promo/02-editor-react"),
+        Act(|e, _, _| {
+            inject(e, BAD);
+            e.show_tool("problems");
+        }),
+        UntilFor(
+            |e| {
+                app_tsx(e)
+                    .is_some_and(|i| e.lsp.harness_has(&e.documents[i].path, "not assignable"))
+            },
+            "type error diagnostic",
+            60,
+        ),
+        Wait(1.0),
+        Shot("lsp/01-squiggle-and-problems"),
+        Act(|e, _, _| {
+            uninject(e, BAD);
+            inject(e, PROBE);
+        }),
+        Wait(0.8),
+        Key(Key::Space, Modifiers::CTRL),
+        UntilFor(|e| e.lsp.harness_popup_items() > 0, "completion items", 30),
+        Wait(0.8),
+        Shot("lsp/02-completion-popup"),
+        Act(|e, _, _| {
+            e.lsp.harness_close_popup();
+            uninject(e, PROBE);
+        }),
+        UntilFor(
+            |e| {
+                app_tsx(e).is_some_and(|i| {
+                    let p = &e.documents[i].path;
+                    !e.lsp.harness_has(p, "not assignable") && !e.lsp.harness_has(p, "useSt")
+                })
+            },
+            "diagnostics cleared after the fix",
+            60,
+        ),
+        Wait(0.8),
+        Shot("lsp/03-fixed"),
+        Act(|e, c, _| {
+            e.ensure_runtime(c);
+        }),
+        UntilFor(
+            |e| {
+                agents_ref(e).is_some_and(|r| {
+                    !r.detections.is_empty() && r.detections.values().all(|d| d.done)
+                })
+            },
+            "provider detection",
+            90,
+        ),
+        Act(|e, _, root| {
+            use covalos_agents::{AccountId, permission::Preset};
+            let r = agents(e);
+            let index = r
+                .create_session(crate::agents_runtime::NewSession {
+                    title: "Explain App.tsx".into(),
+                    account: AccountId::new("codex-main").unwrap(),
+                    model: None,
+                    root: root.to_path_buf(),
+                    worktree: false,
+                    preset: Preset::ReadOnly,
+                    allow_safe_commands: false,
+                    share_context: false,
+                })
+                .unwrap();
+            r.send(
+                index,
+                "Active file in the editor: src/App.tsx\n\nIn two short sentences, what does this component render? Do not edit files.",
+            )
+            .unwrap();
+            let id = r.sessions[index].meta.id.as_str().to_owned();
+            e.hub.agents.chat.restored = true;
+            e.hub.agents.chat.dock = Some(id);
+            e.preferences.assistant_open = true;
+            e.preferences.assistant_width = 430.0;
+            e.preferences.tools_open = false;
+        }),
+        UntilFor(
+            |e| agents_ref(e).is_some_and(|r| r.sessions.last().is_some_and(|s| !s.running())),
+            "Codex turn",
+            300,
+        ),
+        Wait(1.0),
+        Shot("promo/03-agents-beside-code"),
+        Act(|e, c, _| {
+            e.preferences.assistant_open = false;
+            e.show_tool("terminal");
+            e.preferences.tools_height = 300.0;
+            e.harness_open_terminal(c);
+        }),
+        UntilFor(|e| e.harness_prompt_ready(), "PowerShell prompt", 60),
+        Wait(0.6),
+        Act(|e, _, _| e.harness_type("npm run dev\r")),
+        UntilFor(|e| e.harness_url().is_some(), "Vite address", 120),
+        Act(|e, _, _| {
+            let url = e.harness_url().unwrap();
+            e.open_preview(&url);
+        }),
+        UntilFor(
+            |e| e.harness_preview_url().is_some(),
+            "WebView2 preview",
+            60,
+        ),
+        Wait(3.0),
+        Act(|_, c, _| {
+            let out = std::env::var_os("COVALOS_EVIDENCE_DIR")
+                .map(PathBuf::from)
+                .unwrap();
+            os_capture(c, &out.join("promo").join("04-terminal-preview.png"));
+        }),
+        Shot("promo/04-terminal-preview-gl"),
+        Act(|e, _, _| {
+            e.preview.open = false;
+            e.hub_open = true;
+            e.hub.focus_agents("orchestrator");
+        }),
+        Wait(1.2),
+        Shot("promo/05-orchestrator"),
+        Act(|e, _, _| {
+            e.hub_open = false;
+            e.harness_stop_all();
+        }),
+        UntilFor(|e| !e.terminals.busy(), "processes stopped", 30),
+    ]
+}
+
+#[test]
+#[ignore = "opens a native window, runs the TypeScript server, Vite and one Codex turn"]
+fn capture_alpha_tour() -> Result<(), Box<dyn std::error::Error>> {
+    use winit::platform::windows::EventLoopBuilderExtWindows;
+    let output =
+        PathBuf::from(std::env::var_os("COVALOS_EVIDENCE_DIR").ok_or("set COVALOS_EVIDENCE_DIR")?);
+    std::fs::create_dir_all(output.join("reports"))?;
+    let root =
+        PathBuf::from(std::env::var_os("COVALOS_LSP_PROJECT").ok_or("set COVALOS_LSP_PROJECT")?);
+    let base = PathBuf::from(std::env::var_os("COVALOS_AGENT_RUN").ok_or("set COVALOS_AGENT_RUN")?);
+    // SAFETY: set before any thread of this test reads the environment.
+    unsafe { std::env::set_var("COVALOS_CONFIG_DIR", base.join("config")) };
+    let options = eframe::NativeOptions {
+        viewport: ViewportBuilder::default()
+            .with_inner_size([1440.0, 860.0])
+            .with_position([40.0, 40.0])
+            .with_decorations(false)
+            .with_title("Covalos"),
+        event_loop_builder: Some(Box::new(|b| {
+            b.with_any_thread(true);
+        })),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "Covalos alpha tour",
+        options,
+        Box::new(move |cc| {
+            let mut preferences = Preferences::default();
+            preferences.language = super::i18n::Language::English;
+            preferences.assistant_open = false;
+            let editor = Editor::new(&cc.egui_ctx, None, preferences);
+            Ok(Box::new(Harness {
+                editor,
+                root,
+                steps: tour_steps(),
+                stage: 0,
+                at: Instant::now(),
+                delay: 0.8,
+                queued: Vec::new(),
+                requested: false,
+                output,
+                suffix: String::new(),
+                scale: 1.0,
+                deadline: Instant::now() + Duration::from_secs(900),
+                manifest: Vec::new(),
+                last_action: Instant::now(),
+                render_ms: Vec::new(),
+            }))
+        }),
+    )?;
+    Ok(())
+}
+
 /// Web workflow on a throwaway Node project: dev server from a terminal tab,
 /// its port in Ports, the WebView2 preview, and a confirmed Cloudflare tunnel.
 fn web_steps() -> Vec<Step> {

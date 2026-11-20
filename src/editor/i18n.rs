@@ -77,6 +77,24 @@ pub(super) fn trf(template: &'static str, values: &[(&str, String)]) -> String {
 }
 
 const SPANISH: &[(&str, &str)] = &[
+    ("Copy output", "Copiar salida"),
+    (
+        "Copy the terminal text, including scrollback",
+        "Copiar el texto de la terminal, incluido el historial",
+    ),
+    (
+        "Interrupt the running program",
+        "Interrumpir el programa en ejecución",
+    ),
+    ("Already formatted.", "El archivo ya tiene formato."),
+    (
+        "The language server could not format this file.",
+        "El servidor de lenguaje no pudo formatear este archivo.",
+    ),
+    (
+        "No language server can format this file.",
+        "Ningún servidor de lenguaje puede formatear este archivo.",
+    ),
     ("+ Add AI", "+ Añadir IA"),
     ("+ New conversation", "+ Nueva conversación"),
     ("Add", "Añadir"),

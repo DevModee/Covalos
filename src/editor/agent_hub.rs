@@ -888,7 +888,7 @@ impl Editor {
                 let key = role.id.to_string();
                 ui.horizontal(|ui| {
                     ui.add_sized(
-                        [110.0, 22.0],
+                        [132.0, 22.0],
                         egui::Label::new(RichText::new(&role.name).strong()).truncate(),
                     );
                     let current = state.pins.get(&key).cloned();

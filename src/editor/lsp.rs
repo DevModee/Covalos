@@ -223,6 +223,9 @@ fn pos(v: &Value) -> (u32, u32) {
     )
 }
 
+/// LSP text edits: (start, end, new text), positions as (line, UTF-16 column).
+type TextEdits = Vec<((u32, u32), (u32, u32), String)>;
+
 #[derive(Clone, Debug)]
 pub(super) struct Diagnostic {
     pub(super) start: (u32, u32),
@@ -256,6 +259,8 @@ struct Server {
     opened: HashMap<PathBuf, (i64, u64)>,
     triggers: Vec<char>,
     completion: Option<(i64, PathBuf)>,
+    hover: Option<(i64, PathBuf, usize)>,
+    format: Option<(i64, PathBuf)>,
     /// The server answers `textDocument/diagnostic` (pull) requests.
     pull: bool,
     diagnostic_requests: HashMap<i64, PathBuf>,
@@ -358,6 +363,8 @@ impl Server {
             opened: HashMap::new(),
             triggers: Vec::new(),
             completion: None,
+            hover: None,
+            format: None,
             pull: false,
             diagnostic_requests: HashMap::new(),
         };
@@ -373,7 +380,9 @@ impl Server {
                         "synchronization": {"didSave": false},
                         "publishDiagnostics": {"relatedInformation": false},
                         "diagnostic": {"dynamicRegistration": false, "relatedDocumentSupport": false},
-                        "completion": {"completionItem": {"snippetSupport": false}}
+                        "completion": {"completionItem": {"snippetSupport": false}},
+                        "hover": {"contentFormat": ["plaintext", "markdown"]},
+                        "formatting": {"dynamicRegistration": false}
                     },
                     "workspace": {"configuration": true, "workspaceFolders": true}
                 },
@@ -433,6 +442,12 @@ pub(super) struct Lsp {
     pub(super) diagnostics: HashMap<PathBuf, Vec<Diagnostic>>,
     popup: Option<Popup>,
     synced: Option<Instant>,
+    /// Hover answer: file, char index it describes, text.
+    hover: Option<(PathBuf, usize, String)>,
+    hover_asked: Option<(PathBuf, usize)>,
+    /// Formatting edits waiting to be applied: file, (start, end, text).
+    formatted: Option<(PathBuf, TextEdits)>,
+    pub(super) format_note: Option<String>,
 }
 
 fn digest(text: &str) -> u64 {
@@ -598,6 +613,8 @@ impl Lsp {
     fn poll(&mut self) {
         let mut diagnostics = Vec::new();
         let mut completions = Vec::new();
+        let mut hovers = Vec::new();
+        let mut formats = Vec::new();
         for (lang, slot) in &mut self.servers {
             let Slot::Running(server) = slot else {
                 continue;
@@ -674,6 +691,28 @@ impl Lsp {
                 {
                     completions.push((path.clone(), completion_items(&msg["result"])));
                     server.completion = None;
+                } else if let Some((id, path, index)) = &server.hover
+                    && msg["id"].as_i64() == Some(*id)
+                {
+                    hovers.push((path.clone(), *index, hover_text(&msg["result"]["contents"])));
+                    server.hover = None;
+                } else if let Some((id, path)) = &server.format
+                    && msg["id"].as_i64() == Some(*id)
+                {
+                    let edits = msg["result"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .map(|e| {
+                            (
+                                pos(&e["range"]["start"]),
+                                pos(&e["range"]["end"]),
+                                e["newText"].as_str().unwrap_or_default().to_owned(),
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    formats.push((path.clone(), edits, msg.get("error").is_some()));
+                    server.format = None;
                 }
             }
             if let Some(reason) = failed {
@@ -686,6 +725,18 @@ impl Lsp {
             // Keyed by the plain path: editor paths may carry the verbatim prefix.
             self.diagnostics
                 .insert(crate::agents_runtime::plain(&path), list);
+        }
+        for (path, index, text) in hovers {
+            self.hover = (!text.trim().is_empty()).then_some((path, index, text));
+        }
+        for (path, edits, failed) in formats {
+            if failed {
+                self.format_note = Some("The language server could not format this file.".into());
+            } else if edits.is_empty() {
+                self.format_note = Some("Already formatted.".into());
+            } else {
+                self.formatted = Some((path, edits));
+            }
         }
         for (path, items) in completions {
             if let Some(popup) = &mut self.popup
@@ -774,6 +825,50 @@ impl Lsp {
         });
     }
 
+    /// The ready server for a document, if any.
+    fn server_for(&mut self, path: &Path) -> Option<&mut Server> {
+        let (lang, _) = language(path)?;
+        match self.servers.get_mut(&lang) {
+            Some(Slot::Running(server)) if server.ready && server.opened.contains_key(path) => {
+                Some(server)
+            }
+            _ => None,
+        }
+    }
+
+    fn request_hover(&mut self, doc: &Document, index: usize) {
+        if self.hover_asked == Some((doc.path.clone(), index)) {
+            return;
+        }
+        self.hover_asked = Some((doc.path.clone(), index));
+        self.hover = None;
+        let (line, character) = position(&doc.text, index);
+        let Some(server) = self.server_for(&doc.path) else {
+            return;
+        };
+        let id = server.next;
+        server.next += 1;
+        server.send(json!({
+            "jsonrpc": "2.0", "id": id, "method": "textDocument/hover",
+            "params": {"textDocument": {"uri": uri(&doc.path)}, "position": {"line": line, "character": character}}
+        }));
+        server.hover = Some((id, doc.path.clone(), index));
+    }
+
+    fn request_format(&mut self, doc: &Document) {
+        let Some(server) = self.server_for(&doc.path) else {
+            self.format_note = Some("No language server can format this file.".into());
+            return;
+        };
+        let id = server.next;
+        server.next += 1;
+        server.send(json!({
+            "jsonrpc": "2.0", "id": id, "method": "textDocument/formatting",
+            "params": {"textDocument": {"uri": uri(&doc.path)}, "options": {"tabSize": 2, "insertSpaces": true}}
+        }));
+        server.format = Some((id, doc.path.clone()));
+    }
+
     fn triggers(&self, path: &Path) -> Vec<char> {
         language(path)
             .and_then(|(lang, _)| match self.servers.get(&lang) {
@@ -793,6 +888,7 @@ pub(super) enum PopupKey {
     Accept,
     Close,
     Trigger,
+    Format,
 }
 
 pub(super) fn popup_keys(ui: &mut Ui, lsp: &Lsp, id: egui::Id, path: &Path) -> PopupKey {
@@ -801,6 +897,9 @@ pub(super) fn popup_keys(ui: &mut Ui, lsp: &Lsp, id: egui::Id, path: &Path) -> P
     }
     if ui.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::Space)) {
         return PopupKey::Trigger;
+    }
+    if ui.input_mut(|i| i.consume_key(Modifiers::SHIFT | Modifiers::ALT, Key::F)) {
+        return PopupKey::Format;
     }
     let open = lsp
         .popup
@@ -850,7 +949,19 @@ pub(super) fn after_edit(
             lsp.trigger(doc, cursor);
         }
     }
-    paint_diagnostics(ui, lsp, doc, output);
+    if key == PopupKey::Format {
+        lsp.request_format(doc);
+    }
+    if let Some((path, edits)) = lsp.formatted.take() {
+        if path == doc.path {
+            apply_edits(doc, edits);
+            ui.ctx().request_repaint();
+        } else {
+            lsp.formatted = Some((path, edits));
+        }
+    }
+    let on_diagnostic = paint_diagnostics(ui, lsp, doc, output);
+    hover(ui, lsp, doc, output, on_diagnostic);
     let Some(popup) = &mut lsp.popup else { return };
     if popup.path != doc.path {
         return;
@@ -963,12 +1074,13 @@ fn paint_diagnostics(
     lsp: &Lsp,
     doc: &Document,
     output: &egui::text_edit::TextEditOutput,
-) {
+) -> bool {
+    let mut shown = false;
     let Some(list) = lsp
         .diagnostics
         .get(&crate::agents_runtime::plain(&doc.path))
     else {
-        return;
+        return false;
     };
     let origin = output.galley_pos.to_vec2();
     let pointer = ui.ctx().pointer_hover_pos();
@@ -1015,6 +1127,7 @@ fn paint_diagnostics(
             .add(egui::Shape::line(points, egui::Stroke::new(1.2_f32, color)));
         let rect = egui::Rect::from_min_max(egui::pos2(x0, a.top()), egui::pos2(x1, a.bottom()));
         if pointer.is_some_and(|p| rect.contains(p)) {
+            shown = true;
             egui::Tooltip::always_open(
                 ui.ctx().clone(),
                 ui.layer_id(),
@@ -1034,6 +1147,104 @@ fn paint_diagnostics(
             });
         }
     }
+    shown
+}
+
+/// Type information under a resting pointer, from `textDocument/hover`.
+fn hover(
+    ui: &mut Ui,
+    lsp: &mut Lsp,
+    doc: &Document,
+    output: &egui::text_edit::TextEditOutput,
+    on_diagnostic: bool,
+) {
+    let Some(pointer) = ui.ctx().pointer_hover_pos() else {
+        return;
+    };
+    if on_diagnostic || !output.response.rect.contains(pointer) || lsp.popup.is_some() {
+        return;
+    }
+    let resting = ui.input(|i| i.pointer.time_since_last_movement()) > 0.45;
+    let local = pointer - output.galley_pos;
+    let index = output.galley.cursor_from_pos(local).index;
+    let start = word_start(&doc.text, index);
+    let over_word = doc
+        .text
+        .chars()
+        .nth(index)
+        .is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '$');
+    if !resting || !over_word {
+        return;
+    }
+    lsp.request_hover(doc, start.max(index.min(start + 1)));
+    let Some((path, _, text)) = &lsp.hover else {
+        ui.ctx().request_repaint_after(Duration::from_millis(100));
+        return;
+    };
+    if path != &doc.path {
+        return;
+    }
+    egui::Tooltip::always_open(
+        ui.ctx().clone(),
+        ui.layer_id(),
+        egui::Id::new("lsp-hover"),
+        egui::PopupAnchor::Pointer,
+    )
+    .show(|ui| {
+        ui.set_max_width(520.0);
+        for (i, part) in text.split("\n---\n").enumerate() {
+            if i > 0 {
+                ui.separator();
+            }
+            ui.label(
+                RichText::new(part.trim())
+                    .monospace()
+                    .size(12.0)
+                    .color(colors().text),
+            );
+        }
+    });
+}
+
+/// Hover contents in any of the LSP shapes, without markdown fences.
+fn hover_text(contents: &Value) -> String {
+    let piece = |v: &Value| -> String {
+        v.as_str()
+            .map(str::to_owned)
+            .or_else(|| v["value"].as_str().map(str::to_owned))
+            .unwrap_or_default()
+    };
+    let text = match contents {
+        Value::Array(items) => items.iter().map(piece).collect::<Vec<_>>().join("\n---\n"),
+        other => piece(other),
+    };
+    let fence = "`".repeat(3);
+    text.lines()
+        .filter(|l| !l.trim_start().starts_with(&fence))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .chars()
+        .take(1500)
+        .collect()
+}
+
+/// Applies LSP text edits (ranges in the original text) from last to first.
+fn apply_edits(doc: &mut Document, mut edits: TextEdits) {
+    edits.sort_by_key(|edit| std::cmp::Reverse(edit.0));
+    for (start, end, text) in edits {
+        let a = char_index(&doc.text, start);
+        let b = char_index(&doc.text, end).max(a);
+        let byte = |i: usize| {
+            doc.text
+                .char_indices()
+                .nth(i)
+                .map_or(doc.text.len(), |(b, _)| b)
+        };
+        let (a, b) = (byte(a), byte(b));
+        doc.text.replace_range(a..b, &text);
+    }
+    doc.update_dirty();
 }
 
 fn id_for(n: usize) -> egui::Id {
@@ -1044,6 +1255,9 @@ impl super::Editor {
     /// Keeps language servers in step with the open documents.
     pub(super) fn lsp_sync(&mut self, ctx: &egui::Context) {
         self.lsp.sync(self.root.as_deref(), &self.documents, ctx);
+        if let Some(note) = self.lsp.format_note.take() {
+            self.notice = Some((false, tr(&note).to_owned()));
+        }
     }
 
     /// Problems view: every diagnostic the servers reported for open files.
@@ -1100,7 +1314,7 @@ impl super::Editor {
                     let name = self
                         .root
                         .as_deref()
-                        .and_then(|r| path.strip_prefix(r).ok())
+                        .and_then(|r| path.strip_prefix(crate::agents_runtime::plain(r)).ok())
                         .unwrap_or(path)
                         .display()
                         .to_string();
@@ -1142,6 +1356,27 @@ impl super::Editor {
                 self.focus_editor = true;
             }
         }
+    }
+}
+
+#[cfg(test)]
+impl Lsp {
+    pub(super) fn harness_ready(&self, path: &Path) -> bool {
+        self.state(path).is_some_and(|(_, state)| state == "ready")
+    }
+
+    pub(super) fn harness_has(&self, path: &Path, needle: &str) -> bool {
+        self.diagnostics
+            .get(&crate::agents_runtime::plain(path))
+            .is_some_and(|l| l.iter().any(|d| d.message.contains(needle)))
+    }
+
+    pub(super) fn harness_popup_items(&self) -> usize {
+        self.popup.as_ref().map_or(0, |p| p.items.len())
+    }
+
+    pub(super) fn harness_close_popup(&mut self) {
+        self.popup = None;
     }
 }
 
@@ -1289,6 +1524,45 @@ mod tests {
         );
         assert!(popup.server);
         assert!(labels.contains(&"useState"), "useState not offered");
+
+        // Hover over `useState` in the import line.
+        let index = docs[0].text.find("useState").unwrap() + 2;
+        lsp.request_hover(&docs[0], index);
+        let until = Instant::now() + Duration::from_secs(20);
+        while lsp.hover.is_none() && Instant::now() < until {
+            lsp.poll();
+            thread::sleep(Duration::from_millis(20));
+        }
+        let hover = lsp.hover.clone().expect("hover").2;
+        eprintln!("hover: {hover}");
+        assert!(hover.contains("useState"), "{hover}");
+
+        // Formatting returns edits for badly spaced code.
+        let mut ugly = Document::open(root.join("src").join("main.tsx")).unwrap();
+        ugly.text.push_str(
+            "
+const   spaced={a:1,   b:2}
+",
+        );
+        let docs = vec![ugly];
+        lsp.synced = None;
+        lsp.sync(Some(&root), &docs, &ctx);
+        thread::sleep(Duration::from_millis(500));
+        lsp.poll();
+        lsp.request_format(&docs[0]);
+        let until = Instant::now() + Duration::from_secs(20);
+        while lsp.formatted.is_none() && lsp.format_note.is_none() && Instant::now() < until {
+            lsp.poll();
+            thread::sleep(Duration::from_millis(20));
+        }
+        let mut doc = docs.into_iter().next().unwrap();
+        let (_, edits) = lsp.formatted.take().expect("format edits");
+        apply_edits(&mut doc, edits);
+        assert!(
+            doc.text.contains("const spaced = { a: 1, b: 2 }"),
+            "{}",
+            doc.text
+        );
     }
 
     const FAKE_SERVER: &str = r#"
