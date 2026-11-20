@@ -22,8 +22,8 @@ pub(super) const MODAL_RADIUS: u8 = 12;
 pub(super) const HOVER_SECONDS: f32 = super::motion::HOVER;
 pub(super) const MIN_EDITOR_WIDTH: f32 = 320.0;
 pub(super) const CHAT_COMPOSER_HEIGHT: f32 = 132.0;
-pub(super) const CODE_LINE_HEIGHT: f32 = 1.4;
-pub(super) const COMPACT_CODE_LINE_HEIGHT: f32 = 1.25;
+pub(super) const CODE_LINE_HEIGHT: f32 = 1.32;
+pub(super) const COMPACT_CODE_LINE_HEIGHT: f32 = 1.16;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -527,6 +527,9 @@ pub(super) fn row(ui: &mut egui::Ui, label: &str, detail: &str, selected: bool) 
 
 /// Interface icons. Everything except the AEROS mark is a Lucide icon (ISC) rasterized to a
 /// mipmapped mask, so every surface shares one stroke weight, grid and corner language.
+// The full interface vocabulary is declared up front so new surfaces reuse it instead of
+// drawing ad-hoc glyphs; not every icon is placed yet.
+#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Icon {
     Brand,

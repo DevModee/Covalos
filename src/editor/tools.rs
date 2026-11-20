@@ -341,7 +341,7 @@ impl Editor {
     }
 
     /// Show one file's diff (working tree or staged) inside the Git panel.
-    fn git_diff_file(&mut self, ctx: &Context, path: &str, staged: bool) {
+    pub(super) fn git_diff_file(&mut self, ctx: &Context, path: &str, staged: bool) {
         let Some(root) = &self.root else { return };
         let mut command = Command::new("git");
         command
@@ -365,6 +365,12 @@ impl Editor {
             staged,
         };
         self.tools.git = Some(worker(command, ctx.clone(), false));
+    }
+
+    /// The last Git job finished and produced output.
+    #[cfg(test)]
+    pub(super) fn git_ready(&self) -> bool {
+        self.tools.git.is_none() && !self.tools.git_view.is_empty()
     }
 
     pub(super) fn git_panel(&mut self, ui: &mut Ui) {

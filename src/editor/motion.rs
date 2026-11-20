@@ -160,6 +160,18 @@ pub(super) fn enter(ui: &mut Ui, id: Id, seconds: f32) -> f32 {
 }
 
 #[cfg(test)]
+pub(super) fn record(ui: &Ui, label: impl Into<String>, rect: egui::Rect) {
+    ui.ctx().data_mut(|d| {
+        let key = Id::new("native-review-targets");
+        let mut targets = d
+            .get_temp::<std::collections::HashMap<String, egui::Rect>>(key)
+            .unwrap_or_default();
+        targets.insert(label.into(), rect);
+        d.insert_temp(key, targets);
+    });
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -195,16 +207,4 @@ mod tests {
         assert_eq!(run(&ctx, 0.72, 10.0), 10.0);
         set_intensity(1.0);
     }
-}
-
-#[cfg(test)]
-pub(super) fn record(ui: &Ui, label: impl Into<String>, rect: egui::Rect) {
-    ui.ctx().data_mut(|d| {
-        let key = Id::new("native-review-targets");
-        let mut targets = d
-            .get_temp::<std::collections::HashMap<String, egui::Rect>>(key)
-            .unwrap_or_default();
-        targets.insert(label.into(), rect);
-        d.insert_temp(key, targets);
-    });
 }

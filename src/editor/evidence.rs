@@ -61,27 +61,38 @@ fn home(editor: &mut Editor) {
     editor.palette = None;
 }
 
-fn background(editor: &mut Editor, b: identity::Background, p: identity::Pattern) {
+fn background(editor: &mut Editor, b: identity::Background) {
     home(editor);
     // Hide the Codex panel so the whole field is visible.
     editor.preferences.assistant_open = false;
     editor.preferences.identity.background = b;
-    editor.preferences.identity.pattern = p;
+}
+
+fn open_git(editor: &mut Editor, ctx: &egui::Context) {
+    editor.sidebar = Sidebar::Git;
+    editor.git_refresh(ctx, None);
+}
+
+fn detach_named(editor: &mut Editor, name: &str) {
+    if let Some(index) = editor
+        .documents
+        .iter()
+        .position(|d| d.path.file_name().is_some_and(|n| n == name))
+    {
+        editor.detach(index);
+    }
 }
 
 fn steps(matrix: bool) -> Vec<Step> {
-    use identity::{Background as B, Mood as M, Pattern as P};
+    use identity::{Background as B, Mood as M};
     let mut s = vec![
         Act(|e, c, _| {
-            theme(e, c, theme::Theme::Dark);
+            theme(e, c, theme::Theme::Nocturne);
             e.preferences.language = super::i18n::Language::English;
         }),
-        Move(0.62, 0.40),
-        Wait(0.6),
-        Shot("01-home/home-dark-orbital"),
-        Move(0.32, 0.43),
-        Wait(0.4),
-        Shot("01-home/home-card-hover"),
+        Move(0.70, 0.30),
+        Wait(0.8),
+        Shot("01-home/home-nocturne-dither-field"),
         Click("Folder src"),
         Click("Folder web"),
         Click("Folder tools"),
@@ -90,150 +101,148 @@ fn steps(matrix: bool) -> Vec<Step> {
         Click("File main.rs"),
         Act(|e, _, _| caret_after(e, "fn summarize(")),
         Wait(0.5),
-        Shot("03-editor/rust/editor-rust-dark"),
+        Shot("03-editor/rust/editor-rust-nocturne"),
+        Act(|e, c, _| open_git(e, c)),
+        Until(|e| e.git_ready(), "git status"),
+        Wait(0.3),
+        Shot("04-git/git-grouped-changes"),
     ];
     if matrix {
         s.extend([
             Act(|e, _, _| {
-                e.hub_open = true;
-                e.review_fixture("conversation");
+                e.sidebar = Sidebar::Files;
+                detach_named(e, "main.rs");
             }),
-            Wait(0.5),
-            Shot("04-agent-hub/agent-hub-dark"),
+            Wait(0.6),
+            Shot("05-clean-code/clean-floating-single"),
+            Act(|e, c, _| e.dock_all(c.input(|i| i.time))),
             Act(|e, _, _| {
-                e.hub_open = false;
                 e.preferences.language = super::i18n::Language::Spanish;
                 e.settings_open = true;
             }),
             Wait(0.5),
-            Shot("09-settings-es/settings-es"),
+            Shot("10-settings/settings-es"),
         ]);
         return s;
     }
+    // Git: one file's diff, then back to the grouped list.
     s.extend([
+        Act(|e, c, _| e.git_diff_file(c, "src/main.rs", false)),
+        Until(|e| e.git_ready(), "git diff"),
+        Wait(0.3),
+        Shot("04-git/git-diff-main-rs"),
+        Act(|e, c, _| e.git_diff_file(c, "web/app.ts", true)),
+        Until(|e| e.git_ready(), "staged diff"),
+        Wait(0.3),
+        Shot("04-git/git-diff-staged-app-ts"),
+        Act(|e, _, _| e.sidebar = Sidebar::Files),
+        // Editor languages and density.
         Click("File app.ts"),
         Act(|e, _, _| caret_after(e, "async function loadOrders(")),
         Wait(0.5),
-        Shot("03-editor/typescript/editor-typescript-dark"),
+        Shot("03-editor/typescript/editor-typescript-nocturne"),
         Click("File analyze.py"),
         Act(|e, _, _| caret_after(e, "def summarize(")),
         Wait(0.5),
-        Shot("03-editor/python/editor-python-dark"),
-        Click("File Cargo.toml"),
-        Wait(0.4),
-        Shot("03-editor/rust/editor-toml-dark"),
+        Shot("03-editor/python/editor-python-nocturne"),
         Click("Tab main.rs"),
-        Wait(0.03),
-        Shot("10-motion/tab-switch-1-early"),
-        Wait(0.08),
-        Shot("10-motion/tab-switch-2-mid"),
+        Act(|e, _, _| e.preferences.compact = true),
+        Wait(0.5),
+        Shot("03-editor/rust/editor-rust-compact"),
+        Act(|e, _, _| {
+            e.preferences.compact = false;
+            e.preferences.syntax = super::syntax::SyntaxStyle::Graphite;
+        }),
         Wait(0.4),
-        Shot("10-motion/tab-switch-3-settled"),
-        Key(Key::P, Modifiers::COMMAND),
-        Wait(0.02),
-        Shot("10-motion/palette-1-opening"),
-        Wait(0.35),
-        Shot("03-editor/command-palette"),
-        Key(Key::Escape, Modifiers::NONE),
+        Shot("03-editor/rust/editor-rust-graphite-syntax-before"),
+        Act(|e, _, _| e.preferences.syntax = super::syntax::SyntaxStyle::Auto),
+        // Tab spring: three frames of the selection pill travelling.
+        Click("Tab analyze.py"),
+        Wait(0.03),
+        Shot("11-motion/tab-spring-1"),
+        Wait(0.06),
+        Shot("11-motion/tab-spring-2"),
+        Wait(0.4),
+        Shot("11-motion/tab-spring-3-settled"),
+        // Clean Code: detach, several surfaces, real typing, focus mode, dock back.
+        Click("Tab main.rs"),
+        Wait(0.2),
+        Click("Detach to floating editor"),
+        Wait(0.05),
+        Shot("11-motion/clean-open-1"),
+        Wait(0.5),
+        Shot("05-clean-code/clean-floating-main-rs"),
+        Act(|e, _, _| detach_named(e, "app.ts")),
+        Wait(0.6),
+        Shot("05-clean-code/clean-two-surfaces"),
+        Act(|e, _, _| {
+            let name = std::ffi::OsStr::new("app.ts");
+            if let Some(doc) = e
+                .documents
+                .iter_mut()
+                .find(|d| d.path.file_name() == Some(name))
+            {
+                doc.text.insert_str(0, "// edited in a floating editor\n");
+                doc.update_dirty();
+            }
+        }),
+        Wait(0.3),
+        Shot("05-clean-code/clean-edit-dirty"),
+        Act(|e, _, _| e.clean.focus = true),
+        Move(0.12, 0.85),
+        Wait(0.7),
+        Shot("05-clean-code/clean-focus-mode"),
+        Act(|e, c, _| e.dock_all(c.input(|i| i.time))),
+        Wait(0.08),
+        Shot("11-motion/clean-dock-1"),
+        Wait(0.12),
+        Shot("11-motion/clean-dock-2"),
+        Wait(0.5),
+        Shot("05-clean-code/clean-docked-back"),
+        // Agent Hub and the Codex panel with the official Blossom.
         Act(|e, _, _| {
             e.hub_open = true;
             e.review_fixture("conversation");
         }),
         Wait(0.5),
-        Shot("04-agent-hub/agent-hub-conversation-dark"),
+        Shot("06-agent-hub/agent-hub-conversation"),
         Act(|e, _, _| e.review_fixture("tasks")),
         Wait(0.4),
-        Shot("04-agent-hub/agent-hub-tasks-dark"),
+        Shot("06-agent-hub/agent-hub-tasks"),
         Act(|e, _, _| {
             e.hub_open = false;
             e.chat.messages.clear();
         }),
         Wait(0.4),
-        Shot("04-agent-hub/codex-panel-empty-dark"),
-        Act(|e, c, root| {
-            if let Some(exe) = std::env::var_os("AEROS_TEST_EXE") {
-                use std::io::Write;
-                e.companion.start(c);
-                let mut child = std::process::Command::new(exe)
-                    .arg("--agent-hook")
-                    .stdin(std::process::Stdio::piped())
-                    .stdout(std::process::Stdio::null())
-                    .spawn()
-                    .expect("spawn test hook");
-                let payload = serde_json::json!({"session_id":"evidence-fixture","hook_event_name":"PermissionRequest","cwd":root,"tool_name":"Edit","tool_input":{"file_path":"src/main.rs","old_string":"FIXTURE","new_string":"FIXTURE — no tool is executed"}});
-                child
-                    .stdin
-                    .take()
-                    .unwrap()
-                    .write_all(payload.to_string().as_bytes())
-                    .unwrap();
-                HOOK.with(|h| *h.borrow_mut() = Some(child));
-            }
-        }),
-        Until(
-            |e| {
-                std::env::var_os("AEROS_TEST_EXE").is_none()
-                    || e.companion.sessions.iter().any(|s| {
-                        s.state == crate::agent_bridge::State::Waiting
-                    })
-            },
-            "approval fixture",
-        ),
-        Wait(0.5),
-        Shot("05-companion/companion-compact-approval"),
+        Shot("06-agent-hub/codex-panel-openai-mark"),
+        // Companion spring.
         Act(|e, _, _| e.companion.open = true),
-        Wait(0.03),
-        Shot("10-motion/companion-open-1-early"),
-        Wait(0.06),
-        Shot("10-motion/companion-open-2-mid"),
+        Wait(0.04),
+        Shot("11-motion/companion-spring-1"),
+        Wait(0.08),
+        Shot("11-motion/companion-spring-2"),
         Wait(0.5),
-        Shot("05-companion/companion-expanded-approval"),
+        Shot("07-companion/companion-expanded"),
         Key(Key::Escape, Modifiers::NONE),
-        Wait(0.05),
-        Shot("10-motion/companion-close-1-early"),
+        Act(|e, _, _| e.companion.clear_external()),
         Wait(0.5),
-        Act(|e, _, _| {
-            HOOK.with(|h| {
-                if let Some(mut child) = h.borrow_mut().take() {
-                    let _ = child.kill();
-                }
-            });
-            e.companion.clear_external();
-        }),
-        Wait(0.6),
     ]);
-    let moods: [(Act, &'static str); 8] = [
+    let moods: [(Act, &'static str); 4] = [
         (
             |e, _, _| e.mood_override = Some(M::Idle),
-            "06-mascot/luma-idle",
+            "08-luma/luma-idle",
         ),
         (
             |e, _, _| e.mood_override = Some(M::Thinking),
-            "06-mascot/luma-thinking",
-        ),
-        (
-            |e, _, _| e.mood_override = Some(M::Coding),
-            "06-mascot/luma-coding",
-        ),
-        (
-            |e, _, _| e.mood_override = Some(M::Searching),
-            "06-mascot/luma-searching",
-        ),
-        (
-            |e, _, _| e.mood_override = Some(M::Approval),
-            "06-mascot/luma-waiting-approval",
+            "08-luma/luma-thinking",
         ),
         (
             |e, _, _| e.mood_override = Some(M::Success),
-            "06-mascot/luma-success",
+            "08-luma/luma-success",
         ),
         (
-            |e, _, _| e.mood_override = Some(M::Error),
-            "06-mascot/luma-error",
-        ),
-        (
-            |e, _, _| e.mood_override = Some(M::Sleeping),
-            "06-mascot/luma-sleeping",
+            |e, _, _| e.mood_override = Some(M::Approval),
+            "08-luma/luma-approval",
         ),
     ];
     for (act, name) in moods {
@@ -243,146 +252,93 @@ fn steps(matrix: bool) -> Vec<Step> {
         Act(|e, _, _| e.mood_override = None),
         Move(0.06, 0.88),
         Wait(0.3),
-        Crop("06-mascot/luma-hover", "Luma", 5.0),
-        Click("Luma"),
-        Wait(0.12),
-        Crop("06-mascot/luma-click-bounce", "Luma", 5.0),
+        Crop("08-luma/luma-hover-look", "Luma", 5.0),
         Act(|e, _, _| e.companion.open = false),
-        Wait(0.4),
     ]);
-    let themes: [(Act, &'static str); 5] = [
+    let themes: [(Act, &'static str); 6] = [
+        (
+            |e, c, _| theme(e, c, theme::Theme::Nocturne),
+            "09-themes/editor-nocturne",
+        ),
         (
             |e, c, _| theme(e, c, theme::Theme::Dark),
-            "07-themes/editor-aeros-dark",
+            "09-themes/editor-graphite",
         ),
         (
             |e, c, _| theme(e, c, theme::Theme::Midnight),
-            "07-themes/editor-aeros-midnight",
+            "09-themes/editor-midnight",
         ),
         (
             |e, c, _| theme(e, c, theme::Theme::Violet),
-            "07-themes/editor-aeros-violet",
+            "09-themes/editor-violet",
         ),
         (
             |e, c, _| theme(e, c, theme::Theme::Light),
-            "07-themes/editor-aeros-light",
+            "09-themes/editor-light",
         ),
         (
             |e, c, _| theme(e, c, theme::Theme::HighContrast),
-            "07-themes/editor-high-contrast",
+            "09-themes/editor-high-contrast",
         ),
     ];
     for (act, name) in themes {
         s.extend([Act(act), Wait(0.4), Shot(name)]);
     }
+    // Home background: the reference interactions (trail, click ripple) on a real window.
     s.extend([
-        Act(|e, _, _| home(e)),
-        Wait(0.4),
-        Shot("07-themes/home-high-contrast"),
-        Act(|e, c, _| theme(e, c, theme::Theme::Light)),
-        Wait(0.4),
-        Shot("07-themes/home-aeros-light"),
-        Act(|e, c, _| theme(e, c, theme::Theme::Dark)),
-    ]);
-    let scenes: [(Act, &'static str); 10] = [
-        (
-            |e, _, _| background(e, B::Orbital, P::Waves),
-            "08-ascii-backgrounds/orbital",
-        ),
-        (
-            |e, _, _| background(e, B::Neural, P::Waves),
-            "08-ascii-backgrounds/neural",
-        ),
-        (
-            |e, _, _| background(e, B::Void, P::Waves),
-            "08-ascii-backgrounds/void",
-        ),
-        (
-            |e, _, _| background(e, B::Minimal, P::Waves),
-            "08-ascii-backgrounds/minimal",
-        ),
-        (
-            |e, _, _| background(e, B::Ascii, P::Waves),
-            "08-ascii-backgrounds/ascii-nebula",
-        ),
-        (
-            |e, _, _| background(e, B::Ascii, P::Geometry),
-            "08-ascii-backgrounds/ascii-prism",
-        ),
-        (
-            |e, _, _| background(e, B::Ascii, P::Particles),
-            "08-ascii-backgrounds/ascii-drift",
-        ),
-        (
-            |e, _, _| background(e, B::Ascii, P::Orbits),
-            "08-ascii-backgrounds/ascii-orbit",
-        ),
-        (
-            |e, _, _| background(e, B::Ascii, P::Network),
-            "08-ascii-backgrounds/ascii-contour",
-        ),
-        (
-            |e, _, _| background(e, B::Ascii, P::Sequence),
-            "08-ascii-backgrounds/ascii-signal",
-        ),
-    ];
-    for (act, name) in scenes {
-        s.extend([Act(act), Move(0.84, 0.30), Wait(0.7), Shot(name)]);
-    }
-    // Pointer and click targets stay in empty field space, away from Home controls.
-    s.extend([
-        Act(|e, _, _| background(e, B::Ascii, P::Geometry)),
-        Move(0.30, 0.95),
-        Wait(0.5),
-        Shot("10-motion/ascii-prism-rest"),
-        Move(0.86, 0.42),
-        Wait(0.08),
-        Shot("10-motion/ascii-prism-lens-entering"),
-        Wait(0.5),
-        Shot("10-motion/ascii-prism-lens"),
-        Tap(0.86, 0.42),
-        Wait(0.12),
-        Shot("10-motion/ascii-prism-click-wave-1"),
-        Wait(0.25),
-        Shot("10-motion/ascii-prism-click-wave-2"),
-        Act(|e, _, _| background(e, B::Ascii, P::Waves)),
-        Act(|e, c, _| theme(e, c, theme::Theme::Light)),
-        Move(0.84, 0.30),
-        Wait(0.6),
-        Shot("08-ascii-backgrounds/ascii-nebula-light"),
-        Act(|e, c, _| theme(e, c, theme::Theme::Dark)),
-        Act(|e, _, _| {
-            background(e, B::Orbital, P::Waves);
-            e.preferences.assistant_open = true;
+        Act(|e, c, _| {
+            theme(e, c, theme::Theme::Light);
+            background(e, B::Dither);
         }),
+        Move(0.80, 0.35),
+        Wait(0.6),
+        Shot("09-themes/home-light-dither"),
+        Act(|e, c, _| theme(e, c, theme::Theme::Nocturne)),
+        Move(0.30, 0.96),
+        Wait(1.2),
+        Shot("01-home/dither-field-rest"),
+        Move(0.58, 0.22),
+        Move(0.64, 0.30),
+        Move(0.70, 0.40),
+        Move(0.76, 0.52),
+        Move(0.82, 0.62),
+        Wait(0.02),
+        Shot("01-home/dither-field-cursor-trail"),
+        Wait(1.0),
+        Shot("01-home/dither-field-trail-faded"),
+        Tap(0.78, 0.45),
+        Wait(0.12),
+        Shot("11-motion/dither-ripple-1"),
+        Wait(0.35),
+        Shot("11-motion/dither-ripple-2"),
+        Wait(0.6),
+        Shot("11-motion/dither-ripple-3"),
+        Act(|e, _, _| background(e, B::Bloom)),
+        Move(0.30, 0.96),
+        Wait(0.8),
+        Shot("01-home/dither-bloom"),
+        Act(|e, _, _| background(e, B::Orbital)),
+        Wait(0.6),
+        Shot("01-home/orbital-legacy"),
         Act(|e, _, _| {
-            e.preferences.language = super::i18n::Language::Spanish;
+            background(e, B::Dither);
+            e.preferences.assistant_open = true;
             e.settings_open = true;
         }),
         Wait(0.5),
-        Shot("09-settings-es/settings-es"),
-        Act(|e, _, _| e.settings_open = false),
-        Wait(0.3),
-        Shot("09-settings-es/home-es"),
-        Click("File main.rs"),
+        Shot("10-settings/settings-appearance-en"),
+        Act(|e, _, _| e.preferences.language = super::i18n::Language::Spanish),
         Wait(0.4),
-        Shot("09-settings-es/editor-es"),
+        Shot("10-settings/settings-es"),
         Act(|e, _, _| {
-            e.hub_open = true;
-            e.review_fixture("conversation");
-        }),
-        Wait(0.4),
-        Shot("09-settings-es/agent-hub-es"),
-        Act(|e, _, _| {
-            e.hub_open = false;
-            e.companion.open = true;
-        }),
-        Wait(0.5),
-        Shot("09-settings-es/companion-es"),
-        Act(|e, _, _| {
-            e.companion.open = false;
+            e.settings_open = false;
             e.preferences.language = super::i18n::Language::English;
         }),
+        Act(|e, _, _| e.preferences.reduce_motion = true),
+        Tap(0.78, 0.45),
+        Wait(0.4),
+        Shot("11-motion/reduced-motion-no-ripple"),
+        Act(|e, _, _| e.preferences.reduce_motion = false),
     ]);
     s
 }
@@ -663,7 +619,7 @@ fn capture_visual_review() -> Result<(), Box<dyn std::error::Error>> {
                 output,
                 suffix,
                 scale,
-                deadline: Instant::now() + Duration::from_secs(240),
+                deadline: Instant::now() + Duration::from_secs(420),
                 manifest: Vec::new(),
                 last_action: Instant::now(),
                 render_ms: Vec::new(),
@@ -722,6 +678,56 @@ fn write_fixture(root: &Path) -> std::io::Result<()> {
     for (path, text) in files {
         std::fs::write(root.join(path), text)?;
     }
+    // A real repository with staged, modified, deleted and untracked files for the Git view.
+    let git = |args: &[&str]| -> std::io::Result<()> {
+        let status = std::process::Command::new("git")
+            .current_dir(root)
+            .args(["-c", "core.autocrlf=false", "-c", "user.name=AEROS Fixture"])
+            .args([
+                "-c",
+                "user.email=fixture@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(std::io::Error::other(format!("git {args:?} failed")))
+        }
+    };
+    git(&["init", "-q", "-b", "main"])?;
+    git(&["add", "-A"])?;
+    git(&["commit", "-q", "-m", "Initial ledger"])?;
+    let main = root.join("src/main.rs");
+    let text = std::fs::read_to_string(&main)?.replace(
+        "    println!(\"accounts: {}\", totals.len());",
+        "    let largest = totals.values().cloned().fold(0.0, f64::max);
+    println!(\"accounts: {} largest: {largest:.2}\", totals.len());",
+    );
+    std::fs::write(&main, text)?;
+    let app = root.join("web/app.ts");
+    let text = std::fs::read_to_string(&app)?.replace("page = 1", "page = 1, signal?: AbortSignal");
+    std::fs::write(&app, text)?;
+    git(&["add", "web/app.ts"])?;
+    std::fs::remove_file(root.join("docs/guide.md"))?;
+    std::fs::create_dir_all(root.join("notes"))?;
+    std::fs::write(
+        root.join("notes/todo.md"),
+        "- reconcile fees
+",
+    )?;
+    std::fs::write(
+        root.join("README.md"),
+        "# Orbit Ledger
+
+A small ledger used to review AEROS.
+Now with largest balance.
+",
+    )?;
     Ok(())
 }
 

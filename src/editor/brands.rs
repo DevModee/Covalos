@@ -17,12 +17,12 @@ pub(super) struct Brand {
 
 pub(super) fn get(provider: Provider) -> Brand {
     match provider {
-        // OpenAI publishes the Blossom behind a terms acceptance step on openai.com/brand.
-        // Until the owner of this build accepts those terms, Codex uses a neutral monogram.
+        // Official monochrome Blossom from openai.com/brand (terms accepted by the owner on
+        // 2026-11-19). OpenAI forbids added colour, so it is always drawn in the text tone.
         Provider::Codex => Brand {
             name: "Codex",
             owner: "OpenAI",
-            mark: None,
+            mark: Some("brand_openai"),
             color: Color32::from_rgb(236, 236, 241),
         },
         Provider::Claude => Brand {
@@ -52,7 +52,7 @@ pub(super) fn mark(painter: &Painter, rect: Rect, provider: Provider) {
     let side = rect.width().min(rect.height());
     match brand.mark {
         Some(name) => {
-            let tint = if provider == Provider::Antigravity {
+            let tint = if matches!(provider, Provider::Antigravity | Provider::Codex) {
                 colors().text
             } else {
                 brand.color

@@ -173,6 +173,7 @@ fn bytes(name: &str) -> &'static [u8] {
         "brand_claudecode" => include_bytes!("../../assets/brands/claudecode.png"),
         "brand_gemini" => include_bytes!("../../assets/brands/googlegemini.png"),
         "brand_antigravity" => include_bytes!("../../assets/brands/antigravity.png"),
+        "brand_openai" => include_bytes!("../../assets/brands/openai.png"),
         lucide if lucide.starts_with("lucide-") => super::ui_icons::LUCIDE
             .iter()
             .find(|(n, _)| *n == lucide)
@@ -321,7 +322,13 @@ mod tests {
         assert_eq!(file_name(Path::new("App.sln")), "visualstudio");
         assert_eq!(file_name(Path::new("tsconfig.base.json")), "tsconfig");
         assert_eq!(folder_name(Path::new("src"), true), "folder-src-open");
-        for brand in ["luma", "brand_claude", "brand_gemini", "brand_antigravity"] {
+        for brand in [
+            "luma",
+            "brand_claude",
+            "brand_gemini",
+            "brand_antigravity",
+            "brand_openai",
+        ] {
             assert!(texture(&ctx, brand).size()[0] <= 256);
         }
     }
