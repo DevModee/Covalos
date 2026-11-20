@@ -126,6 +126,7 @@ fn settings(section: &str) -> Value {
 }
 
 pub(super) fn uri(path: &Path) -> String {
+    let path = crate::agents_runtime::plain(path);
     let text = path.to_string_lossy().replace('\\', "/");
     let mut out = String::from("file:///");
     for byte in text.trim_start_matches('/').bytes() {
@@ -588,7 +589,8 @@ impl Lsp {
                     "textDocument/didClose",
                     json!({"textDocument": {"uri": uri(&path)}}),
                 );
-                self.diagnostics.remove(&path);
+                self.diagnostics
+                    .remove(&crate::agents_runtime::plain(&path));
             }
         }
     }
@@ -681,7 +683,9 @@ impl Lsp {
             }
         }
         for (path, list) in diagnostics {
-            self.diagnostics.insert(path, list);
+            // Keyed by the plain path: editor paths may carry the verbatim prefix.
+            self.diagnostics
+                .insert(crate::agents_runtime::plain(&path), list);
         }
         for (path, items) in completions {
             if let Some(popup) = &mut self.popup
@@ -960,7 +964,10 @@ fn paint_diagnostics(
     doc: &Document,
     output: &egui::text_edit::TextEditOutput,
 ) {
-    let Some(list) = lsp.diagnostics.get(&doc.path) else {
+    let Some(list) = lsp
+        .diagnostics
+        .get(&crate::agents_runtime::plain(&doc.path))
+    else {
         return;
     };
     let origin = output.galley_pos.to_vec2();

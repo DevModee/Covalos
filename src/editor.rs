@@ -22,6 +22,7 @@ mod motion;
 mod panels;
 mod preferences;
 mod preview;
+mod pty;
 mod sessions;
 mod shell;
 mod skills;

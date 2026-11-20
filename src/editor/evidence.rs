@@ -1594,8 +1594,11 @@ fn web_steps() -> Vec<Step> {
     vec![
         Act(|e, c, _| {
             e.show_tool("terminal");
-            e.harness_run("npm run dev", c);
+            e.harness_open_terminal(c);
         }),
+        UntilFor(|e| e.harness_prompt_ready(), "PowerShell prompt", 60),
+        Wait(0.6),
+        Act(|e, _, _| e.harness_type("npm run dev\r")),
         UntilFor(|e| e.harness_url().is_some(), "dev server address", 90),
         Wait(1.0),
         Shot("web/01-terminal-dev-server"),
