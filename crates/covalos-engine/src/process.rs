@@ -110,6 +110,51 @@ pub fn kill_tree(child: &mut Child) {
     let _ = child.wait();
 }
 
+/// Ties `child` (and everything it starts later) to the lifetime of this
+/// process: on Windows it joins a kill-on-close Job Object, so agents never
+/// outlive COVALOS after a crash. Elsewhere the process group already lets
+/// the host kill the tree.
+pub fn contain(child: &Child) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        use std::sync::OnceLock;
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+            SetInformationJobObject,
+        };
+        static JOB: OnceLock<usize> = OnceLock::new();
+        let job = *JOB.get_or_init(|| {
+            // SAFETY: creates an unnamed job whose handle lives as long as the
+            // process; the OS closes it (killing its members) only at exit.
+            unsafe {
+                let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+                if job.is_null() {
+                    return 0;
+                }
+                let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+                info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                SetInformationJobObject(
+                    job,
+                    JobObjectExtendedLimitInformation,
+                    (&raw const info).cast(),
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                );
+                job as usize
+            }
+        });
+        if job != 0 {
+            // SAFETY: both handles are valid for the duration of the call.
+            unsafe {
+                AssignProcessToJobObject(job as _, child.as_raw_handle() as _);
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = child;
+}
+
 pub(crate) fn bounded_reader(
     mut source: impl Read + Send + 'static,
     limit: usize,

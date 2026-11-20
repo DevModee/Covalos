@@ -28,6 +28,8 @@ enum Step {
     /// Save an upscaled crop around a recorded control from the next screenshot.
     Crop(&'static str, &'static str, f32),
     Until(fn(&Editor) -> bool, &'static str),
+    /// Like `Until`, with a longer limit in seconds for real provider turns.
+    UntilFor(fn(&Editor) -> bool, &'static str, u64),
 }
 use Step::*;
 
@@ -513,6 +515,16 @@ impl eframe::App for Harness {
                         "timed out waiting for {what}"
                     );
                     ctx.request_repaint_after(Duration::from_millis(30));
+                    return;
+                }
+            }
+            UntilFor(check, what, secs) => {
+                if !check(&self.editor) {
+                    assert!(
+                        self.at.elapsed() < Duration::from_secs(*secs),
+                        "timed out waiting for {what}"
+                    );
+                    ctx.request_repaint_after(Duration::from_millis(100));
                     return;
                 }
             }
@@ -1027,3 +1039,594 @@ if __name__ == "__main__":
     data = json.loads(Path("samples.json").read_text())
     print(summarize([Sample(**item) for item in data]))
 "#;
+
+// ---------------------------------------------------------------- Agent Hub (V4/V5)
+
+fn agents(editor: &mut Editor) -> &mut crate::agents_runtime::Runtime {
+    editor
+        .hub
+        .agents
+        .runtime
+        .as_mut()
+        .expect("agent runtime open")
+}
+
+fn agents_ref(editor: &Editor) -> Option<&crate::agents_runtime::Runtime> {
+    editor.hub.agents.runtime.as_ref()
+}
+
+fn session_index(editor: &Editor, title: &str) -> Option<usize> {
+    agents_ref(editor)?
+        .sessions
+        .iter()
+        .position(|s| s.meta.title == title)
+}
+
+fn idle(editor: &Editor, title: &str) -> bool {
+    session_index(editor, title)
+        .and_then(|i| agents_ref(editor).map(|r| !r.sessions[i].running()))
+        .unwrap_or(false)
+}
+
+fn select(editor: &mut Editor, title: &str) {
+    editor.hub.agents.selected = session_index(editor, title);
+}
+
+fn add_account(
+    editor: &mut Editor,
+    id: &str,
+    provider: covalos_agents::ProviderKind,
+    label: &str,
+    method: covalos_agents::ConnectionMethod,
+) {
+    let account = covalos_agents::Account::new(
+        covalos_agents::AccountId::new(id).unwrap(),
+        provider,
+        label,
+        method,
+    );
+    agents(editor).add_account(account).unwrap();
+}
+
+fn start(
+    editor: &mut Editor,
+    root: &Path,
+    title: &str,
+    worktree: bool,
+    preset: covalos_agents::permission::Preset,
+    prompt: &str,
+) {
+    let runtime = agents(editor);
+    let index = runtime
+        .create_session(crate::agents_runtime::NewSession {
+            title: title.into(),
+            account: covalos_agents::AccountId::new("codex-main").unwrap(),
+            model: None,
+            root: root.to_path_buf(),
+            worktree,
+            preset,
+            allow_safe_commands: true,
+            share_context: true,
+        })
+        .unwrap();
+    runtime.send(index, prompt).unwrap();
+    editor.hub.agents.selected = Some(index);
+}
+
+const A: &str = "Agent A - add mul()";
+const B: &str = "Agent B - add tests";
+const C: &str = "Agent C - reads shared context";
+const D: &str = "Agent D - cancelled";
+
+fn agent_steps() -> Vec<Step> {
+    use covalos_agents::{ConnectionMethod::*, ProviderKind::*, permission::Preset};
+    vec![
+        Act(|e, c, _| {
+            e.hub_open = true;
+            e.hub.focus_agents("accounts");
+            e.ensure_runtime(c);
+        }),
+        UntilFor(
+            |e| {
+                agents_ref(e).is_some_and(|r| {
+                    !r.detections.is_empty() && r.detections.values().all(|d| d.done)
+                })
+            },
+            "provider detection",
+            90,
+        ),
+        Wait(0.6),
+        Shot("agents/01-providers-detected"),
+        Act(|e, _, _| {
+            add_account(
+                e,
+                "codex-main",
+                Codex,
+                "Codex - ChatGPT (system CLI)",
+                SystemCli,
+            );
+            add_account(
+                e,
+                "codex-isolated",
+                Codex,
+                "Codex - second account (isolated)",
+                OfficialLogin,
+            );
+            add_account(
+                e,
+                "claude-main",
+                ClaudeCode,
+                "Claude - system CLI",
+                SystemCli,
+            );
+            add_account(
+                e,
+                "claude-work",
+                ClaudeCode,
+                "Claude - work (isolated)",
+                OfficialLogin,
+            );
+            add_account(
+                e,
+                "claude-alt",
+                ClaudeCode,
+                "Claude - alt (isolated)",
+                OfficialLogin,
+            );
+            e.evidence_account_status();
+        }),
+        Wait(0.6),
+        Shot("agents/02-accounts-multi"),
+        // Goal 2: two agents, distinct tasks, independent worktrees, in parallel.
+        Act(|e, _, root| {
+            e.hub.focus_agents("sessions");
+            start(
+                e,
+                root,
+                A,
+                true,
+                Preset::Worktree,
+                "In calc.py add a function mul(a, b) that returns a * b. Edit only calc.py. \
+                 Reply with one short sentence.",
+            );
+            start(
+                e,
+                root,
+                B,
+                true,
+                Preset::Worktree,
+                "Create test_calc.py with two pytest tests, one for add and one for sub from \
+                 calc.py. Create only that file. Reply with one short sentence.",
+            );
+            select(e, A);
+        }),
+        Wait(4.0),
+        Shot("agents/03-two-agents-running"),
+        UntilFor(|e| idle(e, A) && idle(e, B), "agents A and B", 420),
+        Act(|e, _, _| select(e, A)),
+        Wait(0.6),
+        Shot("agents/04-agent-a-finished"),
+        Act(|e, _, _| select(e, B)),
+        Wait(0.6),
+        Shot("agents/05-agent-b-finished"),
+        // Shared context: a third agent reads what A and B published.
+        Act(|e, _, root| {
+            start(
+                e,
+                root,
+                C,
+                false,
+                Preset::ReadOnly,
+                "Using only the shared COVALOS context above, say in one sentence what the \
+                 other agents reported. Do not read or change files.",
+            );
+        }),
+        UntilFor(|e| idle(e, C), "agent C", 240),
+        Wait(0.6),
+        Shot("agents/06-shared-context"),
+        // Cancellation.
+        Act(|e, _, root| {
+            start(
+                e,
+                root,
+                D,
+                false,
+                Preset::ReadOnly,
+                "Explain calc.py line by line in exhaustive detail with many examples.",
+            );
+        }),
+        Wait(5.0),
+        Act(|e, _, _| {
+            let i = session_index(e, D).unwrap();
+            agents(e).cancel(i);
+        }),
+        UntilFor(|e| idle(e, D), "cancellation", 60),
+        Wait(0.6),
+        Shot("agents/07-cancelled"),
+        // Recovery: the UI state goes away mid-turn and a fresh runtime reopens it.
+        Act(|e, _, _| {
+            let i = session_index(e, C).unwrap();
+            agents(e)
+                .send(i, "Reply with the single word READY.")
+                .unwrap();
+        }),
+        Wait(1.0),
+        Act(|e, c, _| {
+            e.hub.agents.runtime = None;
+            e.ensure_runtime(c);
+            select(e, C);
+        }),
+        Wait(0.8),
+        Shot("agents/08-recovered-interrupted"),
+        Act(|e, _, _| {
+            let i = session_index(e, C).unwrap();
+            agents(e)
+                .send(
+                    i,
+                    "We were interrupted. Reply with the single word RESUMED.",
+                )
+                .unwrap();
+        }),
+        UntilFor(|e| idle(e, C), "resumed agent C", 240),
+        Wait(0.6),
+        Shot("agents/09-resumed"),
+        // Goal 3: a small objective through the autonomous engine.
+        Act(|e, _, root| {
+            e.hub.focus_agents("autonomy");
+            let budget = covalos_engine::budget::Budget {
+                wall_ms: Some(10 * 60_000),
+                tokens: None,
+                cost_micros: None,
+            };
+            agents(e)
+                .start_plan(
+                    "Review calc.py and publish one concrete improvement as a review entry.",
+                    crate::agents_runtime::PlanMode::Single {
+                        role: "reviewer".into(),
+                    },
+                    root,
+                    true,
+                    budget,
+                    1,
+                )
+                .unwrap();
+        }),
+        Wait(3.0),
+        Shot("agents/10-autonomous-running"),
+        UntilFor(
+            |e| {
+                agents_ref(e)
+                    .and_then(|r| r.plan.as_ref())
+                    .is_some_and(|p| p.engine.plan().state.is_settled())
+            },
+            "autonomous plan",
+            600,
+        ),
+        Wait(0.6),
+        Shot("agents/11-autonomous-settled"),
+        Act(|e, _, root| write_agent_report(e, root)),
+    ]
+}
+
+fn git_out(dir: &Path, args: &[&str]) -> String {
+    std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+        .unwrap_or_default()
+}
+
+fn write_agent_report(editor: &mut Editor, root: &Path) {
+    let output = PathBuf::from(std::env::var_os("COVALOS_EVIDENCE_DIR").unwrap());
+    let runtime = agents(editor);
+    let sessions: Vec<_> = runtime
+        .sessions
+        .iter()
+        .map(|s| {
+            let m = &s.meta;
+            serde_json::json!({
+                "title": m.title, "status": m.status.label(), "turns": m.turns,
+                "provider_session": m.provider_session, "model": m.model,
+                "workdir": m.workdir, "branch": m.worktree_branch,
+                "tokens": [m.input_tokens, m.output_tokens],
+                "git_status": git_out(&m.workdir, &["status", "--porcelain"]),
+                "log": m.log.iter().map(|l| format!("[{}] {}", l.kind, l.text)).collect::<Vec<_>>(),
+                "gate_audit": runtime.audit(&m.id),
+            })
+        })
+        .collect();
+    let context: Vec<_> = runtime.context.since(0).cloned().collect();
+    let plan = runtime.plan.as_ref().map(|run| {
+        let plan = run.engine.plan();
+        serde_json::json!({
+            "goal": plan.goal, "state": plan.state, "spend": plan.spend,
+            "tasks": plan.tasks().collect::<Vec<_>>(),
+            "context": run.engine.context().since(0).cloned().collect::<Vec<_>>(),
+            "journal": run.engine.journal_path(),
+            "error": run.error,
+        })
+    });
+    let detections: Vec<_> = runtime
+        .detections
+        .iter()
+        .map(|(k, d)| {
+            serde_json::json!({
+                "provider": k.key(), "program": d.program, "version": d.version, "login": d.login,
+            })
+        })
+        .collect();
+    let accounts: Vec<_> = runtime
+        .profiles
+        .accounts()
+        .iter()
+        .map(|a| {
+            serde_json::json!({
+                "id": a.id, "provider": a.provider.key(), "method": a.method,
+                "status": runtime.account_status(&a.id).unwrap_or_else(|e| e),
+            })
+        })
+        .collect();
+    let report = serde_json::json!({
+        "project": root,
+        "main_status": git_out(root, &["status", "--porcelain"]),
+        "worktrees": git_out(root, &["worktree", "list"]),
+        "credential_backend": runtime.credential_backend,
+        "detections": detections,
+        "accounts": accounts,
+        "sessions": sessions,
+        "shared_context": context,
+        "plan": plan,
+    });
+    std::fs::create_dir_all(output.join("reports")).unwrap();
+    std::fs::write(
+        output.join("reports/agent-hub-report.json"),
+        serde_json::to_vec_pretty(&report).unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+#[ignore = "runs real provider CLIs (uses a small amount of quota) and writes Agent Hub evidence"]
+fn capture_agent_hub_review() -> Result<(), Box<dyn std::error::Error>> {
+    use winit::platform::windows::EventLoopBuilderExtWindows;
+    let output =
+        PathBuf::from(std::env::var_os("COVALOS_EVIDENCE_DIR").ok_or("set COVALOS_EVIDENCE_DIR")?);
+    let sandbox = PathBuf::from(
+        std::env::var_os("COVALOS_AGENT_SANDBOX").ok_or("set COVALOS_AGENT_SANDBOX")?,
+    );
+    std::fs::create_dir_all(output.join("reports"))?;
+    // COVALOS_AGENT_RUN keeps the project, worktrees and config for inspection.
+    let fixture = tempfile::tempdir()?;
+    let base = std::env::var_os("COVALOS_AGENT_RUN")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| fixture.path().to_path_buf());
+    assert!(
+        !base.join("agent-sandbox").exists(),
+        "COVALOS_AGENT_RUN must point to a fresh folder"
+    );
+    let config = base.join("config");
+    std::fs::create_dir_all(&config)?;
+    // SAFETY: set before any thread of this test reads the environment.
+    unsafe { std::env::set_var("COVALOS_CONFIG_DIR", &config) };
+    let root = base.join("agent-sandbox");
+    let cloned = std::process::Command::new("git")
+        .args(["clone", "-q"])
+        .arg(&sandbox)
+        .arg(&root)
+        .status()?;
+    assert!(cloned.success(), "git clone of the sandbox failed");
+    let options = eframe::NativeOptions {
+        viewport: ViewportBuilder::default()
+            .with_inner_size([1366.0, 768.0])
+            .with_decorations(false)
+            .with_icon(crate::brand::window_icon())
+            .with_title("COVALOS Agent Hub evidence"),
+        event_loop_builder: Some(Box::new(|b| {
+            b.with_any_thread(true);
+        })),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "COVALOS Agent Hub evidence",
+        options,
+        Box::new(move |cc| {
+            let mut preferences = Preferences::default();
+            preferences.language = super::i18n::Language::English;
+            let editor = Editor::new(&cc.egui_ctx, Some(root.clone()), preferences);
+            Ok(Box::new(Harness {
+                editor,
+                root,
+                steps: agent_steps(),
+                stage: 0,
+                at: Instant::now(),
+                delay: 0.8,
+                queued: Vec::new(),
+                requested: false,
+                output,
+                suffix: "-1366x768@100".into(),
+                scale: 1.0,
+                deadline: Instant::now() + Duration::from_secs(40 * 60),
+                manifest: Vec::new(),
+                last_action: Instant::now(),
+                render_ms: Vec::new(),
+            }))
+        }),
+    )?;
+    // Keep sessions.json, the gate audit and plan journals next to the evidence.
+    let output = PathBuf::from(std::env::var_os("COVALOS_EVIDENCE_DIR").unwrap());
+    let _ = std::process::Command::new("robocopy")
+        .arg(config.join("agents"))
+        .arg(output.join("config-snapshot"))
+        .args(["/E", "/NFL", "/NDL", "/NJH", "/NJS", "/XD", "worktrees"])
+        .status();
+    drop(fixture);
+    Ok(())
+}
+
+fn replay_steps() -> Vec<Step> {
+    vec![
+        Act(|e, c, _| {
+            e.hub_open = true;
+            e.hub.focus_agents("accounts");
+            e.ensure_runtime(c);
+            e.evidence_account_status();
+        }),
+        UntilFor(
+            |e| {
+                agents_ref(e).is_some_and(|r| {
+                    !r.detections.is_empty() && r.detections.values().all(|d| d.done)
+                })
+            },
+            "provider detection",
+            90,
+        ),
+        Wait(0.6),
+        Shot("replay/01-accounts"),
+        Act(|e, _, _| {
+            e.hub.focus_agents("sessions");
+            select(e, A);
+        }),
+        Wait(0.6),
+        Shot("replay/02-session-a"),
+        Act(|e, _, _| select(e, B)),
+        Wait(0.6),
+        Shot("replay/03-session-b"),
+        Act(|e, _, _| select(e, C)),
+        Wait(0.6),
+        Shot("replay/04-session-c-recovered"),
+        Act(|e, _, _| select(e, D)),
+        Wait(0.6),
+        Shot("replay/05-session-d-cancelled"),
+        Act(|e, _, _| e.hub.focus_agents("autonomy")),
+        Wait(0.6),
+        Shot("replay/06-autonomy"),
+    ]
+}
+
+/// One real engine objective on a recorded run (COVALOS_AGENT_ENGINE=1).
+fn engine_steps() -> Vec<Step> {
+    vec![
+        Act(|e, c, _| {
+            e.hub_open = true;
+            e.hub.focus_agents("autonomy");
+            e.ensure_runtime(c);
+        }),
+        UntilFor(
+            |e| {
+                agents_ref(e).is_some_and(|r| {
+                    !r.detections.is_empty() && r.detections.values().all(|d| d.done)
+                })
+            },
+            "provider detection",
+            90,
+        ),
+        Act(|e, _, root| {
+            let budget = covalos_engine::budget::Budget {
+                wall_ms: Some(10 * 60_000),
+                tokens: None,
+                cost_micros: None,
+            };
+            agents(e)
+                .start_plan(
+                    "Review calc.py and publish one concrete improvement as a review entry.",
+                    crate::agents_runtime::PlanMode::Single {
+                        role: "reviewer".into(),
+                    },
+                    root,
+                    true,
+                    budget,
+                    1,
+                )
+                .unwrap();
+        }),
+        Wait(3.0),
+        Shot("engine/01-autonomous-running"),
+        UntilFor(
+            |e| {
+                agents_ref(e)
+                    .and_then(|r| r.plan.as_ref())
+                    .is_some_and(|p| p.engine.plan().state.is_settled())
+            },
+            "autonomous plan",
+            600,
+        ),
+        Wait(0.6),
+        Shot("engine/02-autonomous-settled"),
+        Act(|e, _, root| write_agent_report(e, root)),
+    ]
+}
+
+/// Re-renders a finished real run (no provider turns) to review layout at
+/// several window sizes and zoom levels.
+#[test]
+#[ignore = "opens a native window over a recorded Agent Hub run"]
+fn capture_agent_hub_replay() -> Result<(), Box<dyn std::error::Error>> {
+    use winit::platform::windows::EventLoopBuilderExtWindows;
+    let output =
+        PathBuf::from(std::env::var_os("COVALOS_EVIDENCE_DIR").ok_or("set COVALOS_EVIDENCE_DIR")?);
+    let base = PathBuf::from(std::env::var_os("COVALOS_AGENT_RUN").ok_or("set COVALOS_AGENT_RUN")?);
+    let env = |k: &str, d: f32| {
+        std::env::var(k)
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(d)
+    };
+    let (width, height, scale) = (
+        env("COVALOS_EVIDENCE_WIDTH", 1366.0),
+        env("COVALOS_EVIDENCE_HEIGHT", 768.0),
+        env("COVALOS_EVIDENCE_SCALE", 1.0),
+    );
+    // SAFETY: set before any thread of this test reads the environment.
+    unsafe { std::env::set_var("COVALOS_CONFIG_DIR", base.join("config")) };
+    let root = base.join("agent-sandbox");
+    let suffix = format!(
+        "-{}x{}@{}",
+        width as u32,
+        height as u32,
+        (scale * 100.0).round() as u32
+    );
+    let options = eframe::NativeOptions {
+        viewport: ViewportBuilder::default()
+            .with_inner_size([width, height])
+            .with_decorations(false)
+            .with_title("COVALOS Agent Hub replay"),
+        event_loop_builder: Some(Box::new(|b| {
+            b.with_any_thread(true);
+        })),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "COVALOS Agent Hub replay",
+        options,
+        Box::new(move |cc| {
+            cc.egui_ctx.set_pixels_per_point(scale);
+            let mut preferences = Preferences::default();
+            preferences.language = super::i18n::Language::English;
+            let editor = Editor::new(&cc.egui_ctx, Some(root.clone()), preferences);
+            Ok(Box::new(Harness {
+                editor,
+                root,
+                steps: if std::env::var_os("COVALOS_AGENT_ENGINE").is_some() {
+                    engine_steps()
+                } else {
+                    replay_steps()
+                },
+                stage: 0,
+                at: Instant::now(),
+                delay: 0.8,
+                queued: Vec::new(),
+                requested: false,
+                output,
+                suffix,
+                scale,
+                deadline: Instant::now() + Duration::from_secs(900),
+                manifest: Vec::new(),
+                last_action: Instant::now(),
+                render_ms: Vec::new(),
+            }))
+        }),
+    )?;
+    Ok(())
+}

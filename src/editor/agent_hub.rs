@@ -32,7 +32,7 @@ pub(super) struct State {
     new_preset: usize,
     new_safe: bool,
     new_share: bool,
-    selected: Option<usize>,
+    pub(super) selected: Option<usize>,
     note: String,
     goal: String,
     single_role: Option<String>,
@@ -102,24 +102,105 @@ const PRESETS: [(Preset, &str); 3] = [
     (Preset::Worktree, "Edit inside workdir"),
 ];
 
-fn card(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
-    Frame::new()
-        .fill(colors().surface)
-        .stroke(egui::Stroke::new(
-            1.0_f32,
-            colors().border.gamma_multiply(0.8),
-        ))
-        .inner_margin(Margin::same(14))
-        .corner_radius(12)
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            add(ui);
-        });
-    ui.add_space(10.0);
+// ---------------------------------------------------------------- reading style
+//
+// Agent Hub reads like a document: solid panels over a dimmed field, three
+// text tones (primary, secondary, metadata) and a 14.5/21 reading size.
+
+const READ: f32 = 14.5;
+const READ_LINE: f32 = 21.0;
+const META: f32 = 12.5;
+const META_LINE: f32 = 18.0;
+const LABEL: f32 = 10.5;
+const TITLE: f32 = 19.0;
+const GUTTER: f32 = 28.0;
+
+mod ink {
+    use super::super::{motion::blend, theme::colors};
+    use eframe::egui::Color32;
+
+    /// Headlines and agent output: almost white.
+    pub(super) fn primary() -> Color32 {
+        blend(colors().text, Color32::WHITE, 0.45)
+    }
+    /// Supporting copy: clearly visible.
+    pub(super) fn secondary() -> Color32 {
+        blend(colors().secondary, colors().text, 0.45)
+    }
+    /// Metadata: quiet but readable.
+    pub(super) fn meta() -> Color32 {
+        blend(colors().muted, colors().secondary, 0.55)
+    }
+    /// Solid panel fill, a step above the dimmed background.
+    pub(super) fn panel() -> Color32 {
+        blend(colors().inset, colors().surface, 0.65)
+    }
+    pub(super) fn raised() -> Color32 {
+        blend(colors().surface, colors().elevated, 0.7)
+    }
 }
 
+fn card(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
+    Frame::new()
+        .fill(ink::panel())
+        .stroke(egui::Stroke::new(
+            1.0_f32,
+            super::motion::blend(colors().border, colors().control_border, 0.35),
+        ))
+        .inner_margin(Margin::same(18))
+        .corner_radius(12)
+        .shadow(egui::epaint::Shadow {
+            offset: [0, 6],
+            blur: 18,
+            spread: 0,
+            color: egui::Color32::from_black_alpha(70),
+        })
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = 8.0;
+            add(ui);
+        });
+    ui.add_space(14.0);
+}
+
+/// Metadata text: quiet but legible.
 fn small(text: impl Into<String>) -> RichText {
-    RichText::new(text.into()).size(SMALL).color(colors().muted)
+    RichText::new(text.into())
+        .size(META)
+        .line_height(Some(META_LINE))
+        .color(ink::meta())
+}
+
+/// Reading text for content people actually read.
+fn read(text: impl Into<String>) -> RichText {
+    RichText::new(text.into())
+        .size(READ)
+        .line_height(Some(READ_LINE))
+        .color(ink::primary())
+}
+
+/// Supporting sentence under a heading.
+fn support(text: impl Into<String>) -> RichText {
+    RichText::new(text.into())
+        .size(BODY + 0.5)
+        .line_height(Some(19.0))
+        .color(ink::secondary())
+}
+
+/// Uppercase section label.
+fn label(text: &str) -> RichText {
+    RichText::new(tr(text).to_uppercase())
+        .size(LABEL)
+        .strong()
+        .extra_letter_spacing(0.9)
+        .color(ink::meta())
+}
+
+fn heading(text: impl Into<String>) -> RichText {
+    RichText::new(text.into())
+        .size(TITLE)
+        .strong()
+        .color(ink::primary())
 }
 
 fn status_color(status: Status) -> egui::Color32 {
@@ -128,8 +209,176 @@ fn status_color(status: Status) -> egui::Color32 {
         Status::Completed => colors().success,
         Status::Failed => colors().error,
         Status::Interrupted | Status::Cancelled => colors().warning,
-        Status::Idle => colors().muted,
+        Status::Idle => ink::meta(),
     }
+}
+
+/// Small rounded tag with a tinted fill.
+fn badge(ui: &mut Ui, text: &str, color: egui::Color32) {
+    Frame::new()
+        .fill(color.gamma_multiply(0.14))
+        .stroke(egui::Stroke::new(1.0_f32, color.gamma_multiply(0.38)))
+        .corner_radius(5)
+        .inner_margin(Margin::symmetric(7, 2))
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(text)
+                    .size(LABEL)
+                    .strong()
+                    .extra_letter_spacing(0.6)
+                    .color(color),
+            );
+        });
+}
+
+/// Neutral metadata chip.
+fn chip(ui: &mut Ui, text: impl Into<String>) {
+    Frame::new()
+        .fill(ink::raised())
+        .corner_radius(6)
+        .inner_margin(Margin::symmetric(8, 3))
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(text.into())
+                    .size(META)
+                    .color(ink::secondary()),
+            );
+        });
+}
+
+fn event_style(kind: &str) -> (&'static str, egui::Color32) {
+    let c = colors();
+    match kind {
+        "created" => ("CREATED", ink::secondary()),
+        "started" => ("STARTED", c.accent),
+        "you" => ("YOU", c.accent),
+        "agent" => ("AGENT", ink::primary()),
+        "tool" => ("TOOL", super::motion::blend(c.accent, c.success, 0.55)),
+        "running" => ("RUNNING", c.accent),
+        "usage" => ("USAGE", ink::meta()),
+        "cost" => ("COST", ink::meta()),
+        "provider" => ("LIMITS", ink::meta()),
+        "done" => ("DONE", c.success),
+        "context" => ("CONTEXT", c.syntax_string),
+        "approval" => ("APPROVAL", c.warning),
+        "recovery" => ("RECOVERY", c.warning),
+        "cancelled" => ("CANCELLED", c.warning),
+        "error" => ("ERROR", c.error),
+        "closed" => ("CLOSED", ink::meta()),
+        _ => ("EVENT", ink::meta()),
+    }
+}
+
+/// Minutes and seconds since the session's first event.
+fn clock(at_ms: u64, base_ms: u64) -> String {
+    let s = at_ms.saturating_sub(base_ms) / 1000;
+    format!("{:02}:{:02}", s / 60, s % 60)
+}
+
+struct Entry<'a> {
+    kind: &'a str,
+    text: String,
+    at_ms: u64,
+}
+
+/// Collapses consecutive tool events into one row ("shell ×3").
+fn timeline_entries(log: &[crate::agents_runtime::LogLine]) -> Vec<Entry<'_>> {
+    fn flush<'a>(out: &mut Vec<Entry<'a>>, tools: &mut Vec<&'a str>, at_ms: u64) {
+        if tools.is_empty() {
+            return;
+        }
+        let mut names: Vec<String> = Vec::new();
+        let mut seen: Vec<&str> = Vec::new();
+        for name in tools.iter() {
+            if seen.contains(name) {
+                continue;
+            }
+            seen.push(name);
+            let count = tools.iter().filter(|t| *t == name).count();
+            names.push(if count > 1 {
+                format!("{name} ×{count}")
+            } else {
+                (*name).to_owned()
+            });
+        }
+        out.push(Entry {
+            kind: "tool",
+            text: names.join(" · "),
+            at_ms,
+        });
+        tools.clear();
+    }
+    let mut out: Vec<Entry<'_>> = Vec::new();
+    let mut tools: Vec<&str> = Vec::new();
+    let mut first_tool_at = 0;
+    for line in log {
+        if line.kind == "tool" {
+            if tools.is_empty() {
+                first_tool_at = line.at_ms;
+            }
+            tools.push(&line.text);
+            continue;
+        }
+        flush(&mut out, &mut tools, first_tool_at);
+        out.push(Entry {
+            kind: &line.kind,
+            text: line.text.clone(),
+            at_ms: line.at_ms,
+        });
+    }
+    flush(&mut out, &mut tools, first_tool_at);
+    out
+}
+
+/// One timeline row: time, a rail with a dot, a badge and the content.
+fn timeline_row(ui: &mut Ui, time: &str, kind: &str, add: impl FnOnce(&mut Ui)) {
+    let (badge_text, color) = event_style(kind);
+    let response = ui.horizontal_top(|ui| {
+        ui.add_sized(
+            [40.0, 20.0],
+            egui::Label::new(
+                RichText::new(time)
+                    .monospace()
+                    .size(11.0)
+                    .color(ink::meta()),
+            ),
+        );
+        ui.add_space(22.0);
+        ui.vertical(|ui| {
+            ui.set_width(ui.available_width());
+            badge(ui, badge_text, color);
+            ui.add_space(2.0);
+            add(ui);
+        });
+    });
+    let rect = response.response.rect;
+    let x = rect.left() + 52.0;
+    let painter = ui.painter();
+    painter.line_segment(
+        [
+            egui::pos2(x, rect.top() + 16.0),
+            egui::pos2(x, rect.bottom() + 12.0),
+        ],
+        egui::Stroke::new(1.0_f32, colors().border),
+    );
+    painter.circle_filled(egui::pos2(x, rect.top() + 10.0), 3.5, color);
+    painter.circle_stroke(
+        egui::pos2(x, rect.top() + 10.0),
+        6.0,
+        egui::Stroke::new(1.0_f32, color.gamma_multiply(0.35)),
+    );
+    ui.add_space(12.0);
+}
+
+fn bubble(ui: &mut Ui, fill: egui::Color32, text: RichText) {
+    Frame::new()
+        .fill(fill)
+        .corner_radius(8)
+        .inner_margin(Margin::symmetric(12, 9))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.add(egui::Label::new(text).wrap());
+        });
 }
 
 fn provider_label(kind: &ProviderKind) -> &'static str {
@@ -152,7 +401,28 @@ impl Editor {
         }
     }
 
-    fn ensure_runtime(&mut self, ctx: &egui::Context) -> bool {
+    /// Evidence harness: refresh every account's sign-in status line.
+    #[cfg(test)]
+    pub(super) fn evidence_account_status(&mut self) {
+        let state = &mut self.hub.agents;
+        let Some(runtime) = state.runtime.as_ref() else {
+            return;
+        };
+        state.status = runtime
+            .profiles
+            .accounts()
+            .iter()
+            .filter(|a| a.method != ConnectionMethod::ApiKey && a.provider != ProviderKind::Gemini)
+            .map(|a| {
+                let text = runtime
+                    .account_status(&a.id)
+                    .unwrap_or_else(|e| format!("Status unavailable: {e}"));
+                (a.id.clone(), text)
+            })
+            .collect();
+    }
+
+    pub(super) fn ensure_runtime(&mut self, ctx: &egui::Context) -> bool {
         let state = &mut self.hub.agents;
         if state.runtime.is_some() {
             return true;
@@ -231,11 +501,7 @@ impl Editor {
         let runtime = self.hub.agents.runtime.as_mut().expect("runtime");
         card(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new(tr("PROVIDERS ON THIS PC"))
-                        .size(10.0)
-                        .color(colors().muted),
-                );
+                ui.label(label("Providers on this PC"));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if ui.small_button(tr("Detect again")).clicked() {
                         runtime.redetect();
@@ -427,7 +693,7 @@ impl Editor {
         let state = &mut self.hub.agents;
         let runtime = state.runtime.as_mut().expect("runtime");
         card(ui, |ui| {
-            ui.label(RichText::new(tr("Add account")).strong());
+            ui.label(label("Add account"));
             ui.add_space(6.0);
             ui.horizontal_wrapped(|ui| {
                 for (i, (_, label)) in PROVIDERS.iter().enumerate() {
@@ -504,14 +770,18 @@ impl Editor {
         self.agent_notice(ui);
         self.approvals_strip(ui);
         let rect = ui.available_rect_before_wrap();
-        let list_width = (rect.width() * 0.34).clamp(240.0, 330.0);
+        let list_width = (rect.width() * 0.32).clamp(270.0, 340.0);
         let list = egui::Rect::from_min_size(rect.min, egui::vec2(list_width, rect.height()));
         let detail =
-            egui::Rect::from_min_max(egui::pos2(list.right() + 20.0, rect.top()), rect.max);
+            egui::Rect::from_min_max(egui::pos2(list.right() + GUTTER, rect.top()), rect.max);
         ui.scope_builder(egui::UiBuilder::new().max_rect(list), |ui| {
+            ui.set_max_width(list.width());
             ScrollArea::vertical()
                 .id_salt("agent-session-list")
+                .max_width(list.width())
+                .auto_shrink([false, false])
                 .show(ui, |ui| {
+                    ui.set_max_width(list.width() - 14.0);
                     self.session_list(ui);
                     self.session_form(ui);
                     self.context_panel(ui);
@@ -529,11 +799,10 @@ impl Editor {
             return;
         }
         card(ui, |ui| {
-            ui.label(
-                RichText::new(tr("APPROVALS WAITING"))
-                    .size(10.0)
-                    .color(colors().warning),
-            );
+            ui.horizontal(|ui| {
+                badge(ui, "APPROVALS WAITING", colors().warning);
+                ui.label(small(format!("{} pending", pending.len())));
+            });
             for request in &pending {
                 let title = runtime
                     .sessions
@@ -572,32 +841,83 @@ impl Editor {
     fn session_list(&mut self, ui: &mut Ui) {
         let state = &mut self.hub.agents;
         let runtime = state.runtime.as_ref().expect("runtime");
-        ui.label(RichText::new(tr("Sessions")).size(LEAD).strong());
-        ui.add_space(6.0);
-        if runtime.sessions.is_empty() {
-            ui.label(secondary("No sessions yet."));
-        }
-        for (index, session) in runtime.sessions.iter().enumerate() {
-            let meta = &session.meta;
-            let detail = format!(
-                "{} · {}{}",
-                provider_label(&meta.provider),
-                tr(meta.status.label()),
-                if meta.worktree_branch.is_some() {
-                    " · worktree"
-                } else {
-                    ""
-                }
-            );
-            let response = row(ui, &meta.title, &detail, state.selected == Some(index));
-            let dot = response.rect.left_center() - egui::vec2(6.0, 0.0);
-            ui.painter()
-                .circle_filled(dot, 3.0, status_color(meta.status));
-            if response.clicked() {
-                state.selected = Some(index);
+        card(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(label("Sessions"));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let live = runtime.sessions.iter().filter(|s| s.running()).count();
+                    if live > 0 {
+                        badge(ui, &format!("{live} RUNNING"), colors().accent);
+                    }
+                });
+            });
+            if runtime.sessions.is_empty() {
+                ui.label(support("No sessions yet. Create one below."));
             }
-        }
-        ui.add_space(12.0);
+            for (index, session) in runtime.sessions.iter().enumerate() {
+                let meta = &session.meta;
+                let selected = state.selected == Some(index);
+                let detail = format!(
+                    "{} · {}{}",
+                    provider_label(&meta.provider),
+                    tr(meta.status.label()),
+                    if meta.worktree_branch.is_some() {
+                        " · worktree"
+                    } else {
+                        ""
+                    }
+                );
+                let item = Frame::new()
+                    .fill(if selected {
+                        colors().accent_bg
+                    } else {
+                        egui::Color32::TRANSPARENT
+                    })
+                    .corner_radius(8)
+                    .inner_margin(Margin::symmetric(10, 8))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.horizontal_top(|ui| {
+                            let (dot, _) = ui
+                                .allocate_exact_size(egui::vec2(10.0, 18.0), egui::Sense::hover());
+                            ui.painter().circle_filled(
+                                dot.center(),
+                                4.0,
+                                status_color(meta.status),
+                            );
+                            ui.vertical(|ui| {
+                                ui.spacing_mut().item_spacing.y = 2.0;
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(&meta.title).size(BODY + 1.0).strong().color(
+                                            if selected {
+                                                ink::primary()
+                                            } else {
+                                                ink::secondary()
+                                            },
+                                        ),
+                                    )
+                                    .truncate(),
+                                );
+                                ui.label(small(detail));
+                            });
+                        });
+                    })
+                    .response
+                    .interact(egui::Sense::click());
+                if item.hovered() && !selected {
+                    ui.painter().rect_stroke(
+                        item.rect,
+                        8,
+                        egui::Stroke::new(1.0_f32, colors().border),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+                if item.clicked() {
+                    state.selected = Some(index);
+                }
+            }
+        });
     }
 
     fn session_form(&mut self, ui: &mut Ui) {
@@ -612,7 +932,7 @@ impl Editor {
             .cloned()
             .collect();
         card(ui, |ui| {
-            ui.label(RichText::new(tr("New session")).strong());
+            ui.label(label("New session"));
             let Some(root) = root.clone() else {
                 ui.label(secondary("Open a project folder first."));
                 return;
@@ -635,6 +955,7 @@ impl Editor {
             );
             egui::ComboBox::from_id_salt("agent-new-account")
                 .width(ui.available_width())
+                .truncate()
                 .selected_text(
                     accounts
                         .iter()
@@ -672,7 +993,10 @@ impl Editor {
                 &mut state.new_share,
                 tr("Share context with other agents"),
             );
-            ui.label(small(format!("Project: {}", root.display())));
+            ui.label(small(format!(
+                "Project: {}",
+                crate::agents_runtime::plain(&root).display()
+            )));
             if ui.add(primary("Create session")).clicked() {
                 let account = state.new_account.clone().expect("selected");
                 let model = Some(state.new_model.trim().to_owned())
@@ -705,21 +1029,40 @@ impl Editor {
         let state = &mut self.hub.agents;
         let runtime = state.runtime.as_mut().expect("runtime");
         card(ui, |ui| {
-            ui.label(RichText::new(tr("Shared context")).strong());
-            ui.label(small(
+            ui.label(label("Shared context"));
+            ui.label(support(
                 "Results and notes every session can read. Transcripts are never shared; \
                  secret-looking text is refused.",
             ));
             let entries: Vec<_> = runtime.context.since(0).cloned().collect();
-            for entry in entries.iter().rev().take(12) {
-                ui.label(small(format!(
-                    "#{} {:?}{} · {}",
-                    entry.seq,
-                    entry.kind,
-                    if entry.pinned { " · pinned" } else { "" },
-                    entry.text.chars().take(220).collect::<String>()
-                )));
+            if entries.is_empty() {
+                ui.label(small("Nothing shared yet."));
             }
+            for entry in entries.iter().rev().take(12) {
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    let kind = serde_json::to_value(entry.kind)
+                        .ok()
+                        .and_then(|v| v.as_str().map(str::to_uppercase))
+                        .unwrap_or_default();
+                    badge(ui, &kind, colors().syntax_string);
+                    ui.label(small(format!(
+                        "#{}{}",
+                        entry.seq,
+                        if entry.pinned { " · pinned" } else { "" }
+                    )));
+                });
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(entry.text.chars().take(260).collect::<String>())
+                            .size(BODY)
+                            .line_height(Some(18.0))
+                            .color(ink::secondary()),
+                    )
+                    .wrap(),
+                );
+            }
+            ui.add_space(4.0);
             ui.add(
                 TextEdit::multiline(&mut state.note)
                     .hint_text(tr("Add a decision or contract for all agents"))
@@ -750,105 +1093,193 @@ impl Editor {
         let audit = runtime.audit(&runtime.sessions[index].meta.id);
         let session = &mut runtime.sessions[index];
         let meta = session.meta.clone();
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(&meta.title).size(LEAD).strong());
-            ui.colored_label(status_color(meta.status), tr(meta.status.label()));
-        });
-        ui.label(small(format!(
-            "{} · {} · {} · {} turns · {} in / {} out tokens{}",
-            provider_label(&meta.provider),
-            meta.model.clone().unwrap_or_else(|| "default model".into()),
-            PRESETS
-                .iter()
-                .find(|(p, _)| *p == meta.preset)
-                .map_or("", |(_, l)| *l),
-            meta.turns,
-            meta.input_tokens,
-            meta.output_tokens,
-            if meta.cost_micros > 0 {
-                format!(" · US$ {:.4} reported", meta.cost_micros as f64 / 1e6)
-            } else {
-                String::new()
-            }
-        )));
-        ui.label(small(format!(
-            "Workdir {}{}",
-            meta.workdir.display(),
-            meta.worktree_branch
-                .as_deref()
-                .map(|b| format!(" · branch {b}"))
-                .unwrap_or_default()
-        )));
-        ui.label(small(match meta.provider {
-            ProviderKind::ClaudeCode => {
-                "COVALOS gate: every tool call passes the session policy; edits outside the \
-                 workdir are denied. Process limits: Claude permission mode and your Windows \
-                 user. A worktree isolates files, not the process."
-            }
-            _ => {
-                "Codex runs under its own sandbox (read-only or workspace-write). It has no \
-                 hook for COVALOS approvals, so its sandbox is the effective limit."
-            }
-        }));
-        if let Some(id) = &meta.provider_session {
-            ui.label(small(format!(
-                "Provider session {id} (resumed on the next message)"
-            )));
-        }
-        ui.add_space(6.0);
+        let running = session.running();
         let mut close = false;
         let mut cancel = false;
         let mut send = None;
-        let log_height = (ui.available_height() - 118.0).max(120.0);
+
+        // Header: title, status and the facts that identify the session.
+        ui.horizontal(|ui| {
+            ui.label(heading(&meta.title));
+            ui.add_space(6.0);
+            badge(
+                ui,
+                &tr(meta.status.label()).to_uppercase(),
+                status_color(meta.status),
+            );
+        });
+        ui.add_space(6.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            chip(ui, provider_label(&meta.provider));
+            chip(
+                ui,
+                meta.model.clone().unwrap_or_else(|| "Default model".into()),
+            );
+            chip(
+                ui,
+                PRESETS
+                    .iter()
+                    .find(|(p, _)| *p == meta.preset)
+                    .map_or("", |(_, l)| *l),
+            );
+            chip(
+                ui,
+                format!(
+                    "{} turn{}",
+                    meta.turns,
+                    if meta.turns == 1 { "" } else { "s" }
+                ),
+            );
+            chip(
+                ui,
+                format!("{} in · {} out", meta.input_tokens, meta.output_tokens),
+            );
+            if meta.cost_micros > 0 {
+                chip(
+                    ui,
+                    format!("US$ {:.4} reported", meta.cost_micros as f64 / 1e6),
+                );
+            }
+        });
+        ui.add_space(12.0);
+        let permissions = match meta.provider {
+            ProviderKind::ClaudeCode => {
+                "Every tool call passes the COVALOS gate; edits outside the workspace are                  denied. The process still runs as your Windows user: a worktree isolates                  files, not the process."
+            }
+            _ => {
+                "Codex runs under its own sandbox (read-only or workspace-write). It has no \
+                 approval hook, so its sandbox is the effective limit."
+            }
+        };
+        ui.columns(2, |cols| {
+            // Left-aligned, unjustified text in both columns.
+            cols[0].with_layout(Layout::top_down(Align::Min), |ui| {
+                ui.label(label("Workspace"));
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(meta.workdir.display().to_string())
+                            .monospace()
+                            .size(11.5)
+                            .color(ink::secondary()),
+                    )
+                    .wrap(),
+                );
+                if let Some(branch) = &meta.worktree_branch {
+                    ui.label(small(format!("Own worktree · branch {branch}")));
+                }
+                if let Some(id) = &meta.provider_session {
+                    ui.label(small(format!("Provider session {id}")));
+                }
+            });
+            cols[1].with_layout(Layout::top_down(Align::Min), |ui| {
+                ui.label(label("Permissions"));
+                ui.add(egui::Label::new(support(permissions)).wrap());
+            });
+        });
+        ui.add_space(14.0);
+
+        // Activity timeline.
+        let composer = 132.0;
+        let height = (ui.available_height() - composer).max(160.0);
         Frame::new()
-            .fill(colors().canvas.gamma_multiply(0.96))
-            .corner_radius(10)
-            .inner_margin(Margin::same(10))
+            .fill(ink::panel())
+            .stroke(egui::Stroke::new(1.0_f32, colors().border))
+            .corner_radius(12)
+            .inner_margin(Margin::symmetric(16, 14))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.label(label("Activity"));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(small(format!("{} events", meta.log.len())));
+                    });
+                });
+                ui.add_space(8.0);
                 ScrollArea::vertical()
                     .id_salt(("agent-log", index))
-                    .max_height(log_height)
+                    .max_height(height - 40.0)
+                    .auto_shrink([false, false])
                     .stick_to_bottom(true)
                     .show(ui, |ui| {
-                        for line in &meta.log {
-                            let color = match line.kind.as_str() {
-                                "error" => colors().error,
-                                "you" => colors().accent,
-                                "agent" => colors().text,
-                                "approval" | "recovery" => colors().warning,
-                                _ => colors().secondary,
-                            };
-                            ui.horizontal_wrapped(|ui| {
-                                ui.label(small(format!("{:>8}", line.kind)));
-                                ui.label(RichText::new(&line.text).color(color));
+                        let base = meta.log.first().map_or(0, |l| l.at_ms);
+                        for entry in timeline_entries(&meta.log) {
+                            let time = clock(entry.at_ms, base);
+                            timeline_row(ui, &time, entry.kind, |ui| match entry.kind {
+                                "agent" => bubble(ui, ink::raised(), read(&entry.text)),
+                                "you" => bubble(
+                                    ui,
+                                    colors().accent_bg,
+                                    read(&entry.text).color(ink::primary()),
+                                ),
+                                "error" => bubble(
+                                    ui,
+                                    colors().error.gamma_multiply(0.12),
+                                    RichText::new(&entry.text)
+                                        .size(META)
+                                        .line_height(Some(META_LINE))
+                                        .color(colors().error),
+                                ),
+                                "usage" | "cost" | "provider" | "closed" => {
+                                    ui.label(small(&entry.text));
+                                }
+                                _ => {
+                                    ui.add(egui::Label::new(support(&entry.text)).wrap());
+                                }
                             });
                         }
-                        if !session.streaming.is_empty() {
-                            ui.horizontal_wrapped(|ui| {
-                                ui.label(small("   delta"));
-                                ui.label(
-                                    RichText::new(&session.streaming).color(colors().secondary),
-                                );
+                        if running {
+                            let base_time = clock(covalos_agents::now_ms(), base);
+                            timeline_row(ui, &base_time, "running", |ui| {
+                                ui.horizontal(|ui| {
+                                    busy_indicator(ui);
+                                    ui.label(support("Working…"));
+                                });
+                                if !session.streaming.is_empty() {
+                                    bubble(
+                                        ui,
+                                        ink::raised(),
+                                        read(&session.streaming).color(ink::secondary()),
+                                    );
+                                }
                             });
                         }
                         if !audit.is_empty() {
                             ui.add_space(6.0);
-                            ui.label(small("Gate decisions"));
+                            ui.label(label("COVALOS gate decisions"));
+                            ui.add_space(4.0);
                             for entry in &audit {
-                                ui.label(small(format!(
-                                    "{} {} · {} ({})",
-                                    if entry["allow"] == true { "✔" } else { "✖" },
-                                    entry["tool"].as_str().unwrap_or_default(),
-                                    entry["target"].as_str().unwrap_or_default(),
-                                    entry["reason"].as_str().unwrap_or_default()
-                                )));
+                                let allowed = entry["allow"] == true;
+                                ui.horizontal_wrapped(|ui| {
+                                    badge(
+                                        ui,
+                                        if allowed { "ALLOW" } else { "DENY" },
+                                        if allowed {
+                                            colors().success
+                                        } else {
+                                            colors().error
+                                        },
+                                    );
+                                    ui.label(support(
+                                        entry["tool"].as_str().unwrap_or_default().to_owned(),
+                                    ));
+                                    ui.label(
+                                        RichText::new(entry["target"].as_str().unwrap_or_default())
+                                            .monospace()
+                                            .size(11.5)
+                                            .color(ink::secondary()),
+                                    );
+                                    ui.label(small(
+                                        entry["reason"].as_str().unwrap_or_default().to_owned(),
+                                    ));
+                                });
                             }
                         }
                     });
             });
-        ui.add_space(6.0);
-        let running = session.running();
+        ui.add_space(12.0);
+
+        // Composer.
         ui.add(
             TextEdit::multiline(&mut session.draft)
                 .hint_text(tr(if running {
@@ -856,12 +1287,14 @@ impl Editor {
                 } else {
                     "Message the agent"
                 }))
+                .font(egui::FontId::proportional(READ))
+                .margin(Margin::symmetric(12, 10))
                 .desired_rows(2)
                 .desired_width(f32::INFINITY),
         );
+        ui.add_space(6.0);
         ui.horizontal(|ui| {
             if running {
-                busy_indicator(ui);
                 if ui.button(tr("Cancel turn")).clicked() {
                     cancel = true;
                 }
@@ -917,7 +1350,7 @@ impl Editor {
             .is_some_and(|p| !p.engine.plan().state.is_settled());
         if !runtime.recoverable.is_empty() {
             card(ui, |ui| {
-                ui.label(RichText::new(tr("Interrupted plans")).strong());
+                ui.label(label("Interrupted plans"));
                 let mut recover: Option<PathBuf> = None;
                 for journal in &runtime.recoverable {
                     ui.horizontal(|ui| {
@@ -941,7 +1374,7 @@ impl Editor {
         }
         if !running {
             card(ui, |ui| {
-                ui.label(RichText::new(tr("New objective")).strong());
+                ui.label(label("New objective"));
                 ui.add(
                     TextEdit::multiline(&mut state.goal)
                         .hint_text(tr("Describe the goal"))
@@ -984,7 +1417,10 @@ impl Editor {
                     ui.label(secondary("Open a project folder first."));
                     return;
                 };
-                ui.label(small(format!("Project: {}", root.display())));
+                ui.label(small(format!(
+                    "Project: {}",
+                    crate::agents_runtime::plain(&root).display()
+                )));
                 if ui.add(primary("Start objective")).clicked() {
                     let budget = Budget {
                         wall_ms: Some(u64::from(state.budget_minutes) * 60_000),
