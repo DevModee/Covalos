@@ -71,6 +71,13 @@ fn server_command(lang: Lang, root: &Path) -> Option<Command> {
         c.arg(script);
         return Some(c);
     }
+    if lang == Lang::Ts
+        && let Some(tsc) = native_typescript(root)
+    {
+        let mut c = Command::new(tsc);
+        c.args(["--lsp", "--stdio"]);
+        return Some(c);
+    }
     let name = lang.server();
     let names: Vec<String> = if cfg!(windows) {
         vec![format!("{name}.cmd"), format!("{name}.exe")]
@@ -88,6 +95,34 @@ fn server_command(lang: Lang, root: &Path) -> Option<Command> {
     let mut c = Command::new(program);
     c.arg("--stdio");
     Some(c)
+}
+
+/// The project's `tsc` when its TypeScript is 7 or newer (the native
+/// compiler, which has no tsserver.js but serves LSP itself).
+fn native_typescript(root: &Path) -> Option<PathBuf> {
+    let manifest = root
+        .join("node_modules")
+        .join("typescript")
+        .join("package.json");
+    let json: Value = serde_json::from_slice(&std::fs::read(manifest).ok()?).ok()?;
+    let major: u32 = json["version"].as_str()?.split('.').next()?.parse().ok()?;
+    if major < 7 {
+        return None;
+    }
+    let bin = root.join("node_modules").join(".bin");
+    [bin.join("tsc.cmd"), bin.join("tsc.exe"), bin.join("tsc")]
+        .into_iter()
+        .find(|p| p.is_file())
+}
+
+/// Settings answered to `workspace/configuration`, per section.
+fn settings(section: &str) -> Value {
+    match section {
+        "css" | "scss" | "less" => json!({"validate": true, "lint": {}}),
+        "html" => json!({"validate": {"scripts": true, "styles": true}}),
+        "json" => json!({"validate": {"enable": true}}),
+        _ => json!({}),
+    }
 }
 
 pub(super) fn uri(path: &Path) -> String {
@@ -120,7 +155,11 @@ fn path_from_uri(uri: &str) -> Option<PathBuf> {
             i += 1;
         }
     }
-    let text = String::from_utf8(bytes).ok()?;
+    let mut text = String::from_utf8(bytes).ok()?;
+    // Servers may lower-case the drive letter (`file:///e%3A/...`).
+    if cfg!(windows) && text.as_bytes().get(1) == Some(&b':') {
+        text[..1].make_ascii_uppercase();
+    }
     Some(PathBuf::from(if cfg!(windows) {
         text.replace('/', "\\")
     } else {
@@ -160,6 +199,20 @@ pub(super) fn char_index(text: &str, (line, col): (u32, u32)) -> usize {
         }
     }
     text.chars().count()
+}
+
+fn parse_diagnostics(list: &Value) -> Vec<Diagnostic> {
+    list.as_array()
+        .into_iter()
+        .flatten()
+        .map(|d| Diagnostic {
+            start: pos(&d["range"]["start"]),
+            end: pos(&d["range"]["end"]),
+            severity: d["severity"].as_u64().unwrap_or(1) as u8,
+            message: d["message"].as_str().unwrap_or_default().to_owned(),
+            source: d["source"].as_str().unwrap_or_default().to_owned(),
+        })
+        .collect()
 }
 
 fn pos(v: &Value) -> (u32, u32) {
@@ -202,6 +255,9 @@ struct Server {
     opened: HashMap<PathBuf, (i64, u64)>,
     triggers: Vec<char>,
     completion: Option<(i64, PathBuf)>,
+    /// The server answers `textDocument/diagnostic` (pull) requests.
+    pull: bool,
+    diagnostic_requests: HashMap<i64, PathBuf>,
 }
 
 impl Drop for Server {
@@ -211,7 +267,18 @@ impl Drop for Server {
     }
 }
 
+fn trace(direction: &str, message: &Value) {
+    if std::env::var_os("COVALOS_LSP_TRACE").is_some() {
+        let text = message.to_string();
+        eprintln!(
+            "lsp {direction} {}",
+            text.chars().take(300).collect::<String>()
+        );
+    }
+}
+
 fn frame(message: &Value) -> Vec<u8> {
+    trace("->", message);
     let body = message.to_string();
     let mut bytes = format!("Content-Length: {}\r\n\r\n", body.len()).into_bytes();
     bytes.extend_from_slice(body.as_bytes());
@@ -273,7 +340,8 @@ impl Server {
                     let _ = tx.send(Incoming::Closed);
                     return;
                 }
-                if let Ok(value) = serde_json::from_slice(&body) {
+                if let Ok(value) = serde_json::from_slice::<Value>(&body) {
+                    trace("<-", &value);
                     let _ = tx.send(Incoming::Message(value));
                     wake.request_repaint();
                 }
@@ -289,6 +357,8 @@ impl Server {
             opened: HashMap::new(),
             triggers: Vec::new(),
             completion: None,
+            pull: false,
+            diagnostic_requests: HashMap::new(),
         };
         let root_uri = uri(root);
         let init = json!({
@@ -301,6 +371,7 @@ impl Server {
                     "textDocument": {
                         "synchronization": {"didSave": false},
                         "publishDiagnostics": {"relatedInformation": false},
+                        "diagnostic": {"dynamicRegistration": false, "relatedDocumentSupport": false},
                         "completion": {"completionItem": {"snippetSupport": false}}
                     },
                     "workspace": {"configuration": true, "workspaceFolders": true}
@@ -322,6 +393,20 @@ impl Server {
 
     fn notify(&mut self, method: &str, params: Value) {
         self.send(json!({"jsonrpc": "2.0", "method": method, "params": params}));
+    }
+
+    /// Asks a pull-diagnostics server for a document's current diagnostics.
+    fn pull_diagnostics(&mut self, path: &Path) {
+        if !(self.ready && self.pull) {
+            return;
+        }
+        let id = self.next;
+        self.next += 1;
+        self.diagnostic_requests.insert(id, path.to_path_buf());
+        self.send(json!({
+            "jsonrpc": "2.0", "id": id, "method": "textDocument/diagnostic",
+            "params": {"textDocument": {"uri": uri(path)}}
+        }));
     }
 }
 
@@ -405,7 +490,7 @@ fn completion_items(result: &Value) -> Vec<Item> {
     let mut items: Vec<Item> = list
         .into_iter()
         .flatten()
-        .take(400)
+        .take(20_000)
         .map(|item| {
             let label = item["label"].as_str().unwrap_or_default().to_owned();
             let insert = item["textEdit"]["newText"]
@@ -474,6 +559,7 @@ impl Lsp {
                         "textDocument/didOpen",
                         json!({"textDocument": {"uri": uri(&doc.path), "languageId": id, "version": 1, "text": doc.text}}),
                     );
+                    server.pull_diagnostics(&doc.path);
                 }
                 Some((version, old)) if old != hash => {
                     server.opened.insert(doc.path.clone(), (version + 1, hash));
@@ -481,6 +567,7 @@ impl Lsp {
                         "textDocument/didChange",
                         json!({"textDocument": {"uri": uri(&doc.path), "version": version + 1}, "contentChanges": [{"text": doc.text}]}),
                     );
+                    server.pull_diagnostics(&doc.path);
                 }
                 Some(_) => {}
             }
@@ -514,6 +601,7 @@ impl Lsp {
                 continue;
             };
             let mut closed = false;
+            let mut failed: Option<String> = None;
             let messages: Vec<Incoming> = server.rx.try_iter().collect();
             for message in messages {
                 let Incoming::Message(msg) = message else {
@@ -521,8 +609,16 @@ impl Lsp {
                     continue;
                 };
                 let method = msg["method"].as_str().unwrap_or_default();
-                if msg["id"] == 0 && method.is_empty() {
+                if msg["id"] == 0 && method.is_empty() && msg.get("error").is_some() {
+                    let reason = msg["error"]["message"]
+                        .as_str()
+                        .unwrap_or("initialize failed");
+                    failed = Some(reason.chars().take(300).collect::<String>());
+                } else if msg["id"] == 0 && method.is_empty() {
                     server.ready = true;
+                    server.pull = msg["result"]["capabilities"]
+                        .get("diagnosticProvider")
+                        .is_some();
                     server.triggers =
                         msg["result"]["capabilities"]["completionProvider"]["triggerCharacters"]
                             .as_array()
@@ -536,28 +632,35 @@ impl Lsp {
                     for queued in std::mem::take(&mut server.queued) {
                         let _ = server.out.send(frame(&queued));
                     }
+                    let opened: Vec<PathBuf> = server.opened.keys().cloned().collect();
+                    for path in opened {
+                        server.pull_diagnostics(&path);
+                    }
+                } else if let Some(path) = msg["id"]
+                    .as_i64()
+                    .filter(|_| method.is_empty())
+                    .and_then(|id| server.diagnostic_requests.remove(&id))
+                {
+                    if msg["result"]["kind"] != "unchanged" {
+                        let list = parse_diagnostics(&msg["result"]["items"]);
+                        diagnostics.push((path, list));
+                    }
                 } else if method == "textDocument/publishDiagnostics" {
                     let params = &msg["params"];
                     if let Some(path) = params["uri"].as_str().and_then(path_from_uri) {
-                        let list = params["diagnostics"]
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .map(|d| Diagnostic {
-                                start: pos(&d["range"]["start"]),
-                                end: pos(&d["range"]["end"]),
-                                severity: d["severity"].as_u64().unwrap_or(1) as u8,
-                                message: d["message"].as_str().unwrap_or_default().to_owned(),
-                                source: d["source"].as_str().unwrap_or_default().to_owned(),
-                            })
-                            .collect::<Vec<_>>();
-                        diagnostics.push((path, list));
+                        diagnostics.push((path, parse_diagnostics(&params["diagnostics"])));
                     }
                 } else if !method.is_empty() && msg.get("id").is_some() {
                     // Server-to-client requests must be answered or some servers stall.
                     let result = if method == "workspace/configuration" {
-                        let n = msg["params"]["items"].as_array().map_or(0, Vec::len);
-                        Value::Array(vec![Value::Null; n])
+                        Value::Array(
+                            msg["params"]["items"]
+                                .as_array()
+                                .into_iter()
+                                .flatten()
+                                .map(|item| settings(item["section"].as_str().unwrap_or_default()))
+                                .collect(),
+                        )
                     } else {
                         Value::Null
                     };
@@ -571,7 +674,9 @@ impl Lsp {
                     server.completion = None;
                 }
             }
-            if closed {
+            if let Some(reason) = failed {
+                *slot = Slot::Failed(reason);
+            } else if closed {
                 *slot = Slot::Failed(format!("{} stopped", lang.server()));
             }
         }
@@ -943,19 +1048,26 @@ impl super::Editor {
         if let Some(path) = &active
             && let Some((lang, state)) = self.lsp.state(path)
         {
+            let native =
+                lang == Lang::Ts && self.root.as_deref().and_then(native_typescript).is_some();
+            let name = if native {
+                "TypeScript 7 (tsc --lsp)"
+            } else {
+                lang.server()
+            };
             ui.horizontal(|ui| {
                 let text = match state {
-                    "ready" => format!("{} {}", lang.server(), tr("is running")),
-                    "starting" => format!("{} {}", lang.server(), tr("is starting…")),
+                    "ready" => format!("{} {}", name, tr("is running")),
+                    "starting" => format!("{} {}", name, tr("is starting…")),
                     "missing" => format!(
                         "{} {} · {}",
-                        lang.server(),
+                        name,
                         tr("is not installed"),
                         lang.install_hint()
                     ),
                     "stopped" => format!(
                         "{} {}: {}",
-                        lang.server(),
+                        name,
                         tr("stopped"),
                         self.lsp.failure(lang).unwrap_or_default()
                     ),
@@ -1038,6 +1150,12 @@ mod tests {
         assert_eq!(p, (1, 13));
         assert_eq!(char_index(text, p), idx);
         assert_eq!(char_index(text, (0, 99)), 12, "clamped to the line end");
+        if cfg!(windows) {
+            assert_eq!(
+                path_from_uri("file:///e%3A/a/b.ts").unwrap(),
+                PathBuf::from(r"E:\a\b.ts")
+            );
+        }
         let path = PathBuf::from(r"E:\my site\src\App.tsx");
         let u = uri(&path);
         assert!(u.starts_with("file:///E%3A/my%20site/src/App.tsx"), "{u}");
@@ -1098,6 +1216,72 @@ mod tests {
         assert!(popup.server);
         assert_eq!(popup.items[0].label, "total");
         assert_eq!(popup.anchor, 17);
+    }
+
+    /// Real servers on a Vite React-TS project (COVALOS_LSP_PROJECT): the
+    /// servers are found the same way the editor finds them.
+    #[test]
+    #[ignore = "needs typescript-language-server and vscode-langservers-extracted"]
+    fn real_servers_on_a_react_project() {
+        let root =
+            PathBuf::from(std::env::var_os("COVALOS_LSP_PROJECT").expect("COVALOS_LSP_PROJECT"));
+        let ctx = egui::Context::default();
+        let mut app = Document::open(root.join("src").join("App.tsx")).unwrap();
+        app.text
+            .push_str("\nconst broken: number = \"text\";\nconst probe = useSt");
+        let mut css = Document::open(root.join("src").join("App.css")).unwrap();
+        css.text.push_str("\n.probe { colr: red; }\n");
+        let docs = vec![app, css];
+        let mut lsp = Lsp::default();
+        let started = Instant::now();
+        let has = |lsp: &Lsp, path: &Path, needle: &str| {
+            lsp.diagnostics
+                .get(path)
+                .is_some_and(|l| l.iter().any(|d| d.message.contains(needle)))
+        };
+        while !(has(&lsp, &docs[0].path, "not assignable") && has(&lsp, &docs[1].path, "colr"))
+            && started.elapsed() < Duration::from_secs(90)
+        {
+            lsp.synced = None;
+            lsp.sync(Some(&root), &docs, &ctx);
+            thread::sleep(Duration::from_millis(100));
+        }
+        for doc in &docs {
+            eprintln!("{} -> {:?}", doc.path.display(), lsp.state(&doc.path));
+            for d in lsp.diagnostics.get(&doc.path).into_iter().flatten() {
+                eprintln!("  {:?} sev {} {}", d.start, d.severity, d.message);
+            }
+        }
+        eprintln!("diagnostics after {:?}", started.elapsed());
+        for (path, list) in &lsp.diagnostics {
+            eprintln!("key {} ({} items)", path.display(), list.len());
+        }
+        assert!(
+            has(&lsp, &docs[0].path, "not assignable"),
+            "no TypeScript diagnostic"
+        );
+        assert!(has(&lsp, &docs[1].path, "colr"), "no CSS diagnostic");
+        let cursor = docs[0].text.chars().count();
+        lsp.trigger(&docs[0], cursor);
+        let until = Instant::now() + Duration::from_secs(30);
+        while lsp.popup.as_ref().is_none_or(|p| p.items.is_empty()) && Instant::now() < until {
+            lsp.poll();
+            thread::sleep(Duration::from_millis(20));
+        }
+        let popup = lsp.popup.as_ref().expect("popup");
+        let labels: Vec<&str> = popup
+            .items
+            .iter()
+            .map(|i| i.label.as_str())
+            .filter(|l| l.starts_with("useSt"))
+            .collect();
+        eprintln!(
+            "{} completion items, first {:?}",
+            labels.len(),
+            &labels[..labels.len().min(8)]
+        );
+        assert!(popup.server);
+        assert!(labels.contains(&"useState"), "useState not offered");
     }
 
     const FAKE_SERVER: &str = r#"

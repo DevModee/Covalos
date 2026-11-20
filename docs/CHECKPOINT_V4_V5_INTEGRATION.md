@@ -19,10 +19,10 @@ Commits: `544ad08` agents, `2e193da` terminal/ports/preview/tunnel/reload, `e129
 | Preview: WebView2 vía `wry 0.53.5` como hijo de la ventana eframe; se oculta bajo modales | verificado: cargó `http://localhost:5179/` (la captura GL no incluye la ventana nativa) | `web/03` |
 | Cloudflare Tunnel: detecta `cloudflared`, pide confirmación, URL trycloudflare real, copiar, detener | verificado con un servidor de prueba, detenido al final | `web/04,05,06` |
 | Recarga de archivos cambiados en disco (agentes): buffer limpio recarga; con cambios, banner Reload / Keep mine | test `external_edits_reload_*` | — |
-| LSP (TS/JS/React, CSS, HTML, JSON): diagnósticos con subrayado y hover, pestaña Problems, completado (Ctrl+Space, trigger chars, 2 letras); sin servidor, completa palabras del archivo | test de ida y vuelta con servidor stdio de prueba; **no probado con `typescript-language-server` real (no instalado)** | tests `lsp::*` |
+| LSP (TS/JS/React, CSS, HTML, JSON): diagnósticos (push y pull) con subrayado y hover, pestaña Problems, completado (Ctrl+Space, trigger chars, 2 letras); sin servidor, palabras del archivo. Con TypeScript ≥ 7 en el proyecto usa su servidor nativo `tsc --lsp --stdio`; si no, `typescript-language-server` | **verificado con servidores reales** en `E:\workspace\covalos-lsp-react` (Vite react-ts, TypeScript 7.0.2): error TS2322 y `colr` de CSS en 0,9 s; `useSt` → `useState` | test `real_servers_on_a_react_project` (ignored, `COVALOS_LSP_PROJECT`) |
 
 Pendiente, en orden:
-1. Instalar `npm i -g typescript-language-server typescript vscode-langservers-extracted` y probar diagnósticos/completado reales en un proyecto React.
+1. Hecho: servidores instalados globalmente (`typescript-language-server` 6.1.0, `vscode-langservers-extracted`) y probados (ver fila LSP). Falta probarlo a mano en la app: subrayados, hover y popup no tienen captura.
 2. Correr el planner-agente del Orchestrator con una cuenta real (1 turno) y un objetivo con rol fijado.
 3. Claude Code real (login vencido) y Gemini CLI (no instalado): siguen como en §3.
 4. Editor flotante de Clean Code no tiene LSP (solo el editor principal).
