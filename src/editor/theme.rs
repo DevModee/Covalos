@@ -1,8 +1,8 @@
 pub(super) use super::i18n::{tr, trf};
 use eframe::egui::{self, Color32, Context, FontId, Frame, Margin, RichText, Stroke, TextStyle};
 
-pub(crate) const BRAND: &str = "AEROS";
-pub(crate) const TITLE: &str = "AEROS Editor";
+pub(crate) const BRAND: &str = crate::brand::NAME;
+pub(crate) const TITLE: &str = crate::brand::TITLE;
 
 pub(super) const UNIT: f32 = 4.0;
 pub(super) const SMALL: f32 = 12.0;
@@ -47,11 +47,11 @@ impl Theme {
     ];
     pub(super) fn name(self) -> &'static str {
         match self {
-            Self::Nocturne => "AEROS Nocturne",
-            Self::Dark => "AEROS Graphite",
-            Self::Midnight => "AEROS Midnight",
-            Self::Violet => "AEROS Violet",
-            Self::Light => "AEROS Light",
+            Self::Nocturne => "COVALOS Nocturne",
+            Self::Dark => "COVALOS Graphite",
+            Self::Midnight => "COVALOS Midnight",
+            Self::Violet => "COVALOS Violet",
+            Self::Light => "COVALOS Light",
             Self::HighContrast => "High Contrast",
         }
     }
@@ -525,7 +525,7 @@ pub(super) fn row(ui: &mut egui::Ui, label: &str, detail: &str, selected: bool) 
     response
 }
 
-/// Interface icons. Everything except the AEROS mark is a Lucide icon (ISC) rasterized to a
+/// Interface icons. Everything except the COVALOS mark is a Lucide icon (ISC) rasterized to a
 /// mipmapped mask, so every surface shares one stroke weight, grid and corner language.
 // The full interface vocabulary is declared up front so new surfaces reuse it instead of
 // drawing ad-hoc glyphs; not every icon is placed yet.
@@ -772,23 +772,14 @@ pub(super) fn draw_icon_sized(
         );
         return;
     }
-    // The AEROS mark is original identity art: a delta under an open orbit.
-    let stroke = Stroke::new(1.4_f32, color);
-    let p = |x: f32, y: f32| center + egui::vec2(x, y) * (size / ICON_SIZE);
-    painter.add(egui::Shape::closed_line(
-        vec![p(-7.0, 5.0), p(0.0, -8.0), p(7.0, 5.0)],
-        stroke,
-    ));
-    painter.line_segment([p(-3.0, 0.5), p(3.0, 0.5)], stroke);
-    painter.add(egui::Shape::line(
-        (0..25)
-            .map(|i| {
-                let a = i as f32 / 24.0 * std::f32::consts::PI * 1.55;
-                p(a.cos() * 10.0, a.sin() * 4.5 + 1.0)
-            })
-            .collect(),
-        Stroke::new(1.1_f32, color),
-    ));
+    // Centralized provisional COVALOS mark (refined Bond Prism C). High Contrast uses the
+    // monochrome mask tinted with the active accent; other themes render the full-color mark.
+    let rect = egui::Rect::from_center_size(center, egui::Vec2::splat(size * 1.15));
+    if active() == Theme::HighContrast {
+        super::assets::tinted(painter, rect, "covalos_mark_mono", color);
+    } else {
+        super::assets::tinted(painter, rect, "covalos_mark", Color32::WHITE);
+    }
 }
 
 pub(super) fn modal_frame() -> Frame {

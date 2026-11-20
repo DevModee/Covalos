@@ -1,4 +1,4 @@
-//! AEROS syntax highlighting: syntect grammars, a semantic token classifier and curated
+//! COVALOS syntax highlighting: syntect grammars, a semantic token classifier and curated
 //! palettes that follow the interface theme.
 //!
 //! Grammars come from syntect's bundled Sublime syntaxes. Scopes are mapped onto a small,
@@ -819,10 +819,10 @@ mod tests {
             has(&ts, "map", Token::Method) || has(&ts, "map", Token::Function),
             "{ts:?}"
         );
-        let toml = kinds("[package]\nname = \"aeros\" # id\nlto = true\n", "toml");
+        let toml = kinds("[package]\nname = \"covalos\" # id\nlto = true\n", "toml");
         assert!(has(&toml, "[package]", Token::Type), "{toml:?}");
         assert!(has(&toml, "name", Token::Property), "{toml:?}");
-        assert!(has(&toml, "\"aeros\"", Token::String), "{toml:?}");
+        assert!(has(&toml, "\"covalos\"", Token::String), "{toml:?}");
         assert!(has(&toml, "true", Token::Constant), "{toml:?}");
     }
 

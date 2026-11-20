@@ -1,4 +1,4 @@
-//! AEROS Clean Code: detach files from the tab strip into floating editor surfaces.
+//! COVALOS Clean Code: detach files from the tab strip into floating editor surfaces.
 //!
 //! A floating editor is a view of the same `Document` the tab used: the same buffer, dirty
 //! state, save path and highlighter. Nothing is copied, so docking, closing, saving and

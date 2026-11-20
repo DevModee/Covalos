@@ -166,6 +166,11 @@ impl Editor {
                                 ui.close();
                                 self.request(Pending::CloseTab(index), ctx);
                             }
+                            ui.separator();
+                            if ui.button(tr("About COVALOS")).clicked() {
+                                ui.close();
+                                self.about_open = true;
+                            }
                         });
                         if rect.width() > 1100.0 {
                             self.workspace_picker(ui);

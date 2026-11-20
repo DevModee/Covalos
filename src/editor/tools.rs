@@ -962,9 +962,9 @@ mod tests {
         let folder = tempfile::tempdir()?;
         let mut log = String::new();
         let script = if cfg!(windows) {
-            "echo AEROS_READY && cd"
+            "echo COVALOS_READY && cd"
         } else {
-            "echo AEROS_READY && pwd"
+            "echo COVALOS_READY && pwd"
         };
         let mut job = Some(worker(
             user_command(folder.path(), script),
@@ -977,7 +977,7 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
         assert!(job.is_none(), "{log}");
-        assert!(log.contains("AEROS_READY"), "{log}");
+        assert!(log.contains("COVALOS_READY"), "{log}");
         assert!(
             log.contains(folder.path().file_name().unwrap().to_str().unwrap()),
             "{log}"

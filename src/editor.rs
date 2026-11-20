@@ -100,6 +100,7 @@ pub struct Editor {
     saved_preferences: Preferences,
     preferences_path: Option<PathBuf>,
     settings_open: bool,
+    about_open: bool,
     hub_open: bool,
     companion: companion::Companion,
     identity: identity::Identity,
@@ -178,6 +179,7 @@ impl Editor {
             preferences,
             preferences_path: None,
             settings_open: false,
+            about_open: false,
             hub_open: false,
             companion: companion::Companion::default(),
             identity: identity::Identity::default(),
@@ -778,6 +780,7 @@ impl Editor {
             self.floating_editors(ctx);
         }
         self.settings_window(ctx);
+        self.about_window(ctx);
         self.palette_modal(ctx);
         self.modals(ctx);
         self.conversation_close_modal(ctx);
@@ -987,15 +990,16 @@ mod tests {
             }
         }
 
-        let output = std::env::var_os("AEROS_SMOKE_DIR")
+        let output = std::env::var_os("COVALOS_SMOKE_DIR")
+            .or_else(|| std::env::var_os("AEROS_SMOKE_DIR"))
             .map(PathBuf::from)
-            .ok_or("set AEROS_SMOKE_DIR")?;
+            .ok_or("set COVALOS_SMOKE_DIR")?;
         std::fs::create_dir_all(&output)?;
         let fixture = tempfile::tempdir()?;
         std::fs::create_dir(fixture.path().join("src"))?;
         std::fs::write(
             fixture.path().join("src/main.rs"),
-            "fn main() {\n    println!(\"Hello from AEROS\");\n}\n",
+            "fn main() {\n    println!(\"Hello from COVALOS\");\n}\n",
         )?;
         std::fs::write(
             fixture.path().join("Cargo.toml"),
@@ -1005,14 +1009,14 @@ mod tests {
         let options = eframe::NativeOptions {
             viewport: ViewportBuilder::default()
                 .with_inner_size([1040.0, 690.0])
-                .with_title("AEROS render test"),
+                .with_title("COVALOS render test"),
             event_loop_builder: Some(Box::new(|builder| {
                 builder.with_any_thread(true);
             })),
             ..Default::default()
         };
         eframe::run_native(
-            "AEROS render test",
+            "COVALOS render test",
             options,
             Box::new(move |cc| {
                 let editor = Editor::new(&cc.egui_ctx, Some(root.clone()), Preferences::default());

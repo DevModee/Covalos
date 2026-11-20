@@ -168,6 +168,9 @@ pub(super) fn folder_name(path: &Path, open: bool) -> &'static str {
 
 fn bytes(name: &str) -> &'static [u8] {
     match name {
+        "covalos_mark" => crate::brand::MARK_PNG,
+        "covalos_mark_mono" => crate::brand::MARK_MONO_PNG,
+        "covalos_app" => crate::brand::APP_ICON_PNG,
         "luma" => include_bytes!("../../assets/identity/luma.png"),
         "brand_claude" => include_bytes!("../../assets/brands/claude.png"),
         "brand_claudecode" => include_bytes!("../../assets/brands/claudecode.png"),
@@ -323,6 +326,9 @@ mod tests {
         assert_eq!(file_name(Path::new("tsconfig.base.json")), "tsconfig");
         assert_eq!(folder_name(Path::new("src"), true), "folder-src-open");
         for brand in [
+            "covalos_mark",
+            "covalos_mark_mono",
+            "covalos_app",
             "luma",
             "brand_claude",
             "brand_gemini",

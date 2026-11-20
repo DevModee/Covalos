@@ -289,7 +289,7 @@ mod tests {
         let prompt = with_file_context(
             "Read the attached source and reply with the exact string assigned to TOKEN. Do not use tools.",
             Path::new("snippet.rs"),
-            Some("const TOKEN: &str = \"AEROS_OK\";"),
+            Some("const TOKEN: &str = \"COVALOS_OK\";"),
         );
         let run = start(root.path().to_owned(), None, prompt, || {});
         let mut session = None;
@@ -307,7 +307,7 @@ mod tests {
                 | Event::Model(_) => {}
             }
         }
-        assert_eq!(text.trim(), "AEROS_OK");
+        assert_eq!(text.trim(), "COVALOS_OK");
         let run = start(
             root.path().to_owned(),
             Some(session.expect("Codex session id")),
@@ -328,7 +328,7 @@ mod tests {
                 | Event::Model(_) => {}
             }
         }
-        assert_eq!(repeated.trim(), "AEROS_OK");
+        assert_eq!(repeated.trim(), "COVALOS_OK");
     }
 
     #[test]
@@ -340,7 +340,7 @@ mod tests {
             Scope::Isolated,
             root.path().to_owned(),
             None,
-            "Reply with the exact text AEROS_GENERAL_OK. Do not use tools.".into(),
+            "Reply with the exact text COVALOS_GENERAL_OK. Do not use tools.".into(),
             || {},
         );
         let mut reply = String::new();
@@ -356,7 +356,7 @@ mod tests {
                 _ => {}
             }
         }
-        assert_eq!(reply.trim(), "AEROS_GENERAL_OK");
+        assert_eq!(reply.trim(), "COVALOS_GENERAL_OK");
         Ok(())
     }
 

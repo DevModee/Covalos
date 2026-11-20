@@ -77,7 +77,9 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 12 => {
                     self.editor.companion.open = true;
-                    if let Some(exe) = std::env::var_os("AEROS_TEST_EXE") {
+                    if let Some(exe) = std::env::var_os("COVALOS_TEST_EXE")
+                        .or_else(|| std::env::var_os("AEROS_TEST_EXE"))
+                    {
                         use std::io::Write;
                         self.editor.companion.start(ctx);
                         let mut child = std::process::Command::new(exe)
@@ -191,65 +193,85 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
             ctx.request_repaint_after(Duration::from_millis(40));
         }
     }
-    let output = std::env::var_os("AEROS_REVIEW_DIR")
+    let output = std::env::var_os("COVALOS_REVIEW_DIR")
+        .or_else(|| std::env::var_os("AEROS_REVIEW_DIR"))
         .map(PathBuf::from)
-        .ok_or("set AEROS_REVIEW_DIR")?;
+        .ok_or("set COVALOS_REVIEW_DIR")?;
     std::fs::create_dir_all(&output)?;
-    let width = std::env::var("AEROS_REVIEW_WIDTH")
+    let width = std::env::var("COVALOS_REVIEW_WIDTH")
+        .or_else(|_| std::env::var("AEROS_REVIEW_WIDTH"))
         .ok()
         .and_then(|v| v.parse::<f32>().ok())
         .unwrap_or(1366.0);
-    let height = std::env::var("AEROS_REVIEW_HEIGHT")
+    let height = std::env::var("COVALOS_REVIEW_HEIGHT")
+        .or_else(|_| std::env::var("AEROS_REVIEW_HEIGHT"))
         .ok()
         .and_then(|v| v.parse::<f32>().ok())
         .unwrap_or(768.0);
-    let scale = std::env::var("AEROS_REVIEW_SCALE")
+    let scale = std::env::var("COVALOS_REVIEW_SCALE")
+        .or_else(|_| std::env::var("AEROS_REVIEW_SCALE"))
         .ok()
         .and_then(|v| v.parse::<f32>().ok())
         .unwrap_or(1.0);
     let fixture = tempfile::tempdir()?;
-    let root = fixture.path().join("aeros-workspace");
+    let config = fixture.path().join("config");
+    std::fs::create_dir_all(&config)?;
+    // SAFETY: set before any thread of this test reads the environment.
+    unsafe { std::env::set_var("COVALOS_CONFIG_DIR", &config) };
+    let root = fixture.path().join("covalos-workspace");
     std::fs::create_dir_all(root.join("src"))?;
     std::fs::write(root.join("src/main.rs"), SAMPLE)?;
     std::fs::write(root.join("src/workspace.rs"), "// Workspace operations\n")?;
-    std::fs::write(root.join("README.md"), "# Aeros workspace\n")?;
+    std::fs::write(root.join("README.md"), "# Covalos workspace\n")?;
     std::fs::write(
         root.join("Cargo.toml"),
-        "[package]\nname = \"aeros-workspace\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        "[package]\nname = \"covalos-workspace\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
     )?;
     let options = eframe::NativeOptions {
         viewport: ViewportBuilder::default()
             .with_inner_size([width, height])
             .with_decorations(false)
-            .with_title("AEROS visual review"),
+            .with_title("COVALOS visual review"),
         event_loop_builder: Some(Box::new(|builder| {
             builder.with_any_thread(true);
         })),
         ..Default::default()
     };
     eframe::run_native(
-        "AEROS visual review",
+        "COVALOS visual review",
         options,
         Box::new(move |cc| {
-            let requested_theme =
-                std::env::var("AEROS_REVIEW_THEME").unwrap_or_else(|_| "dark".into());
+            let requested_theme = std::env::var("COVALOS_REVIEW_THEME")
+                .or_else(|_| std::env::var("AEROS_REVIEW_THEME"))
+                .unwrap_or_else(|_| "nocturne".into());
             let mut preferences = Preferences::default();
             preferences.theme =
                 serde_json::from_str(&format!("\"{requested_theme}\"")).unwrap_or_default();
-            if let Ok(background) = std::env::var("AEROS_REVIEW_BACKGROUND") {
+            if let Ok(background) = std::env::var("COVALOS_REVIEW_BACKGROUND")
+                .or_else(|_| std::env::var("AEROS_REVIEW_BACKGROUND"))
+            {
                 preferences.identity.background =
                     serde_json::from_str(&format!("\"{background}\"")).unwrap_or_default();
             }
-            preferences.reduce_motion = std::env::var("AEROS_REVIEW_REDUCE").as_deref() == Ok("1");
-            preferences.compact = std::env::var("AEROS_REVIEW_COMPACT").as_deref() == Ok("1");
+            preferences.reduce_motion = std::env::var("COVALOS_REVIEW_REDUCE")
+                .or_else(|_| std::env::var("AEROS_REVIEW_REDUCE"))
+                .as_deref()
+                == Ok("1");
+            preferences.compact = std::env::var("COVALOS_REVIEW_COMPACT")
+                .or_else(|_| std::env::var("AEROS_REVIEW_COMPACT"))
+                .as_deref()
+                == Ok("1");
             let mut editor = Editor::new(&cc.egui_ctx, Some(root.clone()), preferences);
-            if std::env::var_os("AEROS_TEST_EXE").is_some() {
+            if std::env::var_os("COVALOS_TEST_EXE")
+                .or_else(|| std::env::var_os("AEROS_TEST_EXE"))
+                .is_some()
+            {
                 editor.companion.start(&cc.egui_ctx);
             }
             editor
                 .preferences
                 .recent
-                .push(root.parent().unwrap().join("aeros-series"));
+                .push(root.parent().unwrap().join("covalos-series"));
             Ok(Box::new(Review {
                 editor,
                 root,
@@ -285,7 +307,7 @@ fn main() -> eframe::Result {
     };
 
     eframe::run_native(
-        "AEROS Editor",
+        "COVALOS",
         options,
         Box::new(move |cc| {
             let editor = Editor::new(&cc.egui_ctx, root);
@@ -353,7 +375,9 @@ fn capture_recovered_conversation() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let output = PathBuf::from(
-        std::env::var_os("AEROS_RECOVERY_CAPTURE").ok_or("set AEROS_RECOVERY_CAPTURE")?,
+        std::env::var_os("COVALOS_RECOVERY_CAPTURE")
+            .or_else(|| std::env::var_os("AEROS_RECOVERY_CAPTURE"))
+            .ok_or("set COVALOS_RECOVERY_CAPTURE")?,
     );
     std::fs::create_dir_all(output.parent().unwrap())?;
     let fixture = tempfile::tempdir()?;
@@ -365,14 +389,14 @@ fn capture_recovered_conversation() -> Result<(), Box<dyn std::error::Error>> {
         viewport: ViewportBuilder::default()
             .with_inner_size([1366.0, 768.0])
             .with_decorations(false)
-            .with_title("AEROS recovery verification"),
+            .with_title("COVALOS recovery verification"),
         event_loop_builder: Some(Box::new(|b| {
             b.with_any_thread(true);
         })),
         ..Default::default()
     };
     eframe::run_native(
-        "AEROS recovery verification",
+        "COVALOS recovery verification",
         options,
         Box::new(move |cc| {
             let mut original =
@@ -463,7 +487,7 @@ fn capture_precision_interactions() -> Result<(), Box<dyn std::error::Error>> {
         Capture("companion"),
         DismissFixtureCompanion,
         Click("Settings"),
-        Click("Theme AEROS Light"),
+        Click("Theme COVALOS Light"),
         Check(7),
         Capture("light-settings"),
         Click("Settings"),
@@ -702,29 +726,35 @@ fn capture_precision_interactions() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let output = PathBuf::from(
-        std::env::var_os("AEROS_INTERACTION_DIR").ok_or("set AEROS_INTERACTION_DIR")?,
+        std::env::var_os("COVALOS_INTERACTION_DIR")
+            .or_else(|| std::env::var_os("AEROS_INTERACTION_DIR"))
+            .ok_or("set COVALOS_INTERACTION_DIR")?,
     );
     std::fs::create_dir_all(&output)?;
     let fixture = tempfile::tempdir()?;
-    let root = fixture.path().join("aeros-project");
+    let config = fixture.path().join("profile");
+    std::fs::create_dir_all(&config)?;
+    // SAFETY: set before any thread of this test reads the environment.
+    unsafe { std::env::set_var("COVALOS_CONFIG_DIR", &config) };
+    let root = fixture.path().join("covalos-project");
     std::fs::create_dir_all(root.join("src"))?;
     std::fs::write(root.join("src/main.rs"), SAMPLE)?;
     std::fs::write(
         root.join("Cargo.toml"),
-        "[package]\nname = \"aeros-project\"\n",
+        "[package]\nname = \"covalos-project\"\n",
     )?;
     let options = eframe::NativeOptions {
         viewport: ViewportBuilder::default()
             .with_inner_size([1366.0, 768.0])
             .with_decorations(false)
-            .with_title("AEROS Precision Interaction Review"),
+            .with_title("COVALOS Precision Interaction Review"),
         event_loop_builder: Some(Box::new(|b| {
             b.with_any_thread(true);
         })),
         ..Default::default()
     };
     eframe::run_native(
-        "AEROS Precision Interaction Review",
+        "COVALOS Precision Interaction Review",
         options,
         Box::new(move |cc| {
             let mut editor = Editor::new(&cc.egui_ctx, Some(root), Preferences::default());
