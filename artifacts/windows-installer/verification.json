@@ -1,0 +1,28 @@
+{
+  "installer": "Covalos-0.4.0-Windows-x64-Setup.exe",
+  "tests": [
+    "Installed executable and uninstaller exist",
+    "Installed executable matches release binary",
+    "Registered in Windows Apps with correct name and version",
+    "Install directory with spaces and Unicode preserved",
+    "App Paths points to installed executable",
+    "Quoted context command: *\\shell\\Covalos",
+    "Quoted context command: Directory\\shell\\Covalos",
+    "Quoted context command: Directory\\Background\\shell\\Covalos",
+    "Installed Library Studio CLI executes and returns JSON",
+    "Reinstall succeeds and retains release binary",
+    "Reinstall keeps preferences",
+    "Uninstall removes registration: HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{9734E261-3523-49A9-9571-D2AA32411CF1}_is1",
+    "Uninstall removes registration: HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\covalos.exe",
+    "Uninstall removes registration: HKCU\\Software\\Classes\\*\\shell\\Covalos",
+    "Uninstall removes registration: HKCU\\Software\\Classes\\Directory\\shell\\Covalos",
+    "Uninstall removes registration: HKCU\\Software\\Classes\\Directory\\Background\\shell\\Covalos",
+    "Uninstall removes the application",
+    "Uninstall preserves preferences",
+    "Uninstall preserves untracked files"
+  ],
+  "passed": true,
+  "shortcuts": "Compiled definitions inspected; /NOICONS avoids modifying the real Start menu and desktop.",
+  "installer_sha256": "5c6707319cd778b3fece670ad30a6b49502b0385937092d65c6e16d7f50b16c2",
+  "finished_at_utc": "2026-11-20T04:42:48.593Z"
+}
