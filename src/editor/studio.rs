@@ -1,9 +1,9 @@
-//! AEROS Library Studio: discover, inspect and install components without leaving the
+//! COVALOS Library Studio: discover, inspect and install components without leaving the
 //! editor. The catalog lives in `crate::library`; this module is the native interface.
 //!
 //! Third-party React components cannot run inside the Rust renderer, so their cards show
 //! verified metadata, a schematic of their category and the official source on demand.
-//! AEROS-native resources (backgrounds, springs, icon sets) render live previews and have
+//! COVALOS-native resources (backgrounds, springs, icon sets) render live previews and have
 //! a working playground.
 use super::{Editor, theme::*};
 use crate::library::{self as lib, Category, Compatibility, Native, Terms};
@@ -288,7 +288,7 @@ fn compat_color(c: &Compatibility) -> Color32 {
 
 fn compat_label(c: &Compatibility) -> &'static str {
     match c {
-        Compatibility::Bundled => "Included in AEROS",
+        Compatibility::Bundled => "Included in COVALOS",
         Compatibility::Ready => "Ready to install",
         Compatibility::NeedsSetup(_) => "Needs setup",
         Compatibility::Incompatible(_) => "Not compatible",
@@ -718,7 +718,7 @@ impl Editor {
                     empty_state(
                         ui,
                         if self.studio.catalog.sync.is_empty() {
-                            "Only AEROS resources are available offline. Sync the catalog to add the official registries."
+                            "Only COVALOS resources are available offline. Sync the catalog to add the official registries."
                         } else {
                             "No results. Try a broader term or turn off a filter."
                         },
@@ -751,7 +751,7 @@ impl Editor {
             .show(ui, |ui| {
                 section_title(
                     ui,
-                    "Native to AEROS",
+                    "Native to COVALOS",
                     "Rendered by the editor itself, available offline.",
                 );
                 let native: Vec<usize> = (0..self.studio.catalog.entries.len())
@@ -807,7 +807,7 @@ impl Editor {
                 section_title(
                     ui,
                     "Sources",
-                    "Official registries, licenses and what AEROS may store.",
+                    "Official registries, licenses and what COVALOS may store.",
                 );
                 self.source_cards(ui);
             });
@@ -1096,7 +1096,8 @@ impl Editor {
         let columns = ((width + 12.0) / 300.0).floor().max(1.0) as usize;
         let card_width = (width - 12.0 * (columns as f32 - 1.0)) / columns as f32;
         let mut open = None;
-        let sources: Vec<&lib::Source> = lib::SOURCES.iter().filter(|s| s.id != "aeros").collect();
+        let sources: Vec<&lib::Source> =
+            lib::SOURCES.iter().filter(|s| s.id != "covalos").collect();
         for row in sources.chunks(columns) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 12.0;
@@ -1386,7 +1387,7 @@ impl Editor {
         let terms = entry.source().terms;
         if entry.native.is_some() {
             ui.label(muted(
-                "Native AEROS resource. Its implementation lives in the AEROS source tree:",
+                "Native COVALOS resource. Its implementation lives in the COVALOS source tree:",
             ));
             ui.add_space(6.0);
             let snippet = native_snippet(entry.native);
@@ -1427,7 +1428,7 @@ impl Editor {
                     egui::Label::new(muted(if terms == Terms::Open {
                         "Loads the component source from its official registry and caches it locally (permissive license)."
                     } else {
-                        "Loads the component source from its official registry for viewing. AEROS does not store it: the license forbids redistribution."
+                        "Loads the component source from its official registry for viewing. COVALOS does not store it: the license forbids redistribution."
                     }))
                     .wrap(),
                 );
@@ -1454,7 +1455,7 @@ impl Editor {
                         if terms == Terms::Open {
                             tr("Cached locally.")
                         } else {
-                            tr("Not stored by AEROS.")
+                            tr("Not stored by COVALOS.")
                         }
                     )))
                     .wrap(),
@@ -1555,7 +1556,7 @@ impl Editor {
             None => {
                 empty_state(
                     ui,
-                    "Web components run in a browser runtime. AEROS keeps its renderer native, so a sandboxed web preview is not part of this build. Open the official demo, or install the component and run your project's dev server.",
+                    "Web components run in a browser runtime. COVALOS keeps its renderer native, so a sandboxed web preview is not part of this build. Open the official demo, or install the component and run your project's dev server.",
                 );
                 let docs = entry.docs_url();
                 if !docs.is_empty() && ui.button(tr("Open live demo")).clicked() {
@@ -1589,7 +1590,7 @@ impl Editor {
             (Some(Compatibility::Bundled), _) => {
                 empty_state(
                     ui,
-                    "Already part of AEROS. Use the Playground tab to tune and apply it.",
+                    "Already part of COVALOS. Use the Playground tab to tune and apply it.",
                 );
             }
             (Some(Compatibility::Incompatible(reason) | Compatibility::External(reason)), _) => {
@@ -1786,7 +1787,7 @@ impl Editor {
         let backup =
             dir.join("backups")
                 .join(format!("{}-{}", lib::now(), plan.entry.replace('/', "-")));
-        if let Err(error) = lib::backup(&project.root, &backup) {
+        if let Err(error) = lib::backup(&project.root, &backup, &plan.conflicts) {
             self.studio.install = Some((
                 plan.entry.clone(),
                 Install::Failed(format!("Backup failed: {error}")),
@@ -1992,7 +1993,7 @@ fn review(ui: &mut Ui, plan: &lib::Plan) {
     ui.add_space(4.0);
     ui.label(muted("Commands"));
     for command in &plan.commands {
-        code_block(ui, &command.join(" "), "txt");
+        command_block(ui, &command.join(" "));
     }
     let list = |ui: &mut Ui, title: &str, items: Vec<String>, color: Color32| {
         if items.is_empty() {
@@ -2069,6 +2070,37 @@ fn log_view(ui: &mut Ui, log: &str) {
                 .show(ui, |ui| {
                     ui.add(egui::Label::new(RichText::new(log).monospace().size(11.5)).wrap());
                 });
+        });
+}
+
+/// Render a shell command as clean wrapped selectable monospace text with a copy button,
+/// avoiding both syntax-highlighter error underlines and horizontal scrollbar overlap.
+fn command_block(ui: &mut Ui, command: &str) {
+    egui::Frame::new()
+        .fill(colors().inset)
+        .stroke(Stroke::new(1.0_f32, colors().border))
+        .corner_radius(CornerRadius::same(8))
+        .inner_margin(Margin::symmetric(10, 8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.add(
+                egui::Label::new(
+                    RichText::new(command)
+                        .monospace()
+                        .size(11.5)
+                        .color(colors().text),
+                )
+                .wrap()
+                .selectable(true),
+            );
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.small_button(tr("Copy")).clicked() {
+                        ui.ctx().copy_text(command.to_owned());
+                    }
+                });
+            });
         });
 }
 
@@ -2212,20 +2244,20 @@ mod tests {
         assert!(results.iter().all(|&i| {
             editor.studio.catalog.entries[i]
                 .id
-                .starts_with("aeros/spring")
+                .starts_with("covalos/spring")
         }));
-        editor.studio.select("aeros/dither-field");
+        editor.studio.select("covalos/dither-field");
         for tab in [Tab::Overview, Tab::Code, Tab::Playground, Tab::Install] {
             editor.studio.tab = tab;
             frame(&mut editor);
         }
-        editor.studio.state.toggle_favorite("aeros/dither-field");
+        editor.studio.state.toggle_favorite("covalos/dither-field");
         editor.studio.save_state();
         let reloaded = lib::State::load(Some(&folder.path().join("library")));
-        assert_eq!(reloaded.favorites, ["aeros/dither-field"]);
+        assert_eq!(reloaded.favorites, ["covalos/dither-field"]);
         assert_eq!(
             reloaded.recent.first().map(String::as_str),
-            Some("aeros/dither-field")
+            Some("covalos/dither-field")
         );
         Ok(())
     }
