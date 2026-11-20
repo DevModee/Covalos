@@ -1,13 +1,13 @@
-//! Visual evidence harness. Drives the real AEROS window through every screen named in
+//! Visual evidence harness. Drives the real COVALOS window through every screen named in
 //! the review brief and writes PNG captures plus a manifest into
 //! `artifacts/visual-review/`. Input is injected through eframe's raw input hook into
 //! a native window; screenshots come from the OpenGL framebuffer.
 //!
 //! Run (PowerShell):
-//!   $env:AEROS_EVIDENCE_DIR = "artifacts/visual-review"
+//!   $env:COVALOS_EVIDENCE_DIR = "artifacts/visual-review"
 //!   cargo test --release capture_visual_review -- --ignored
-//! Optional: AEROS_EVIDENCE_WIDTH / _HEIGHT / _SCALE, AEROS_EVIDENCE_SET=matrix (subset),
-//! AEROS_TEST_EXE (path to aeros-editor.exe, enables the approval fixture).
+//! Optional: COVALOS_EVIDENCE_WIDTH / _HEIGHT / _SCALE, COVALOS_EVIDENCE_SET=matrix (subset),
+//! COVALOS_TEST_EXE (path to covalos.exe, enables the approval fixture).
 use super::{Editor, Sidebar, identity, preferences::Preferences, theme};
 use eframe::egui::{
     self, Event, Key, Modifiers, PointerButton, UserData, ViewportBuilder, ViewportCommand,
@@ -557,21 +557,28 @@ impl Harness {
 #[ignore = "opens a native window and writes the visual evidence set"]
 fn capture_visual_review() -> Result<(), Box<dyn std::error::Error>> {
     use winit::platform::windows::EventLoopBuilderExtWindows;
-    let output =
-        PathBuf::from(std::env::var_os("AEROS_EVIDENCE_DIR").ok_or("set AEROS_EVIDENCE_DIR")?);
+    let output = PathBuf::from(
+        std::env::var_os("COVALOS_EVIDENCE_DIR")
+            .or_else(|| std::env::var_os("AEROS_EVIDENCE_DIR"))
+            .ok_or("set COVALOS_EVIDENCE_DIR")?,
+    );
     std::fs::create_dir_all(output.join("reports"))?;
-    let env = |k: &str, d: f32| {
+    let env = |k: &str, legacy: &str, d: f32| {
         std::env::var(k)
+            .or_else(|_| std::env::var(legacy))
             .ok()
             .and_then(|v| v.parse::<f32>().ok())
             .unwrap_or(d)
     };
     let (width, height, scale) = (
-        env("AEROS_EVIDENCE_WIDTH", 1366.0),
-        env("AEROS_EVIDENCE_HEIGHT", 768.0),
-        env("AEROS_EVIDENCE_SCALE", 1.0),
+        env("COVALOS_EVIDENCE_WIDTH", "AEROS_EVIDENCE_WIDTH", 1366.0),
+        env("COVALOS_EVIDENCE_HEIGHT", "AEROS_EVIDENCE_HEIGHT", 768.0),
+        env("COVALOS_EVIDENCE_SCALE", "AEROS_EVIDENCE_SCALE", 1.0),
     );
-    let matrix = std::env::var("AEROS_EVIDENCE_SET").as_deref() == Ok("matrix");
+    let matrix = std::env::var("COVALOS_EVIDENCE_SET")
+        .or_else(|_| std::env::var("AEROS_EVIDENCE_SET"))
+        .as_deref()
+        == Ok("matrix");
     let suffix = format!(
         "-{}x{}@{}",
         width as u32,
@@ -584,27 +591,28 @@ fn capture_visual_review() -> Result<(), Box<dyn std::error::Error>> {
     let config = fixture.path().join("config");
     std::fs::create_dir_all(&config)?;
     // SAFETY: set before any thread of this test reads the environment.
-    unsafe { std::env::set_var("AEROS_CONFIG_DIR", &config) };
+    unsafe { std::env::set_var("COVALOS_CONFIG_DIR", &config) };
     let root = fixture.path().join("orbit-ledger");
     write_fixture(&root)?;
     let options = eframe::NativeOptions {
         viewport: ViewportBuilder::default()
             .with_inner_size([width, height])
             .with_decorations(false)
-            .with_title("AEROS visual evidence"),
+            .with_icon(crate::brand::window_icon())
+            .with_title("COVALOS visual evidence"),
         event_loop_builder: Some(Box::new(|b| {
             b.with_any_thread(true);
         })),
         ..Default::default()
     };
     eframe::run_native(
-        "AEROS visual evidence",
+        "COVALOS visual evidence",
         options,
         Box::new(move |cc| {
             cc.egui_ctx.set_pixels_per_point(scale);
             let mut preferences = Preferences::default();
             preferences.language = super::i18n::Language::English;
-            preferences.recent = vec![root.with_file_name("aeros-site")];
+            preferences.recent = vec![root.with_file_name("covalos-site")];
             let mut editor = Editor::new(&cc.egui_ctx, Some(root.clone()), preferences);
             editor.sidebar = Sidebar::Files;
             Ok(Box::new(Harness {
@@ -663,13 +671,13 @@ fn library_steps() -> Vec<Step> {
         Act(|e, _, _| {
             e.studio.query.free_only = false;
             e.studio.view = View::Discover;
-            e.studio.select("aeros/dither-field");
+            e.studio.select("covalos/dither-field");
             e.library_open_playground_tab();
         }),
         Wait(0.8),
         Shot("06-native-dither-playground"),
         Act(|e, _, _| {
-            e.studio.select("aeros/spring-smooth");
+            e.studio.select("covalos/spring-smooth");
             e.library_open_playground_tab();
         }),
         Wait(0.5),
@@ -713,14 +721,17 @@ fn library_steps() -> Vec<Step> {
 #[ignore = "opens a native window, syncs the official registries and writes Library Studio evidence"]
 fn capture_library_review() -> Result<(), Box<dyn std::error::Error>> {
     use winit::platform::windows::EventLoopBuilderExtWindows;
-    let output =
-        PathBuf::from(std::env::var_os("AEROS_EVIDENCE_DIR").ok_or("set AEROS_EVIDENCE_DIR")?);
+    let output = PathBuf::from(
+        std::env::var_os("COVALOS_EVIDENCE_DIR")
+            .or_else(|| std::env::var_os("AEROS_EVIDENCE_DIR"))
+            .ok_or("set COVALOS_EVIDENCE_DIR")?,
+    );
     std::fs::create_dir_all(output.join("reports"))?;
     let fixture = tempfile::tempdir()?;
     let config = fixture.path().join("config");
     std::fs::create_dir_all(&config)?;
     // SAFETY: set before any thread of this test reads the environment.
-    unsafe { std::env::set_var("AEROS_CONFIG_DIR", &config) };
+    unsafe { std::env::set_var("COVALOS_CONFIG_DIR", &config) };
     // A temporary React + Tailwind + shadcn workspace; nothing is installed into it.
     let root = fixture.path().join("react-app");
     std::fs::create_dir_all(root.join("src/components/ui"))?;
@@ -743,14 +754,15 @@ fn capture_library_review() -> Result<(), Box<dyn std::error::Error>> {
         viewport: ViewportBuilder::default()
             .with_inner_size([width, height])
             .with_decorations(false)
-            .with_title("AEROS Library Studio evidence"),
+            .with_icon(crate::brand::window_icon())
+            .with_title("COVALOS Library Studio evidence"),
         event_loop_builder: Some(Box::new(|b| {
             b.with_any_thread(true);
         })),
         ..Default::default()
     };
     eframe::run_native(
-        "AEROS Library Studio evidence",
+        "COVALOS Library Studio evidence",
         options,
         Box::new(move |cc| {
             let mut preferences = Preferences::default();
@@ -810,7 +822,7 @@ fn write_fixture(root: &Path) -> std::io::Result<()> {
         ),
         (
             "README.md",
-            "# Orbit Ledger\n\nA small ledger used to review AEROS.\n",
+            "# Orbit Ledger\n\nA small ledger used to review COVALOS.\n",
         ),
         (".gitignore", "/target\nnode_modules/\n"),
         ("Dockerfile", "FROM rust:1.89\nWORKDIR /app\nCOPY . .\n"),
@@ -831,7 +843,12 @@ fn write_fixture(root: &Path) -> std::io::Result<()> {
     let git = |args: &[&str]| -> std::io::Result<()> {
         let status = std::process::Command::new("git")
             .current_dir(root)
-            .args(["-c", "core.autocrlf=false", "-c", "user.name=AEROS Fixture"])
+            .args([
+                "-c",
+                "core.autocrlf=false",
+                "-c",
+                "user.name=COVALOS Fixture",
+            ])
             .args([
                 "-c",
                 "user.email=fixture@example.invalid",
@@ -873,7 +890,7 @@ fn write_fixture(root: &Path) -> std::io::Result<()> {
         root.join("README.md"),
         "# Orbit Ledger
 
-A small ledger used to review AEROS.
+A small ledger used to review COVALOS.
 Now with largest balance.
 ",
     )?;

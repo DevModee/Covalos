@@ -1,4 +1,4 @@
-//! AEROS Motion: one vocabulary of durations and damped springs. Decorative motion never
+//! COVALOS Motion: one vocabulary of durations and damped springs. Decorative motion never
 //! gates input or owns keyboard focus, every value is interruptible and retargets from its
 //! current position and velocity, and the user's intensity setting (0 = instant) and
 //! Reduced Motion are honoured everywhere.

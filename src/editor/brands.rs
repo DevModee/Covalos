@@ -1,5 +1,5 @@
 //! Provider identity. Official marks are embedded as monochrome masks and shown only to
-//! identify the matching integration, never larger than the AEROS identity.
+//! identify the matching integration, never larger than the COVALOS identity.
 //!
 //! Sources and terms are recorded in `assets/brands/PROVENANCE.md`.
 use super::theme::colors;

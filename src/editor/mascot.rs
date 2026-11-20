@@ -1,6 +1,6 @@
-//! Luma, the AEROS companion: an original vector character drawn with egui meshes.
+//! Luma, the COVALOS companion: an original vector character drawn with egui meshes.
 //!
-//! A soft squircle pod wrapped by the AEROS open orbit. The pod turns to face the cursor
+//! A soft squircle pod wrapped by the COVALOS orbital ring. The pod turns to face the cursor
 //! (eyes and contour lines shift with perspective), breathes while idle and changes its
 //! expression, rim light and orbit rhythm with the agent state. Everything is procedural,
 //! resolution independent and costs a few hundred vertices per frame.
@@ -423,7 +423,7 @@ impl Orbit {
     }
     fn stroke(&self, painter: &Painter, back: bool, stroke: Stroke) {
         // The front of the ellipse has sin(a) >= 0. A small opening stays on the back:
-        // the AEROS orbit is never a closed circle.
+        // the COVALOS orbit is never a closed circle.
         let (from, to) = if back { (PI, TAU - 0.35) } else { (0.0, PI) };
         let points: Vec<Pos2> = (0..=36)
             .map(|i| self.point(from + (to - from) * i as f32 / 36.0))

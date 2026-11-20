@@ -2,8 +2,10 @@
 
 mod agent_bridge;
 mod assistant;
+mod brand;
 mod editor;
 mod library;
+mod paths;
 mod process;
 mod workspace;
 
@@ -12,7 +14,7 @@ use eframe::egui;
 fn main() -> eframe::Result {
     if std::env::args().nth(1).as_deref() == Some("--agent-hook") {
         if let Err(error) = agent_bridge::hook_entry() {
-            eprintln!("AEROS hook: {error}");
+            eprintln!("{} hook: {error}", brand::NAME);
         }
         return Ok(());
     }
@@ -24,6 +26,8 @@ fn main() -> eframe::Result {
     let root = std::env::args_os().nth(1).map(std::path::PathBuf::from);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
+            .with_title(brand::TITLE)
+            .with_icon(brand::window_icon())
             .with_inner_size([1390.0, 860.0])
             .with_decorations(false)
             .with_min_inner_size([800.0, 480.0]),

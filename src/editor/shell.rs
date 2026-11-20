@@ -65,6 +65,7 @@ enum Action {
     Detach,
     DockAll,
     Library,
+    About,
 }
 
 const ACTIONS: &[(Action, &str)] = &[
@@ -80,6 +81,7 @@ const ACTIONS: &[(Action, &str)] = &[
     (Action::Detach, "Detach to floating editor"),
     (Action::DockAll, "Dock all"),
     (Action::Library, "Open Library Studio"),
+    (Action::About, "About COVALOS"),
 ];
 
 enum Selection {
@@ -170,7 +172,7 @@ impl Editor {
                         .root
                         .as_deref()
                         .map(workspace::filename)
-                        .unwrap_or_else(|| tr("Welcome to AEROS").to_owned());
+                        .unwrap_or_else(|| tr("Welcome to COVALOS").to_owned());
                     ui.horizontal(|ui| {
                         let text_width = width;
                         ui.allocate_ui_with_layout(
@@ -415,6 +417,50 @@ impl Editor {
             });
     }
 
+    pub(super) fn about_window(&mut self, ctx: &egui::Context) {
+        if !self.about_open {
+            return;
+        }
+        egui::Window::new(tr("About COVALOS"))
+            .open(&mut self.about_open)
+            .collapsible(false)
+            .resizable(false)
+            .fixed_size(egui::vec2(400.0, 240.0))
+            .constrain_to(ctx.content_rect().shrink(16.0))
+            .show(ctx, |ui| {
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    let (_, icon_rect) = ui.allocate_space(egui::vec2(56.0, 56.0));
+                    super::assets::paint(ui, icon_rect, "covalos_app");
+                    ui.add_space(12.0);
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(crate::brand::NAME).size(HEADING).strong());
+                        ui.label(muted(format!("v{}", crate::brand::VERSION)));
+                        ui.add_space(4.0);
+                        ui.add(
+                            egui::Label::new(secondary(tr(crate::brand::DESCRIPTION))).wrap(),
+                        );
+                    });
+                });
+                ui.add_space(14.0);
+                ui.separator();
+                ui.add_space(10.0);
+                ui.add(
+                    egui::Label::new(muted(tr(
+                        "Nocturne Design System · Native Rust renderer (eframe/egui).",
+                    )))
+                    .wrap(),
+                );
+                ui.add_space(6.0);
+                ui.add(
+                    egui::Label::new(muted(tr(
+                        "Third-party assets: Lucide Icons (ISC), Material Icon Theme (MIT), Geist & IBM Plex Mono (OFL).",
+                    )))
+                    .wrap(),
+                );
+            });
+    }
+
     pub(super) fn palette_modal(&mut self, ctx: &egui::Context) {
         let Some(mut palette) = self.palette.take() else {
             return;
@@ -577,6 +623,7 @@ impl Editor {
                 }
                 Action::DockAll => self.dock_all(ctx.input(|i| i.time)),
                 Action::Library => self.open_library(),
+                Action::About => self.about_open = true,
             },
             Some(Selection::File(file)) => self.open_file(file),
             Some(Selection::Project(root)) => self.request(Pending::OpenWorkspace(root), ctx),
