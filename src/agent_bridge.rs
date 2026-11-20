@@ -1,4 +1,4 @@
-//! AEROS-owned hook bridge. Compatible with canonical Coucou/Claude lifecycle payloads.
+//! COVALOS-owned hook bridge. Compatible with canonical Coucou/Claude lifecycle payloads.
 //! No provider settings, credentials, or unrelated processes are modified.
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -56,20 +56,7 @@ pub(crate) fn now_ms() -> u64 {
         .min(u128::from(u64::MAX)) as u64
 }
 pub(crate) fn directory() -> Option<PathBuf> {
-    if let Some(dir) = std::env::var_os("AEROS_CONFIG_DIR").filter(|s| !s.is_empty()) {
-        return Some(PathBuf::from(dir).join("agent-bridge"));
-    }
-    let home = || std::env::var_os("HOME").map(PathBuf::from);
-    let base = if cfg!(windows) {
-        std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
-    } else if cfg!(target_os = "macos") {
-        home().map(|p| p.join("Library/Application Support"))
-    } else {
-        std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .or_else(|| home().map(|p| p.join(".config")))
-    };
-    base.map(|p| p.join("AerosEditor/agent-bridge"))
+    crate::paths::agent_bridge_dir()
 }
 fn bounded(value: Option<&str>, limit: usize) -> String {
     value.unwrap_or_default().chars().take(limit).collect()
@@ -393,17 +380,19 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires AEROS_TEST_EXE; tests the actual hook subprocess without executing a provider tool"]
+    #[ignore = "requires COVALOS_TEST_EXE; tests the actual hook subprocess without executing a provider tool"]
     fn hook_subprocess_round_trip() -> io::Result<()> {
         use std::process::{Command, Stdio};
-        let exe = std::env::var_os("AEROS_TEST_EXE").expect("set AEROS_TEST_EXE");
+        let exe = std::env::var_os("COVALOS_TEST_EXE")
+            .or_else(|| std::env::var_os("AEROS_TEST_EXE"))
+            .expect("set COVALOS_TEST_EXE");
         let profile = tempfile::tempdir()?;
         let dir = profile.path().join("agent-bridge");
         fs::create_dir_all(&dir)?;
         fs::write(dir.join("ui-heartbeat"), "test")?;
         let mut child = Command::new(exe)
             .arg("--agent-hook")
-            .env("AEROS_CONFIG_DIR", profile.path())
+            .env("COVALOS_CONFIG_DIR", profile.path())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()?;

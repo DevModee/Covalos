@@ -65,20 +65,7 @@ impl Default for Preferences {
 
 impl Preferences {
     pub(super) fn path() -> Option<PathBuf> {
-        if let Some(path) = std::env::var_os("AEROS_CONFIG_DIR").filter(|p| !p.is_empty()) {
-            return Some(PathBuf::from(path).join("editor.json"));
-        }
-        let home = || std::env::var_os("HOME").map(PathBuf::from);
-        let base = if cfg!(windows) {
-            std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
-        } else if cfg!(target_os = "macos") {
-            home().map(|p| p.join("Library/Application Support"))
-        } else {
-            std::env::var_os("XDG_CONFIG_HOME")
-                .map(PathBuf::from)
-                .or_else(|| home().map(|p| p.join(".config")))
-        };
-        base.map(|p| p.join("AerosEditor/editor.json"))
+        crate::paths::preferences_path()
     }
 
     pub(super) fn load(path: &Path) -> io::Result<Self> {
