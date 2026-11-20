@@ -12,14 +12,14 @@ use std::{
     process::{Command, Stdio},
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{AtomicBool, Ordering},
         mpsc,
     },
     thread,
     time::{Duration, Instant},
 };
 
-use eframe::egui::{self, Align, Key, Layout, Margin, RichText, ScrollArea, TextEdit, Ui};
+use eframe::egui::{self, Align, Layout, Margin, RichText, ScrollArea, Ui};
 
 use super::{Editor, theme::*};
 
@@ -33,33 +33,12 @@ enum Event {
 pub(super) struct Job {
     events: mpsc::Receiver<Event>,
     stop: Arc<AtomicBool>,
-    pid: Arc<AtomicU32>,
-    started: Instant,
-    command: String,
 }
 
 impl Drop for Job {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
     }
-}
-
-impl Job {
-    fn pid(&self) -> Option<u32> {
-        Some(self.pid.load(Ordering::Relaxed)).filter(|p| *p != 0)
-    }
-}
-
-struct Term {
-    id: u32,
-    cwd: PathBuf,
-    log: String,
-    input: String,
-    job: Option<Job>,
-    history: Vec<String>,
-    recall: Option<usize>,
-    /// Local URLs the processes printed (dev servers announce them).
-    urls: Vec<String>,
 }
 
 pub(super) struct Port {
@@ -81,7 +60,10 @@ struct Tunnel {
 
 #[derive(Default)]
 pub(super) struct Terminals {
-    tabs: Vec<Term>,
+    tabs: Vec<super::pty::Shell>,
+    error: Option<String>,
+    preview: Option<String>,
+    busy_at: Option<Instant>,
     active: usize,
     second: Option<usize>,
     next: u32,
@@ -102,7 +84,7 @@ fn append(log: &mut String, text: &str) {
     }
 }
 
-fn strip_ansi(text: &str) -> String {
+pub(super) fn strip_ansi(text: &str) -> String {
     use std::sync::OnceLock;
     static ANSI: OnceLock<regex::Regex> = OnceLock::new();
     let re = ANSI.get_or_init(|| {
@@ -115,12 +97,12 @@ fn strip_ansi(text: &str) -> String {
 }
 
 /// `http://localhost:5173/`-style addresses printed by a process.
-fn local_urls(text: &str) -> Vec<String> {
+pub(super) fn local_urls(text: &str) -> Vec<String> {
     use std::sync::OnceLock;
     static URL: OnceLock<regex::Regex> = OnceLock::new();
     let re = URL.get_or_init(|| {
         regex::Regex::new(
-            r"https?://(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(?::\d{2,5})?(?:/[^\s'\x22<>]*)?",
+            r"https?://(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(?::\d{2,5})(?:/[^\s'\x22<>]*)?",
         )
         .expect("static regex")
     });
@@ -134,69 +116,10 @@ fn local_urls(text: &str) -> Vec<String> {
         .collect()
 }
 
-fn base64(bytes: &[u8]) -> String {
-    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let b = [
-            chunk[0],
-            *chunk.get(1).unwrap_or(&0),
-            *chunk.get(2).unwrap_or(&0),
-        ];
-        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-        out.push(T[(n >> 18) as usize & 63] as char);
-        out.push(T[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 {
-            T[(n >> 6) as usize & 63] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            T[n as usize & 63] as char
-        } else {
-            '='
-        });
-    }
-    out
-}
-
-fn powershell(cwd: &Path, script: &str) -> Command {
-    let full = format!(
-        "$ProgressPreference='SilentlyContinue'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; {script}"
-    );
-    let utf16: Vec<u8> = full.encode_utf16().flat_map(u16::to_le_bytes).collect();
-    #[cfg(windows)]
-    let mut command = {
-        let mut c = Command::new("powershell.exe");
-        c.args([
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-        ])
-        .args(["-EncodedCommand", &base64(&utf16)]);
-        c
-    };
-    #[cfg(not(windows))]
-    let mut command = {
-        let _ = utf16;
-        let mut c = Command::new("sh");
-        c.args(["-c", script]);
-        c
-    };
-    command
-        .current_dir(cwd)
-        .env("BROWSER", "none")
-        .env("FORCE_COLOR", "0");
-    command
-}
-
-fn spawn(mut command: Command, label: String, ctx: egui::Context) -> Job {
+fn spawn(mut command: Command, ctx: egui::Context) -> Job {
     let (tx, events) = mpsc::sync_channel(512);
     let stop = Arc::new(AtomicBool::new(false));
-    let pid = Arc::new(AtomicU32::new(0));
-    let (thread_stop, thread_pid) = (stop.clone(), pid.clone());
+    let thread_stop = stop.clone();
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -227,7 +150,6 @@ fn spawn(mut command: Command, label: String, ctx: egui::Context) -> Job {
             }
         };
         covalos_engine::process::contain(&child);
-        thread_pid.store(child.id(), Ordering::Relaxed);
         let read = |reader: Box<dyn Read + Send>| {
             let tx = tx.clone();
             let ctx = ctx.clone();
@@ -278,115 +200,7 @@ fn spawn(mut command: Command, label: String, ctx: egui::Context) -> Job {
         }
         send(Event::Finished(status));
     });
-    Job {
-        events,
-        stop,
-        pid,
-        started: Instant::now(),
-        command: label,
-    }
-}
-
-impl Term {
-    fn new(id: u32, cwd: PathBuf) -> Self {
-        Self {
-            id,
-            cwd,
-            log: String::new(),
-            input: String::new(),
-            job: None,
-            history: Vec::new(),
-            recall: None,
-            urls: Vec::new(),
-        }
-    }
-
-    fn title(&self) -> String {
-        match &self.job {
-            Some(job) => job
-                .command
-                .split_whitespace()
-                .take(3)
-                .collect::<Vec<_>>()
-                .join(" "),
-            None => self.cwd.file_name().map_or_else(
-                || "PowerShell".to_owned(),
-                |n| n.to_string_lossy().into_owned(),
-            ),
-        }
-    }
-
-    fn poll(&mut self) {
-        let Some(job) = &self.job else { return };
-        let mut finished = None;
-        for event in job.events.try_iter().take(512) {
-            match event {
-                Event::Output(text) => {
-                    for url in local_urls(&text) {
-                        if !self.urls.contains(&url) {
-                            self.urls.push(url);
-                        }
-                    }
-                    append(&mut self.log, &text);
-                }
-                Event::Finished(status) => {
-                    finished = Some(status);
-                    break;
-                }
-            }
-        }
-        if let Some(status) = finished {
-            if !status.is_empty() {
-                append(&mut self.log, &format!("{status}\n"));
-            }
-            self.job = None;
-        }
-    }
-
-    fn run(&mut self, ctx: &egui::Context) {
-        let line = std::mem::take(&mut self.input);
-        let script = line.trim();
-        self.recall = None;
-        if script.is_empty() {
-            return;
-        }
-        if self.history.last().is_none_or(|h| h != script) {
-            self.history.push(script.to_owned());
-        }
-        append(
-            &mut self.log,
-            &format!("PS {}> {script}\n", self.cwd.display()),
-        );
-        if matches!(script, "cls" | "clear" | "Clear-Host") {
-            self.log.clear();
-            return;
-        }
-        let target = script
-            .strip_prefix("cd ")
-            .or_else(|| script.strip_prefix("Set-Location "))
-            .or_else(|| script.strip_prefix("sl "))
-            .map(|t| t.trim().trim_matches(['"', '\'']));
-        if let Some(target) = target.or((script == "cd..").then_some("..")) {
-            let next = if target == "~" {
-                std::env::var_os("USERPROFILE").map_or_else(|| self.cwd.clone(), PathBuf::from)
-            } else {
-                self.cwd.join(target)
-            };
-            match std::fs::canonicalize(&next) {
-                Ok(path) if path.is_dir() => {
-                    self.cwd = crate::agents_runtime::plain(&path);
-                }
-                _ => append(&mut self.log, &format!("Cannot find path '{target}'.\n")),
-            }
-            return;
-        }
-        self.urls.clear();
-        self.job = Some(spawn(
-            powershell(&self.cwd, script),
-            script.to_owned(),
-            ctx.clone(),
-        ));
-    }
+    Job { events, stop }
 }
 
 // ------------------------------------------------------------------ ports
@@ -554,8 +368,24 @@ fn trycloudflare(text: &str) -> Option<String> {
 
 impl Terminals {
     pub(super) fn poll(&mut self) {
-        for term in &mut self.tabs {
-            term.poll();
+        if !self.tabs.is_empty()
+            && self
+                .busy_at
+                .is_none_or(|t| t.elapsed() > Duration::from_millis(900))
+        {
+            self.busy_at = Some(Instant::now());
+            let table = processes();
+            for tab in &mut self.tabs {
+                let Some(pid) = tab.pid() else { continue };
+                tab.busy = table
+                    .iter()
+                    .find(|(_, (parent, name))| *parent == pid && name != "conhost.exe")
+                    .map(|(_, (_, name))| name.clone());
+            }
+        }
+        self.tabs.retain(|t| !t.exited());
+        if self.active >= self.tabs.len() {
+            self.active = self.tabs.len().saturating_sub(1);
         }
         for tunnel in &mut self.tunnels {
             for event in tunnel.job.events.try_iter().take(256) {
@@ -566,7 +396,10 @@ impl Terminals {
                         }
                         append(&mut tunnel.log, &text);
                     }
-                    Event::Finished(_) => tunnel.done = true,
+                    Event::Finished(status) => {
+                        append(&mut tunnel.log, &status);
+                        tunnel.done = true;
+                    }
                 }
             }
         }
@@ -578,7 +411,7 @@ impl Terminals {
     }
 
     pub(super) fn busy(&self) -> bool {
-        self.tabs.iter().any(|t| t.job.is_some()) || !self.tunnels.is_empty()
+        self.tabs.iter().any(|t| t.busy.is_some()) || !self.tunnels.is_empty()
     }
 
     fn refresh_ports(&mut self) {
@@ -587,7 +420,7 @@ impl Terminals {
         let roots: Vec<(u32, u32)> = self
             .tabs
             .iter()
-            .filter_map(|t| t.job.as_ref().and_then(Job::pid).map(|p| (p, t.id)))
+            .filter_map(|t| t.pid().map(|p| (p, t.id)))
             .collect();
         let owner = |mut pid: u32| {
             for _ in 0..32 {
@@ -615,26 +448,38 @@ impl Terminals {
             .collect();
     }
 
-    fn ensure_tab(&mut self, root: &Path) {
-        if self.tabs.is_empty() {
-            self.next += 1;
-            self.tabs.push(Term::new(self.next, root.to_path_buf()));
-            self.active = 0;
+    fn ensure_tab(&mut self, root: &Path, ctx: &egui::Context) {
+        if self.tabs.is_empty() && self.error.is_none() && self.next == 0 {
+            self.open_tab(root.to_path_buf(), ctx);
         }
     }
 
-    /// A new project resets idle tabs to its folder; running ones keep going.
-    pub(super) fn workspace_changed(&mut self, root: Option<&Path>) {
-        if let Some(root) = root {
-            for tab in self.tabs.iter_mut().filter(|t| t.job.is_none()) {
-                tab.cwd = root.to_path_buf();
+    fn open_tab(&mut self, cwd: PathBuf, ctx: &egui::Context) {
+        self.next += 1;
+        match super::pty::Shell::spawn(self.next, cwd, ctx) {
+            Ok(shell) => {
+                self.tabs.push(shell);
+                self.active = self.tabs.len() - 1;
+                self.focus_input = true;
+                self.error = None;
             }
+            Err(e) => self.error = Some(e),
+        }
+    }
+
+    /// A new project closes idle shells; busy ones (servers) keep running.
+    pub(super) fn workspace_changed(&mut self, _root: Option<&Path>) {
+        self.tabs.retain(|t| t.busy.is_some());
+        self.active = 0;
+        self.second = None;
+        if self.tabs.is_empty() {
+            self.next = 0;
         }
     }
 }
 
 impl Editor {
-    /// Terminal section of the tools panel: tabs, output and the prompt.
+    /// Terminal section of the tools panel: tabs of interactive shells.
     pub(super) fn terminal_view(&mut self, ui: &mut Ui) {
         let Some(root) = self.root.clone() else {
             ui.label(muted(tr("Open a project to run commands.")));
@@ -642,13 +487,17 @@ impl Editor {
         };
         let ctx = ui.ctx().clone();
         let terms = &mut self.terminals;
-        terms.ensure_tab(&root);
+        terms.ensure_tab(&root, &ctx);
         let mut close = None;
+        let mut add = false;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             for (i, term) in terms.tabs.iter().enumerate() {
-                let running = term.job.is_some();
-                let text = format!("{}{}", if running { "● " } else { "" }, term.title());
+                let text = format!(
+                    "{}{}",
+                    if term.busy.is_some() { "● " } else { "" },
+                    term.title()
+                );
                 let selected = i == terms.active || Some(i) == terms.second;
                 let response = ui
                     .selectable_label(selected, RichText::new(text).size(SMALL))
@@ -666,20 +515,14 @@ impl Editor {
                 .on_hover_text(tr("New terminal"))
                 .clicked()
             {
-                terms.next += 1;
-                let cwd = terms
-                    .tabs
-                    .get(terms.active)
-                    .map_or(root.clone(), |t| t.cwd.clone());
-                terms.tabs.push(Term::new(terms.next, cwd));
-                terms.active = terms.tabs.len() - 1;
-                terms.focus_input = true;
+                add = true;
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui
-                    .small_button(tr("Close"))
-                    .on_hover_text(tr("Close this terminal and stop its process"))
-                    .clicked()
+                if !terms.tabs.is_empty()
+                    && ui
+                        .small_button(tr("Close"))
+                        .on_hover_text(tr("Close this terminal and stop its process"))
+                        .clicked()
                 {
                     close = Some(terms.active);
                 }
@@ -701,13 +544,41 @@ impl Editor {
                         };
                     }
                 }
+                if let Some(term) = terms.tabs.get(terms.active) {
+                    if ui
+                        .small_button(tr("Copy output"))
+                        .on_hover_text(tr("Copy the terminal text, including scrollback"))
+                        .clicked()
+                    {
+                        ui.ctx().copy_text(term.contents());
+                    }
+                    if ui
+                        .small_button("Ctrl+C")
+                        .on_hover_text(tr("Interrupt the running program"))
+                        .clicked()
+                    {
+                        term.interrupt();
+                        terms.focus_input = true;
+                    }
+                    for url in term.urls().into_iter().rev().take(2) {
+                        if ui
+                            .small_button(format!("{} {url}", tr("Preview")))
+                            .on_hover_text(tr("Open in the Covalos preview"))
+                            .clicked()
+                        {
+                            terms.preview = Some(url);
+                        }
+                    }
+                }
             });
         });
-        if let Some(i) = close {
+        if add {
+            terms.open_tab(root.clone(), &ctx);
+        }
+        if let Some(i) = close.filter(|i| *i < terms.tabs.len()) {
             terms.tabs.remove(i);
             terms.second = None;
             terms.active = terms.active.min(terms.tabs.len().saturating_sub(1));
-            terms.ensure_tab(&root);
         }
         if terms
             .second
@@ -715,27 +586,32 @@ impl Editor {
         {
             terms.second = None;
         }
-        let focus = std::mem::take(&mut terms.focus_input);
-        let active = terms.active;
-        let preview = match terms.second {
-            Some(second) => {
-                let (a, b) = if second < active {
-                    let (left, right) = terms.tabs.split_at_mut(active);
-                    (&mut left[second], &mut right[0])
-                } else {
-                    let (left, right) = terms.tabs.split_at_mut(second);
-                    (&mut right[0], &mut left[active])
-                };
-                let mut found = None;
-                ui.columns(2, |cols| {
-                    found = term_pane(&mut cols[0], a, &ctx, false);
-                    found = term_pane(&mut cols[1], b, &ctx, focus).or(found.take());
-                });
-                found
+        if let Some(error) = &terms.error {
+            ui.colored_label(colors().error, error.clone());
+        }
+        if terms.tabs.is_empty() {
+            if ui.button(tr("New terminal")).clicked() {
+                terms.open_tab(root, &ctx);
             }
-            None => term_pane(ui, &mut terms.tabs[active], &ctx, focus),
-        };
-        if let Some(url) = preview {
+            return;
+        }
+        let focus = std::mem::take(&mut terms.focus_input);
+        let rect = ui.available_rect_before_wrap();
+        let active = terms.active;
+        match terms.second {
+            Some(second) => {
+                let gap = 8.0;
+                let half = (rect.width() - gap) / 2.0;
+                let left = egui::Rect::from_min_size(rect.min, egui::vec2(half, rect.height()));
+                let right =
+                    egui::Rect::from_min_max(egui::pos2(left.right() + gap, rect.top()), rect.max);
+                terms.tabs[second].show(ui, left, false);
+                terms.tabs[active].show(ui, right, focus);
+            }
+            None => terms.tabs[active].show(ui, rect, focus),
+        }
+        ui.allocate_rect(rect, egui::Sense::hover());
+        if let Some(url) = self.terminals.preview.take() {
             self.open_preview(&url);
         }
     }
@@ -900,13 +776,9 @@ impl Editor {
                     });
             });
         if let Some(tab) = stop_tab
-            && let Some(job) = terms
-                .tabs
-                .iter()
-                .find(|t| t.id == tab)
-                .and_then(|t| t.job.as_ref())
+            && let Some(term) = terms.tabs.iter().find(|t| t.id == tab)
         {
-            job.stop.store(true, Ordering::Relaxed);
+            term.interrupt();
         }
         if let Some(url) = preview {
             self.open_preview(&url);
@@ -966,7 +838,7 @@ impl Editor {
             "--url",
             &format!("http://localhost:{port}"),
         ]);
-        let job = spawn(command, format!("cloudflared {port}"), ctx.clone());
+        let job = spawn(command, ctx.clone());
         self.terminals.tunnels.push(Tunnel {
             port,
             url: None,
@@ -977,159 +849,28 @@ impl Editor {
     }
 }
 
-/// One terminal: scrollback, a status line and the prompt. Returns a URL the
-/// user asked to preview.
-fn term_pane(ui: &mut Ui, term: &mut Term, ctx: &egui::Context, focus: bool) -> Option<String> {
-    let mut preview = None;
-    let input_height = 30.0;
-    let status_height = if term.job.is_some() || !term.urls.is_empty() {
-        26.0
-    } else {
-        0.0
-    };
-    let height = (ui.available_height() - input_height - status_height).max(40.0);
-    egui::Frame::new()
-        .fill(colors().inset)
-        .corner_radius(6)
-        .inner_margin(Margin::symmetric(8, 6))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ScrollArea::vertical()
-                .id_salt(("term-log", term.id))
-                .max_height(height - 12.0)
-                .stick_to_bottom(true)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    if term.log.is_empty() {
-                        ui.label(
-                            muted(tr(
-                                "PowerShell · type a command, e.g. npm install or npm run dev",
-                            ))
-                            .size(SMALL),
-                        );
-                    }
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(&term.log)
-                                .monospace()
-                                .size(12.0)
-                                .color(colors().text),
-                        )
-                        .wrap()
-                        .selectable(true),
-                    );
-                });
-        });
-    if status_height > 0.0 {
-        ui.horizontal(|ui| {
-            if let Some(job) = &term.job {
-                busy_indicator(ui);
-                let secs = job.started.elapsed().as_secs();
-                ui.label(
-                    muted(format!("{} · {}:{:02}", job.command, secs / 60, secs % 60)).size(SMALL),
-                );
-            }
-            for url in term.urls.iter().take(2) {
-                if ui
-                    .small_button(format!("{} {url}", tr("Preview")))
-                    .on_hover_text(tr("Open in the Covalos preview"))
-                    .clicked()
-                {
-                    preview = Some(url.clone());
-                }
-            }
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if let Some(job) = &term.job
-                    && ui
-                        .button(tr("Stop"))
-                        .on_hover_text(tr("Stop the process and its children"))
-                        .clicked()
-                {
-                    job.stop.store(true, Ordering::Relaxed);
-                }
-            });
-        });
-    }
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new("PS>")
-                .monospace()
-                .size(12.0)
-                .color(colors().accent),
-        );
-        let enabled = term.job.is_none();
-        let id = egui::Id::new(("term-input", term.id));
-        let history_key = if enabled && ui.memory(|m| m.has_focus(id)) {
-            ui.input(|i| {
-                if i.key_pressed(Key::ArrowUp) {
-                    Some(true)
-                } else if i.key_pressed(Key::ArrowDown) {
-                    Some(false)
-                } else {
-                    None
-                }
-            })
-        } else {
-            None
-        };
-        if let Some(up) = history_key
-            && !term.history.is_empty()
-        {
-            let last = term.history.len() - 1;
-            let next = match (term.recall, up) {
-                (None, true) => Some(last),
-                (Some(i), true) => Some(i.saturating_sub(1)),
-                (Some(i), false) if i < last => Some(i + 1),
-                _ => None,
-            };
-            term.recall = next;
-            term.input = next.map(|i| term.history[i].clone()).unwrap_or_default();
-        }
-        let hint = if enabled {
-            term.cwd.display().to_string()
-        } else {
-            tr("Running… open another tab with + to keep working").to_owned()
-        };
-        let response = ui.add_enabled(
-            enabled,
-            TextEdit::singleline(&mut term.input)
-                .id(id)
-                .font(egui::TextStyle::Monospace)
-                .hint_text(hint)
-                .desired_width(f32::INFINITY)
-                .char_limit(8192),
-        );
-        if focus {
-            response.request_focus();
-        }
-        if enabled && response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-            term.run(ctx);
-            response.request_focus();
-        }
-    });
-    preview
-}
-
 #[cfg(test)]
 impl Editor {
-    pub(super) fn harness_run(&mut self, command: &str, ctx: &egui::Context) {
+    pub(super) fn harness_open_terminal(&mut self, ctx: &egui::Context) {
         let root = self.root.clone().expect("project");
-        let terms = &mut self.terminals;
-        terms.next += 1;
-        let mut term = Term::new(terms.next, root);
-        term.input = command.to_owned();
-        term.run(ctx);
-        terms.tabs.push(term);
-        terms.active = terms.tabs.len() - 1;
+        self.terminals.open_tab(root, ctx);
+    }
+
+    pub(super) fn harness_prompt_ready(&self) -> bool {
+        self.terminals
+            .tabs
+            .last()
+            .is_some_and(|t| t.contents().contains("PS "))
+    }
+
+    pub(super) fn harness_type(&mut self, text: &str) {
+        if let Some(term) = self.terminals.tabs.last() {
+            term.write(text.as_bytes());
+        }
     }
 
     pub(super) fn harness_url(&self) -> Option<String> {
-        self.terminals
-            .tabs
-            .iter()
-            .flat_map(|t| t.urls.iter())
-            .next()
-            .cloned()
+        self.terminals.tabs.iter().flat_map(|t| t.urls()).next()
     }
 
     pub(super) fn harness_ask_tunnel(&mut self, port: u16) {
@@ -1152,11 +893,7 @@ impl Editor {
         for tunnel in &self.terminals.tunnels {
             tunnel.job.stop.store(true, Ordering::Relaxed);
         }
-        for tab in &self.terminals.tabs {
-            if let Some(job) = &tab.job {
-                job.stop.store(true, Ordering::Relaxed);
-            }
-        }
+        self.terminals.tabs.clear();
     }
 }
 
@@ -1177,28 +914,6 @@ mod tests {
             trycloudflare("INF |  https://quiet-river-12.trycloudflare.com  |"),
             Some("https://quiet-river-12.trycloudflare.com".into())
         );
-        assert_eq!(base64(b"Ma"), "TWE=");
-        assert_eq!(base64(b"Man"), "TWFu");
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn powershell_runs_in_the_tab_directory_and_cd_is_tracked() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir(dir.path().join("web")).unwrap();
-        let ctx = egui::Context::default();
-        let mut term = Term::new(1, dir.path().to_path_buf());
-        term.input = "cd web".into();
-        term.run(&ctx);
-        assert!(term.cwd.ends_with("web"), "{}", term.cwd.display());
-        term.input = "Write-Output \"$((Get-Location).Path)|ok\"".into();
-        term.run(&ctx);
-        let until = Instant::now() + Duration::from_secs(30);
-        while term.job.is_some() && Instant::now() < until {
-            term.poll();
-            thread::sleep(Duration::from_millis(20));
-        }
-        assert!(term.log.contains("web|ok"), "{}", term.log);
     }
 
     #[cfg(windows)]
