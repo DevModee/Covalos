@@ -116,11 +116,14 @@ impl Journal {
     /// off so later appends never follow a corrupt line.
     pub fn open(path: &Path) -> Result<(Self, Vec<Record>)> {
         let (records, valid_len) = scan(&std::fs::read(path)?)?;
-        let file = OpenOptions::new().append(true).open(path)?;
-        if file.metadata()?.len() != valid_len as u64 {
-            file.set_len(valid_len as u64)?;
-            file.sync_data()?;
+        if std::fs::metadata(path)?.len() != valid_len as u64 {
+            // Truncate through a write handle: on Windows an append-only
+            // handle lacks FILE_WRITE_DATA and `set_len` is refused.
+            let truncate = OpenOptions::new().write(true).open(path)?;
+            truncate.set_len(valid_len as u64)?;
+            truncate.sync_all()?;
         }
+        let file = OpenOptions::new().append(true).open(path)?;
         Ok((
             Self {
                 file,
