@@ -222,7 +222,19 @@ fn turn_args(spec: &ProviderSpec, turn: &Turn) -> Result<Vec<String>> {
             }
         }
         Headless::CodexExecJson => {
-            args.extend(["exec", "--json", "--color", "never", "--sandbox"].map(String::from));
+            // Projects are often not git repositories yet (a fresh `npm create`);
+            // the sandbox below still limits what Codex may touch.
+            args.extend(
+                [
+                    "exec",
+                    "--skip-git-repo-check",
+                    "--json",
+                    "--color",
+                    "never",
+                    "--sandbox",
+                ]
+                .map(String::from),
+            );
             args.push(
                 match turn.sandbox {
                     Sandbox::ReadOnly => "read-only",
@@ -510,6 +522,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(codex.args.first().map(String::as_str), Some("exec"));
+        assert!(codex.args.iter().any(|a| a == "--skip-git-repo-check"));
         assert!(
             codex
                 .args

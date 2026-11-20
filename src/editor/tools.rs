@@ -759,6 +759,7 @@ impl Editor {
         self.preferences.tools_open = true;
         self.tools.tab = match name {
             "ports" => Tab::Ports,
+            "problems" => Tab::Problems,
             "output" => Tab::Output,
             _ => Tab::Terminal,
         };
