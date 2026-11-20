@@ -113,7 +113,10 @@ impl Executor for CliExecutor {
             .stderr(Stdio::piped())
             .spawn()
         {
-            Ok(child) => child,
+            Ok(child) => {
+                crate::process::contain(&child);
+                child
+            }
             Err(error) => return fail(format!("could not start {}: {error}", spec.label), true),
         };
         let mut stdin = child.stdin.take().expect("piped");
@@ -188,9 +191,14 @@ impl Executor for CliExecutor {
                 },
                 true,
             ),
-            None if completed => Outcome::Succeeded {
-                summary: last_message.chars().take(2_000).collect(),
-            },
+            None if completed => {
+                for draft in crate::executor::context_lines(&last_message) {
+                    channel.report(Report::Publish(draft));
+                }
+                Outcome::Succeeded {
+                    summary: last_message.chars().take(2_000).collect(),
+                }
+            }
             None => fail(
                 format!("provider ended without a result ({status}) {stderr}"),
                 true,

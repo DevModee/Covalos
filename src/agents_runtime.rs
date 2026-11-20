@@ -101,17 +101,46 @@ fn run_capture(mut command: Command, timeout: Duration) -> Result<String, String
     Ok(reader.join().unwrap_or_default())
 }
 
-/// Status line without e-mail addresses or other identifiers.
+/// Status line without e-mail addresses, CLI warnings or log noise.
 pub(crate) fn sanitize_status(text: &str) -> String {
     text.lines()
         .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.contains('@'))
+        .filter(|l| {
+            !l.is_empty()
+                && !l.contains('@')
+                && !l.starts_with("WARNING")
+                && !l.starts_with("(codex_home")
+                && !l.starts_with('"')
+                && !l.chars().next().is_some_and(|c| c.is_ascii_digit())
+        })
         .take(3)
         .collect::<Vec<_>>()
         .join(" · ")
         .chars()
         .take(200)
         .collect()
+}
+
+/// Whether a CLI status text says the account is not signed in.
+pub(crate) fn signed_out(status: &str) -> bool {
+    let lower = status.to_ascii_lowercase();
+    lower.contains("not logged in")
+        || lower.contains("not signed in")
+        || lower.contains("expired")
+        || lower.contains("log in again")
+}
+
+/// Strips the Windows verbatim prefix that `canonicalize` adds; git,
+/// provider CLIs and hook commands expect ordinary paths.
+pub(crate) fn plain(path: &Path) -> PathBuf {
+    let text = path.to_string_lossy();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
+    } else {
+        path.to_path_buf()
+    }
 }
 
 fn status_command(spec: &ProviderSpec) -> Option<&'static [&'static str]> {
@@ -418,7 +447,12 @@ impl Runtime {
     }
 
     pub(crate) fn program(&self, kind: &ProviderKind) -> Option<PathBuf> {
-        self.detections.get(kind).and_then(|d| d.program.clone())
+        // Detection runs in the background (version and sign-in probes); the
+        // binary lookup itself is cheap, so never block a turn on it.
+        self.detections
+            .get(kind)
+            .and_then(|d| d.program.clone())
+            .or_else(|| self.registry.get(kind).ok().and_then(launch::discover))
     }
 
     fn spec_for(&self, id: &AccountId) -> Result<(Account, ProviderSpec, PathBuf), String> {
@@ -550,6 +584,10 @@ impl Runtime {
 
     /// Sign-in state of one account through the CLI's own status command.
     pub(crate) fn account_status(&self, id: &AccountId) -> Result<String, String> {
+        self.account_status_raw(id).map(|t| sanitize_status(&t))
+    }
+
+    fn account_status_raw(&self, id: &AccountId) -> Result<String, String> {
         let (account, spec, program) = self.spec_for(id)?;
         let args = status_command(&spec).ok_or("No official status command.")?;
         let plan = account_plan(
@@ -572,7 +610,7 @@ impl Runtime {
             }
         }
         command.args(args);
-        run_capture(command, Duration::from_secs(20)).map(|t| sanitize_status(&t))
+        run_capture(command, Duration::from_secs(20))
     }
 
     // ------------------------------------------------------------ sessions
@@ -631,7 +669,8 @@ impl Runtime {
         self.dir.join("worktrees").join(format!("{name}-{tag}"))
     }
 
-    pub(crate) fn create_session(&mut self, new: NewSession) -> Result<usize, String> {
+    pub(crate) fn create_session(&mut self, mut new: NewSession) -> Result<usize, String> {
+        new.root = plain(&new.root);
         let account = self
             .profiles
             .get(&new.account)
@@ -689,15 +728,9 @@ impl Runtime {
             log: Vec::new(),
             context_cursor: 0,
         });
-        let where_ = format!(
-            "{}{}",
-            session.meta.workdir.display(),
-            session
-                .meta
-                .worktree_branch
-                .as_deref()
-                .map(|b| format!(" (worktree, branch {b})"))
-                .unwrap_or_default()
+        let where_ = session.meta.worktree_branch.as_deref().map_or_else(
+            || "project folder".to_owned(),
+            |b| format!("own worktree, branch {b}"),
         );
         session.log(
             "created",
@@ -913,6 +946,7 @@ impl Runtime {
             .collect();
         let mut agents = Vec::new();
         let mut programs = BTreeMap::new();
+        let mut prefs = Preferences::default();
         for account in self.profiles.accounts() {
             let Ok(spec) = self.registry.get(&account.provider) else {
                 continue;
@@ -924,11 +958,22 @@ impl Runtime {
             if let Some(p) = &program {
                 programs.insert(account.provider.clone(), p.clone());
             }
+            // Never hand work to an account its own CLI reports as signed out.
+            if account.method != ConnectionMethod::ApiKey
+                && self
+                    .account_status_raw(&account.id)
+                    .is_ok_and(|status| signed_out(&status))
+            {
+                prefs.excluded.insert(account.id.clone());
+            }
             agents.push(AgentProfile::from_account(
                 account,
                 all.clone(),
                 Some(program.is_some()),
             ));
+        }
+        if agents.iter().all(|a| prefs.excluded.contains(&a.account)) {
+            return Err("Every configured account reports that it is signed out.".into());
         }
         if agents.is_empty() {
             return Err("Add at least one Claude Code or Codex account first.".into());
@@ -967,7 +1012,7 @@ impl Runtime {
         Ok(Deps {
             roles,
             agents,
-            prefs: Preferences::default(),
+            prefs,
             executor: Arc::new(executor),
             workspace,
             config: EngineConfig {
@@ -997,6 +1042,7 @@ impl Runtime {
         if goal.is_empty() {
             return Err("Describe the goal first.".into());
         }
+        let root = &plain(root);
         let deps = self.deps(root, worktrees, max_parallel)?;
         let spec = match mode {
             PlanMode::Template => TemplatePlanner
@@ -1161,6 +1207,17 @@ impl Runtime {
     }
 }
 
+impl Drop for Runtime {
+    /// Losing the runtime stops its agents instead of orphaning them.
+    fn drop(&mut self) {
+        for session in &self.sessions {
+            if let Some((_, cancel)) = &session.turn {
+                cancel.store(true, Ordering::SeqCst);
+            }
+        }
+    }
+}
+
 fn apply_event(session: &mut LiveSession, event: AgentEvent) {
     match event {
         AgentEvent::Started {
@@ -1277,7 +1334,10 @@ fn spawn_turn(
             .stderr(Stdio::piped())
             .spawn()
         {
-            Ok(child) => child,
+            Ok(child) => {
+                covalos_engine::process::contain(&child);
+                child
+            }
             Err(error) => {
                 send(TurnMsg::Exit {
                     ok: false,
@@ -1376,6 +1436,33 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn verbatim_prefix_is_removed() {
+        assert_eq!(
+            plain(Path::new(r"\\?\C:\work\repo")),
+            PathBuf::from(r"C:\work\repo")
+        );
+        assert_eq!(
+            plain(Path::new(r"\\?\UNC\srv\share")),
+            PathBuf::from(r"\\srv\share")
+        );
+        assert_eq!(plain(Path::new(r"C:\x")), PathBuf::from(r"C:\x"));
+    }
+
+    #[test]
+    fn codex_warnings_do_not_hide_status() {
+        let raw = "WARNING: proceeding, even though we could not create PATH aliases\n\
+                   (codex_home: x)\nNot logged in";
+        assert_eq!(sanitize_status(raw), "Not logged in");
+        assert!(signed_out(raw));
+    }
+
+    #[test]
+    fn signed_out_status_is_recognized() {
+        assert!(signed_out("Login: Expired — log in again · Not logged in."));
+        assert!(!signed_out("Logged in using ChatGPT"));
+    }
 
     #[test]
     fn status_text_drops_identifiers() {

@@ -271,6 +271,14 @@ impl Hub {
     pub(super) fn focus_approvals(&mut self) {
         self.tab = HubTab::Tasks;
     }
+    #[cfg(test)]
+    pub(super) fn focus_agents(&mut self, page: &str) {
+        self.tab = match page {
+            "accounts" => HubTab::Accounts,
+            "sessions" => HubTab::Sessions,
+            _ => HubTab::Autonomy,
+        };
+    }
     pub(super) fn snapshots(
         &self,
         workspace: &Chat,
@@ -415,6 +423,12 @@ impl Editor {
             ui.available_rect_before_wrap(),
             &self.preferences.identity,
             mood,
+        );
+        // Reading scrim: the identity field stays as ambience, never behind text.
+        ui.painter().rect_filled(
+            ui.available_rect_before_wrap(),
+            0,
+            colors().canvas.gamma_multiply(0.84),
         );
         let ctx = ui.ctx().clone();
         let width = ui.available_width().min(1280.0);
