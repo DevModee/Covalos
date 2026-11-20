@@ -1,6 +1,6 @@
 # Provider marks
 
-AEROS shows these marks only to identify the matching integration in Agent Hub, the chat and the Companion. They are never combined with the AEROS identity, recoloured beyond the published brand colour, or shown larger than AEROS. All marks remain the property of their owners.
+COVALOS shows these marks only to identify the matching integration in Agent Hub, the chat and the Companion. They are never combined with the COVALOS identity, recoloured beyond the published brand colour, or shown larger than COVALOS. All marks remain the property of their owners.
 
 | File | Mark | Source | Notes |
 | --- | --- | --- | --- |
@@ -16,6 +16,6 @@ PNG files are 128 px white RGBA masks rasterised with resvg from the SVG next to
 
 | File | Product | Source | Terms |
 | --- | --- | --- | --- |
-| `openai.svg` / `openai.png` | OpenAI Blossom, used to identify Codex | `OpenAI-logos/SVGs/OAI_OpenAI-Blossom_White.svg` from the official package `https://cdn.openai.com/brand/openai-logos.zip`, downloaded on 2026-11-19 after the owner accepted the brand terms at [openai.com/brand](https://openai.com/brand/) | Shown only beside the Codex integration it identifies, monochrome (tinted with the interface text colour, never a brand or accent colour), never larger or more prominent than the AEROS mark, unmodified shape with its clear space. |
+| `openai.svg` / `openai.png` | OpenAI Blossom, used to identify Codex | `OpenAI-logos/SVGs/OAI_OpenAI-Blossom_White.svg` from the official package `https://cdn.openai.com/brand/openai-logos.zip`, downloaded on 2026-11-19 after the owner accepted the brand terms at [openai.com/brand](https://openai.com/brand/) | Shown only beside the Codex integration it identifies, monochrome (tinted with the interface text colour, never a brand or accent colour), never larger or more prominent than the COVALOS mark, unmodified shape with its clear space. |
 
-ChatGPT has no separate integration in AEROS, so no ChatGPT mark is shown. The same Blossom identifies Codex because OpenAI publishes it as the mark for its products; no other logo is substituted.
+ChatGPT has no separate integration in COVALOS, so no ChatGPT mark is shown. The same Blossom identifies Codex because OpenAI publishes it as the mark for its products; no other logo is substituted.
