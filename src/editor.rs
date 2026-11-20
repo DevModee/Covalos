@@ -16,6 +16,7 @@ mod hub;
 mod i18n;
 mod icons;
 mod identity;
+mod lsp;
 mod mascot;
 mod motion;
 mod panels;
@@ -111,6 +112,7 @@ pub struct Editor {
     identity: identity::Identity,
     tools: tools::Tools,
     terminals: terminal::Terminals,
+    lsp: lsp::Lsp,
     preview: preview::Preview,
     palette: Option<shell::Palette>,
     chat: hub::Chat,
@@ -202,6 +204,7 @@ impl Editor {
             identity: identity::Identity::default(),
             tools: tools::Tools::default(),
             terminals: terminal::Terminals::default(),
+            lsp: lsp::Lsp::default(),
             preview: preview::Preview::default(),
             palette: None,
             chat: hub::Chat::default(),
@@ -781,6 +784,7 @@ impl Editor {
         self.tools.poll();
         self.terminals.poll();
         self.check_disk(ctx);
+        self.lsp_sync(ctx);
         if self.terminals.busy() {
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
         }

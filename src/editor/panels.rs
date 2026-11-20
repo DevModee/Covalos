@@ -839,6 +839,7 @@ impl Editor {
                         ui.fonts_mut(|fonts| fonts.layout_job(job))
                     };
                     let decorations = ui.painter().add(egui::Shape::Noop);
+                    let popup_key = super::lsp::popup_keys(ui, &self.lsp, id, &doc.path);
                     let output = TextEdit::multiline(&mut doc.text)
                         .id(id)
                         .code_editor()
@@ -848,6 +849,7 @@ impl Editor {
                         .desired_width(ui.available_width())
                         .layouter(&mut layouter)
                         .show(ui);
+                    super::lsp::after_edit(ui, &mut self.lsp, doc, id, &output, popup_key);
                     if focus {
                         output.response.request_focus();
                     }

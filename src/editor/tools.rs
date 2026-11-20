@@ -24,6 +24,7 @@ enum Tab {
     #[default]
     Terminal,
     Ports,
+    Problems,
     Output,
     AgentLog,
 }
@@ -692,16 +693,20 @@ impl Editor {
                 ui.horizontal(|ui| {
                     let (_, mark) = ui.allocate_space(egui::vec2(20.0, 24.0));
                     draw_icon(ui.painter(), mark.center(), Icon::Terminal, colors().muted);
+                    let (errors, warnings) = self.lsp.counts();
+                    let problems = if errors + warnings > 0 {
+                        format!("{} {}", tr("Problems"), errors + warnings)
+                    } else {
+                        tr("Problems").to_owned()
+                    };
                     for (tab, label) in [
-                        (Tab::Terminal, "Terminal"),
-                        (Tab::Ports, "Ports"),
-                        (Tab::Output, "Output"),
-                        (Tab::AgentLog, "Agent log"),
+                        (Tab::Terminal, tr("Terminal").to_owned()),
+                        (Tab::Ports, tr("Ports").to_owned()),
+                        (Tab::Problems, problems),
+                        (Tab::Output, tr("Output").to_owned()),
+                        (Tab::AgentLog, tr("Agent log").to_owned()),
                     ] {
-                        if ui
-                            .selectable_label(self.tools.tab == tab, tr(label))
-                            .clicked()
-                        {
+                        if ui.selectable_label(self.tools.tab == tab, label).clicked() {
                             self.tools.tab = tab;
                         }
                     }
@@ -715,6 +720,7 @@ impl Editor {
                 match self.tools.tab {
                     Tab::Terminal => self.terminal_view(ui),
                     Tab::Ports => self.ports_view(ui),
+                    Tab::Problems => self.problems_view(ui),
                     Tab::Output | Tab::AgentLog => {
                         let log = if self.tools.tab == Tab::Output {
                             &self.tools.output
