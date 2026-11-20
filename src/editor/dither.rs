@@ -127,14 +127,22 @@ pub(super) fn paint(painter: &egui::Painter, rect: egui::Rect, frame: Frame) {
 }
 
 struct Gpu {
-    program: glow::Program,
+    field: glow::Program,
+    compose: glow::Program,
     vao: glow::VertexArray,
+    texture: glow::Texture,
+    framebuffer: glow::Framebuffer,
+    cells: (i32, i32),
 }
 
 thread_local! {
     static GPU: RefCell<Option<Gpu>> = const { RefCell::new(None) };
 }
 
+/// Two passes, like React Bits' Pixel Blast: the expensive field (noise, brush, ripples)
+/// is evaluated once per dither cell into a small texture; the full-resolution pass only
+/// reads it and applies the Bayer threshold and the pixel mask. This keeps the per-frame
+/// GPU and driver cost proportional to the number of cells, not screen pixels.
 fn draw(info: egui::PaintCallbackInfo, gl: &Arc<glow::Context>, frame: &Frame) {
     use glow::HasContext as _;
     if !available() {
@@ -152,12 +160,84 @@ fn draw(info: egui::PaintCallbackInfo, gl: &Arc<glow::Context>, frame: &Frame) {
                 }
             }
         }
-        let Some(gpu) = slot.as_ref() else { return };
+        let Some(gpu) = slot.as_mut() else { return };
         let viewport = info.viewport_in_pixels();
+        let clip = info.clip_rect_in_pixels();
         let ppp = info.pixels_per_point;
+        let pixel = (frame.pixel * ppp).round().max(2.0);
+        let cells = (
+            (viewport.width_px as f32 / pixel).ceil().max(1.0) as i32,
+            (viewport.height_px as f32 / pixel).ceil().max(1.0) as i32,
+        );
         unsafe {
-            gl.use_program(Some(gpu.program));
-            let u = |name: &str| gl.get_uniform_location(gpu.program, name);
+            if gpu.cells != cells {
+                gl.bind_texture(glow::TEXTURE_2D, Some(gpu.texture));
+                gl.tex_image_2d(
+                    glow::TEXTURE_2D,
+                    0,
+                    glow::RGBA8 as i32,
+                    cells.0,
+                    cells.1,
+                    0,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    glow::PixelUnpackData::Slice(None),
+                );
+                gpu.cells = cells;
+            }
+            let previous = gl.get_parameter_framebuffer(glow::DRAW_FRAMEBUFFER_BINDING);
+            // Pass 1: field per cell into the offscreen texture.
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(gpu.framebuffer));
+            gl.viewport(0, 0, cells.0, cells.1);
+            gl.disable(glow::SCISSOR_TEST);
+            gl.disable(glow::BLEND);
+            gl.use_program(Some(gpu.field));
+            let u = |name: &str| gl.get_uniform_location(gpu.field, name);
+            gl.uniform_2_f32(
+                u("uSize").as_ref(),
+                viewport.width_px as f32,
+                viewport.height_px as f32,
+            );
+            gl.uniform_1_f32(u("uScale").as_ref(), ppp);
+            gl.uniform_1_f32(u("uTime").as_ref(), frame.time);
+            gl.uniform_1_f32(u("uPixel").as_ref(), pixel);
+            gl.uniform_1_f32(u("uRows").as_ref(), cells.1 as f32);
+            gl.uniform_1_f32(u("uDensity").as_ref(), frame.density);
+            gl.uniform_1_f32(
+                u("uVariant").as_ref(),
+                if frame.variant == Variant::Bloom {
+                    1.0
+                } else {
+                    0.0
+                },
+            );
+            let trail: Vec<f32> = frame.trail.iter().flatten().copied().collect();
+            let ripples: Vec<f32> = frame.ripples.iter().flatten().copied().collect();
+            gl.uniform_3_f32_slice(u("uTrail[0]").as_ref(), &trail);
+            gl.uniform_3_f32_slice(u("uRipples[0]").as_ref(), &ripples);
+            gl.bind_vertex_array(Some(gpu.vao));
+            gl.draw_arrays(glow::TRIANGLES, 0, 3);
+            // Pass 2: compose the dithered pixels into egui's framebuffer.
+            gl.bind_framebuffer(glow::FRAMEBUFFER, previous);
+            gl.viewport(
+                viewport.left_px,
+                viewport.from_bottom_px,
+                viewport.width_px,
+                viewport.height_px,
+            );
+            gl.enable(glow::SCISSOR_TEST);
+            gl.scissor(
+                clip.left_px,
+                clip.from_bottom_px,
+                clip.width_px,
+                clip.height_px,
+            );
+            gl.enable(glow::BLEND);
+            gl.use_program(Some(gpu.compose));
+            let u = |name: &str| gl.get_uniform_location(gpu.compose, name);
+            gl.active_texture(glow::TEXTURE0);
+            gl.bind_texture(glow::TEXTURE_2D, Some(gpu.texture));
+            gl.uniform_1_i32(u("uCells").as_ref(), 0);
             gl.uniform_2_f32(
                 u("uOrigin").as_ref(),
                 viewport.left_px as f32,
@@ -168,19 +248,9 @@ fn draw(info: egui::PaintCallbackInfo, gl: &Arc<glow::Context>, frame: &Frame) {
                 viewport.width_px as f32,
                 viewport.height_px as f32,
             );
-            gl.uniform_1_f32(u("uScale").as_ref(), ppp);
-            gl.uniform_1_f32(u("uTime").as_ref(), frame.time);
-            gl.uniform_1_f32(u("uPixel").as_ref(), (frame.pixel * ppp).round().max(2.0));
+            gl.uniform_1_f32(u("uPixel").as_ref(), pixel);
+            gl.uniform_2_i32(u("uCellCount").as_ref(), cells.0, cells.1);
             gl.uniform_1_f32(u("uStrength").as_ref(), frame.strength);
-            gl.uniform_1_f32(u("uDensity").as_ref(), frame.density);
-            gl.uniform_1_f32(
-                u("uVariant").as_ref(),
-                if frame.variant == Variant::Bloom {
-                    1.0
-                } else {
-                    0.0
-                },
-            );
             gl.uniform_1_f32(u("uLight").as_ref(), if frame.light { 1.0 } else { 0.0 });
             gl.uniform_3_f32(
                 u("uInk").as_ref(),
@@ -194,11 +264,6 @@ fn draw(info: egui::PaintCallbackInfo, gl: &Arc<glow::Context>, frame: &Frame) {
                 frame.accent.g(),
                 frame.accent.b(),
             );
-            let trail: Vec<f32> = frame.trail.iter().flatten().copied().collect();
-            let ripples: Vec<f32> = frame.ripples.iter().flatten().copied().collect();
-            gl.uniform_3_f32_slice(u("uTrail[0]").as_ref(), &trail);
-            gl.uniform_3_f32_slice(u("uRipples[0]").as_ref(), &ripples);
-            gl.bind_vertex_array(Some(gpu.vao));
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
             gl.bind_vertex_array(None);
         }
@@ -215,37 +280,87 @@ unsafe fn compile(gl: &glow::Context) -> Result<Gpu, String> {
         "{}{}",
         version.version_declaration(),
         if matches!(version, egui_glow::ShaderVersion::Es300) {
-            "precision highp float;\n"
+            "precision highp float;\nprecision highp int;\n"
         } else {
             ""
         }
     );
-    unsafe {
-        let program = gl.create_program()?;
-        let mut shaders = Vec::new();
-        for (kind, body) in [
-            (glow::VERTEX_SHADER, VERTEX),
-            (glow::FRAGMENT_SHADER, FRAGMENT),
-        ] {
-            let shader = gl.create_shader(kind)?;
-            gl.shader_source(shader, &format!("{header}{body}"));
-            gl.compile_shader(shader);
-            if !gl.get_shader_compile_status(shader) {
-                return Err(gl.get_shader_info_log(shader));
+    let link = |fragment: &str| -> Result<glow::Program, String> {
+        unsafe {
+            let program = gl.create_program()?;
+            let mut shaders = Vec::new();
+            for (kind, body) in [
+                (glow::VERTEX_SHADER, VERTEX),
+                (glow::FRAGMENT_SHADER, fragment),
+            ] {
+                let shader = gl.create_shader(kind)?;
+                gl.shader_source(shader, &format!("{header}{body}"));
+                gl.compile_shader(shader);
+                if !gl.get_shader_compile_status(shader) {
+                    return Err(gl.get_shader_info_log(shader));
+                }
+                gl.attach_shader(program, shader);
+                shaders.push(shader);
             }
-            gl.attach_shader(program, shader);
-            shaders.push(shader);
+            gl.link_program(program);
+            if !gl.get_program_link_status(program) {
+                return Err(gl.get_program_info_log(program));
+            }
+            for shader in shaders {
+                gl.detach_shader(program, shader);
+                gl.delete_shader(shader);
+            }
+            Ok(program)
         }
-        gl.link_program(program);
-        if !gl.get_program_link_status(program) {
-            return Err(gl.get_program_info_log(program));
-        }
-        for shader in shaders {
-            gl.detach_shader(program, shader);
-            gl.delete_shader(shader);
-        }
+    };
+    let field = link(FIELD)?;
+    let compose = link(COMPOSE)?;
+    unsafe {
         let vao = gl.create_vertex_array()?;
-        Ok(Gpu { program, vao })
+        let texture = gl.create_texture()?;
+        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+        for (key, value) in [
+            (glow::TEXTURE_MIN_FILTER, glow::NEAREST),
+            (glow::TEXTURE_MAG_FILTER, glow::NEAREST),
+            (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
+            (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
+        ] {
+            gl.tex_parameter_i32(glow::TEXTURE_2D, key, value as i32);
+        }
+        gl.tex_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            glow::RGBA8 as i32,
+            1,
+            1,
+            0,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            glow::PixelUnpackData::Slice(None),
+        );
+        let previous = gl.get_parameter_framebuffer(glow::DRAW_FRAMEBUFFER_BINDING);
+        let framebuffer = gl.create_framebuffer()?;
+        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+        gl.framebuffer_texture_2d(
+            glow::FRAMEBUFFER,
+            glow::COLOR_ATTACHMENT0,
+            glow::TEXTURE_2D,
+            Some(texture),
+            0,
+        );
+        let complete = gl.check_framebuffer_status(glow::FRAMEBUFFER) == glow::FRAMEBUFFER_COMPLETE;
+        gl.bind_framebuffer(glow::FRAMEBUFFER, previous);
+        if !complete {
+            return Err("offscreen framebuffer incomplete".into());
+        }
+        Ok(Gpu {
+            field,
+            compose,
+            vao,
+            texture,
+            framebuffer,
+            cells: (1, 1),
+        })
     }
 }
 
@@ -256,26 +371,18 @@ void main() {
 }
 "#;
 
-const FRAGMENT: &str = r#"
-uniform vec2 uOrigin;
+/// Pass 1, one fragment per dither cell: r = field value / 1.25, g = cursor/ripple light.
+const FIELD: &str = r#"
 uniform vec2 uSize;
 uniform float uScale;
 uniform float uTime;
 uniform float uPixel;
-uniform float uStrength;
+uniform float uRows;
 uniform float uDensity;
 uniform float uVariant;
-uniform float uLight;
-uniform vec3 uInk;
-uniform vec3 uAccent;
 uniform vec3 uTrail[16];
 uniform vec3 uRipples[6];
 out vec4 fragColor;
-
-// Ordered dithering thresholds, built recursively from the 2x2 Bayer matrix.
-float bayer2(vec2 a) { a = floor(a); return fract(a.x * 0.5 + a.y * a.y * 0.75); }
-float bayer4(vec2 a) { return bayer2(0.5 * a) * 0.25 + bayer2(a); }
-float bayer8(vec2 a) { return bayer4(0.5 * a) * 0.25 + bayer2(a); }
 
 float hash(vec3 p) {
     p = fract(p * 0.1031);
@@ -307,11 +414,8 @@ float clouds(vec2 uv, float t) {
 }
 
 void main() {
-    // Pixel coordinates inside the background rect, origin at its top-left like egui.
-    vec2 px = gl_FragCoord.xy - uOrigin;
-    px.y = uSize.y - px.y;
-    vec2 cell = floor(px / uPixel);
-    vec2 local = fract(px / uPixel);
+    // Cell index with a top-left origin, like egui.
+    vec2 cell = vec2(floor(gl_FragCoord.x), uRows - 1.0 - floor(gl_FragCoord.y));
     vec2 center = (cell + 0.5) * uPixel / uScale;   // in points
     float aspect = uSize.y / uScale;
     vec2 uv = center / aspect;
@@ -320,7 +424,7 @@ void main() {
     if (uVariant < 0.5) {
         vec2 drift = vec2(uTime * 0.035, -uTime * 0.018);
         field = clouds(uv * 2.4 + drift, uTime * 0.05);
-        field = smoothstep(0.30, 0.78, field) * (0.62 + uDensity * 0.6) - 0.08;
+        field = smoothstep(0.36, 0.74, field) * (0.55 + uDensity * 0.7) - 0.05;
     } else {
         // Bloom: a large soft form breathing in from the lower right.
         vec2 c = vec2(uSize.x / uScale * 0.72, uSize.y / uScale * 0.62) / aspect;
@@ -332,14 +436,19 @@ void main() {
         field *= 0.75 + uDensity * 0.5;
     }
 
-    // Cursor brush: recent pointer samples light the pixels they pass, then fade.
+    // Cursor brush: recent pointer samples, joined into segments so a fast stroke stays
+    // continuous, light the cells they pass and fade.
     float heat = 0.0;
     for (int i = 0; i < 16; i++) {
-        vec3 s = uTrail[i];
-        if (s.z >= 1.0) continue;
-        float d = distance(center, s.xy) / 70.0;
-        float life = 1.0 - s.z;
-        heat = max(heat, exp(-d * d * 2.2) * life * life);
+        vec3 a = uTrail[i];
+        if (a.z >= 1.0) continue;
+        vec3 b = uTrail[min(i + 1, 15)];
+        if (b.z >= 1.0) b = a;
+        vec2 ab = b.xy - a.xy;
+        float h = clamp(dot(center - a.xy, ab) / max(dot(ab, ab), 1e-3), 0.0, 1.0);
+        float d = distance(center, a.xy + ab * h) / 64.0;
+        float life = 1.0 - mix(a.z, b.z, h);
+        heat = max(heat, exp(-d * d * 1.6) * life);
     }
     // Click ripples: dithered rings that travel outward and dissolve.
     float ring = 0.0;
@@ -349,18 +458,49 @@ void main() {
         float radius = c.z * 260.0;
         float r = distance(center, c.xy);
         float band = (r - radius) / (26.0 + c.z * 30.0);
-        ring = max(ring, exp(-band * band) * exp(-c.z * 1.25));
+        ring = max(ring, 1.2 * exp(-band * band) * exp(-c.z * 1.1));
         // A short-lived solid blot at the click point.
         ring = max(ring, (1.0 - smoothstep(0.0, 40.0 + c.z * 30.0, r)) * exp(-c.z * 3.5));
     }
     float lit = clamp(max(heat, ring), 0.0, 1.0);
-    float value = clamp(field + lit * 0.95, 0.0, 1.2);
+    float value = clamp(field + lit * 0.95, 0.0, 1.25);
+    fragColor = vec4(value / 1.25, lit, 0.0, 1.0);
+}
+"#;
 
-    float threshold = bayer8(cell);
-    float on = step(threshold, value);
-    // Square pixels with a visible gutter, like the reference.
+/// Pass 2, full resolution: ordered dither threshold, square pixel mask, vignette, color.
+const COMPOSE: &str = r#"
+uniform sampler2D uCells;
+uniform vec2 uOrigin;
+uniform vec2 uSize;
+uniform float uPixel;
+uniform ivec2 uCellCount;
+uniform float uStrength;
+uniform float uLight;
+uniform vec3 uInk;
+uniform vec3 uAccent;
+out vec4 fragColor;
+
+// Ordered dithering thresholds, built recursively from the 2x2 Bayer matrix.
+float bayer2(vec2 a) { a = floor(a); return fract(a.x * 0.5 + a.y * a.y * 0.75); }
+float bayer4(vec2 a) { return bayer2(0.5 * a) * 0.25 + bayer2(a); }
+float bayer8(vec2 a) { return bayer4(0.5 * a) * 0.25 + bayer2(a); }
+
+void main() {
+    vec2 px = gl_FragCoord.xy - uOrigin;
+    px.y = uSize.y - px.y;
+    vec2 cell = floor(px / uPixel);
+    vec2 local = fract(px / uPixel);
+    ivec2 texel = clamp(ivec2(int(cell.x), uCellCount.y - 1 - int(cell.y)), ivec2(0), uCellCount - 1);
+    vec4 cellData = texelFetch(uCells, texel, 0);
+    float value = cellData.r * 1.25;
+    float lit = cellData.g;
+
+    // Lit areas fill their dither cells almost completely, as in the reference.
+    float on = step(bayer8(cell), max(value, lit * 1.25));
+    // Square pixels with a visible gutter; lit pixels grow slightly.
     vec2 q = abs(local - 0.5);
-    float dotMask = step(max(q.x, q.y), 0.30);
+    float dotMask = step(max(q.x, q.y), 0.30 + 0.08 * smoothstep(0.2, 0.9, lit));
 
     // Soft vignette so the field never collides with the window edges.
     vec2 n = (gl_FragCoord.xy - uOrigin) / uSize;
