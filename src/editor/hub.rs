@@ -547,6 +547,9 @@ impl Editor {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(tr("AGENTS")).size(10.0).color(colors().muted));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if icon_button(ui, Icon::Library, "Library Studio", false).clicked() {
+                            self.open_library();
+                        }
                         if icon_button(ui, Icon::Refresh, "Detect installed agents", false)
                             .clicked()
                         {

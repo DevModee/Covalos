@@ -20,6 +20,7 @@ mod preferences;
 mod sessions;
 mod shell;
 mod skills;
+mod studio;
 mod syntax;
 mod theme;
 mod tools;
@@ -123,6 +124,8 @@ pub struct Editor {
     focus_new_file: bool,
     syntax: egui_extras::syntax_highlighting::CodeTheme,
     clean: clean::Clean,
+    studio: studio::Studio,
+    studio_open: bool,
     #[cfg(test)]
     mood_override: Option<identity::Mood>,
 }
@@ -198,6 +201,8 @@ impl Editor {
             pending_delete: None,
             focus_new_file: false,
             clean: clean::Clean::default(),
+            studio: studio::Studio::default(),
+            studio_open: false,
             #[cfg(test)]
             mood_override: None,
             syntax: egui_extras::syntax_highlighting::CodeTheme::dark(
@@ -746,7 +751,12 @@ impl Editor {
         }
         self.top_bar(ctx);
         self.status_bar(ctx);
-        if self.hub_open {
+        if self.studio_open && !self.hub_open {
+            self.activity_rail(ctx);
+            egui::CentralPanel::default()
+                .frame(theme::island(egui::Margin::same(0)).fill(theme::colors().canvas))
+                .show(ctx, |ui| self.library_studio(ui));
+        } else if self.hub_open {
             egui::CentralPanel::default()
                 .frame(theme::island(egui::Margin::same(0)).fill(theme::colors().canvas))
                 .show(ctx, |ui| self.agent_hub(ui));
@@ -764,7 +774,7 @@ impl Editor {
                 .frame(theme::island(egui::Margin::same(0)).fill(theme::colors().inset))
                 .show(ctx, |ui| self.editor_panel(ui));
         }
-        if !self.hub_open {
+        if !self.hub_open && !self.studio_open {
             self.floating_editors(ctx);
         }
         self.settings_window(ctx);

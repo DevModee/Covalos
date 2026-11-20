@@ -64,6 +64,7 @@ enum Action {
     Settings,
     Detach,
     DockAll,
+    Library,
 }
 
 const ACTIONS: &[(Action, &str)] = &[
@@ -78,6 +79,7 @@ const ACTIONS: &[(Action, &str)] = &[
     (Action::Settings, "Open settings"),
     (Action::Detach, "Detach to floating editor"),
     (Action::DockAll, "Dock all"),
+    (Action::Library, "Open Library Studio"),
 ];
 
 enum Selection {
@@ -354,6 +356,11 @@ impl Editor {
                     ui.selectable_value(&mut self.preferences.compact, false, tr("Comfortable"));
                 });
                 ui.add(egui::Slider::new(&mut self.preferences.motion, 0.0..=1.0).step_by(0.05).text(tr("Motion intensity")));
+                ui.horizontal(|ui| {
+                    ui.label(secondary(tr("Library Studio shortcut")));
+                    let valid = super::panels::parse_shortcut(&self.preferences.library_shortcut).is_some();
+                    ui.add(egui::TextEdit::singleline(&mut self.preferences.library_shortcut).desired_width(120.0).text_color(if valid { colors().text } else { colors().error }));
+                });
                 checkbox(ui,&mut self.preferences.high_contrast,tr("High contrast controls"));
                 checkbox(ui,&mut self.preferences.reduce_motion,tr("Reduce motion"));
                 if old != (self.preferences.theme,self.preferences.font_size,self.preferences.high_contrast) {
@@ -569,6 +576,7 @@ impl Editor {
                     }
                 }
                 Action::DockAll => self.dock_all(ctx.input(|i| i.time)),
+                Action::Library => self.open_library(),
             },
             Some(Selection::File(file)) => self.open_file(file),
             Some(Selection::Project(root)) => self.request(Pending::OpenWorkspace(root), ctx),

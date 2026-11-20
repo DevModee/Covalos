@@ -630,6 +630,155 @@ fn capture_visual_review() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn library_steps() -> Vec<Step> {
+    use super::studio::View;
+    use crate::library::Category;
+    vec![
+        Act(|e, c, _| {
+            theme(e, c, theme::Theme::Nocturne);
+            e.preferences.language = super::i18n::Language::English;
+            e.preferences.assistant_open = false;
+            e.open_library();
+            e.studio.focus_search = false;
+        }),
+        Wait(0.6),
+        Shot("01-offline-before-sync"),
+        Act(|e, c, _| e.studio.start_sync(c)),
+        Until(|e| !e.studio.syncing(), "catalog sync"),
+        Wait(0.8),
+        Shot("02-discover"),
+        Act(|e, _, _| e.studio.query.text = "animated button".into()),
+        Wait(0.5),
+        Shot("03-search-animated-button"),
+        Act(|e, _, _| e.studio.query.text = "react chart".into()),
+        Wait(0.4),
+        Shot("04-search-react-chart"),
+        Act(|e, _, _| {
+            e.studio.query.text.clear();
+            e.studio.view = View::Category(Category::Backgrounds);
+            e.studio.query.free_only = true;
+        }),
+        Wait(0.5),
+        Shot("05-category-backgrounds-free"),
+        Act(|e, _, _| {
+            e.studio.query.free_only = false;
+            e.studio.view = View::Discover;
+            e.studio.select("aeros/dither-field");
+            e.library_open_playground_tab();
+        }),
+        Wait(0.8),
+        Shot("06-native-dither-playground"),
+        Act(|e, _, _| {
+            e.studio.select("aeros/spring-smooth");
+            e.library_open_playground_tab();
+        }),
+        Wait(0.5),
+        Shot("07-native-spring-playground"),
+        Act(|e, _, _| e.studio.select("shadcn/button")),
+        Wait(0.5),
+        Shot("08-shadcn-button-overview"),
+        Act(|e, _, _| e.library_open_code_tab()),
+        Wait(0.3),
+        Click("Load source"),
+        Until(|e| e.library_item_loaded(), "registry item"),
+        Wait(0.4),
+        Shot("09-shadcn-button-source"),
+        Act(|e, _, _| e.library_open_install_tab()),
+        Wait(0.3),
+        Click("Add to project"),
+        Until(|e| e.library_review_ready(), "install plan"),
+        Wait(0.4),
+        Shot("10-install-review"),
+        Act(|e, _, _| {
+            e.studio.select("react-bits/BlurText");
+        }),
+        Wait(0.5),
+        Shot("11-commons-clause-entry"),
+        Act(|e, _, _| {
+            e.studio.view = View::Sources;
+            e.studio.selected = None;
+        }),
+        Wait(0.5),
+        Shot("12-sources-licenses"),
+        Act(|e, _, _| {
+            e.preferences.language = super::i18n::Language::Spanish;
+            e.studio.view = View::Discover;
+        }),
+        Wait(0.5),
+        Shot("13-discover-es"),
+    ]
+}
+
+#[test]
+#[ignore = "opens a native window, syncs the official registries and writes Library Studio evidence"]
+fn capture_library_review() -> Result<(), Box<dyn std::error::Error>> {
+    use winit::platform::windows::EventLoopBuilderExtWindows;
+    let output =
+        PathBuf::from(std::env::var_os("AEROS_EVIDENCE_DIR").ok_or("set AEROS_EVIDENCE_DIR")?);
+    std::fs::create_dir_all(output.join("reports"))?;
+    let fixture = tempfile::tempdir()?;
+    let config = fixture.path().join("config");
+    std::fs::create_dir_all(&config)?;
+    // SAFETY: set before any thread of this test reads the environment.
+    unsafe { std::env::set_var("AEROS_CONFIG_DIR", &config) };
+    // A temporary React + Tailwind + shadcn workspace; nothing is installed into it.
+    let root = fixture.path().join("react-app");
+    std::fs::create_dir_all(root.join("src/components/ui"))?;
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"react-app","private":true,"dependencies":{"react":"^19.0.0","react-dom":"^19.0.0"},"devDependencies":{"typescript":"^5.6.0","tailwindcss":"^4.0.0","@tailwindcss/vite":"^4.0.0","vite":"^6.0.0"}}"#,
+    )?;
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{"compilerOptions":{"baseUrl":".","paths":{"@/*":["./src/*"]}}}"#,
+    )?;
+    std::fs::write(
+        root.join("components.json"),
+        r#"{"style":"new-york","tsx":true,"aliases":{"components":"@/components","ui":"@/components/ui","utils":"@/lib/utils"}}"#,
+    )?;
+    std::fs::write(root.join("package-lock.json"), "{}")?;
+    std::fs::write(root.join("src/main.tsx"), "export {};\n")?;
+    let (width, height) = (1366.0, 768.0);
+    let options = eframe::NativeOptions {
+        viewport: ViewportBuilder::default()
+            .with_inner_size([width, height])
+            .with_decorations(false)
+            .with_title("AEROS Library Studio evidence"),
+        event_loop_builder: Some(Box::new(|b| {
+            b.with_any_thread(true);
+        })),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "AEROS Library Studio evidence",
+        options,
+        Box::new(move |cc| {
+            let mut preferences = Preferences::default();
+            preferences.language = super::i18n::Language::English;
+            let editor = Editor::new(&cc.egui_ctx, Some(root.clone()), preferences);
+            Ok(Box::new(Harness {
+                editor,
+                root,
+                steps: library_steps(),
+                stage: 0,
+                at: Instant::now(),
+                delay: 0.8,
+                queued: Vec::new(),
+                requested: false,
+                output,
+                suffix: "-1366x768@100".into(),
+                scale: 1.0,
+                deadline: Instant::now() + Duration::from_secs(300),
+                manifest: Vec::new(),
+                last_action: Instant::now(),
+                render_ms: Vec::new(),
+            }))
+        }),
+    )?;
+    drop(fixture);
+    Ok(())
+}
+
 fn write_fixture(root: &Path) -> std::io::Result<()> {
     for dir in [
         "src",

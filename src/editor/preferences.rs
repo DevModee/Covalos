@@ -12,6 +12,8 @@ pub(super) struct Preferences {
     pub(super) syntax: super::syntax::SyntaxStyle,
     /// Motion intensity from 0 (instant) to 1 (full); Reduced Motion still wins.
     pub(super) motion: f32,
+    /// Shortcut that opens Library Studio, e.g. "Ctrl+Shift+L".
+    pub(super) library_shortcut: String,
     pub(super) language: super::i18n::Language,
     pub(super) identity: super::identity::IdentityPreferences,
     pub(super) font_size: f32,
@@ -38,6 +40,7 @@ impl Default for Preferences {
             theme: super::theme::Theme::Nocturne,
             syntax: super::syntax::SyntaxStyle::Auto,
             motion: 1.0,
+            library_shortcut: "Ctrl+Shift+L".into(),
             language: super::i18n::Language::system(),
             identity: super::identity::IdentityPreferences::default(),
             font_size: 14.0,

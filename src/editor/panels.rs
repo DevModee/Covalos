@@ -16,6 +16,15 @@ impl Editor {
         let shortcut = |modifiers, key| {
             ctx.input_mut(|input| input.consume_shortcut(&KeyboardShortcut::new(modifiers, key)))
         };
+        if let Some((modifiers, key)) = parse_shortcut(&self.preferences.library_shortcut)
+            && shortcut(modifiers, key)
+        {
+            if self.studio_open {
+                self.studio_open = false;
+            } else {
+                self.open_library();
+            }
+        }
         if shortcut(Modifiers::COMMAND, Key::Backtick) {
             self.preferences.tools_open = !self.preferences.tools_open;
         }
@@ -103,6 +112,11 @@ impl Editor {
                         ui.label(RichText::new(BRAND).size(LEAD).strong());
                         ui.add_space(8.0);
                         ui.menu_button(tr("File"), |ui| {
+                            if ui.button(tr("Library Studio")).clicked() {
+                                ui.close();
+                                self.open_library();
+                            }
+                            ui.separator();
                             if ui.button(tr("Open folder…")).clicked() {
                                 ui.close();
                                 self.pick_workspace(ctx);
@@ -377,6 +391,14 @@ impl Editor {
                         }
                     }
                     ui.separator();
+                    if icon_button(ui, Icon::Library, "Library Studio", self.studio_open).clicked()
+                    {
+                        if self.studio_open {
+                            self.studio_open = false;
+                        } else {
+                            self.open_library();
+                        }
+                    }
                     if icon_button(ui, Icon::Hub, "Agent Hub", false).clicked() {
                         self.hub_open = true;
                     }
@@ -1568,4 +1590,21 @@ fn tree(
     }
     directories.insert(path.to_owned(), super::DirectoryLoad::Ready(entries));
     selected
+}
+
+/// Parse a shortcut such as "Ctrl+Shift+L" (Ctrl/Cmd map to the platform command key).
+pub(super) fn parse_shortcut(text: &str) -> Option<(Modifiers, Key)> {
+    let mut modifiers = Modifiers::NONE;
+    let mut key = None;
+    for part in text.split('+').map(str::trim).filter(|p| !p.is_empty()) {
+        match part.to_ascii_lowercase().as_str() {
+            "ctrl" | "cmd" | "command" => modifiers = modifiers.plus(Modifiers::COMMAND),
+            "shift" => modifiers = modifiers.plus(Modifiers::SHIFT),
+            "alt" | "option" => modifiers = modifiers.plus(Modifiers::ALT),
+            other => {
+                key = Key::from_name(&other.to_ascii_uppercase()).or_else(|| Key::from_name(other))
+            }
+        }
+    }
+    key.map(|k| (modifiers, k))
 }
