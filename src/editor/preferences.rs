@@ -38,6 +38,7 @@ pub(super) struct Preferences {
     pub(super) agent_session: Option<String>,
     /// Conversations open in their own windows.
     pub(super) agent_detached: Vec<String>,
+    pub(super) preview_width: f32,
     pub(super) recent: Vec<PathBuf>,
     notes: Vec<(PathBuf, String)>,
     tasks: Vec<(PathBuf, Vec<super::hub::Task>)>,
@@ -71,6 +72,7 @@ impl Default for Preferences {
             tools_height: 210.0,
             agent_session: None,
             agent_detached: Vec::new(),
+            preview_width: 520.0,
             recent: Vec::new(),
             notes: Vec::new(),
             tasks: Vec::new(),

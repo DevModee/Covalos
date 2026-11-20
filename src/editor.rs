@@ -20,11 +20,13 @@ mod mascot;
 mod motion;
 mod panels;
 mod preferences;
+mod preview;
 mod sessions;
 mod shell;
 mod skills;
 mod studio;
 mod syntax;
+mod terminal;
 mod theme;
 mod tools;
 mod ui_icons;
@@ -108,6 +110,8 @@ pub struct Editor {
     companion: companion::Companion,
     identity: identity::Identity,
     tools: tools::Tools,
+    terminals: terminal::Terminals,
+    preview: preview::Preview,
     palette: Option<shell::Palette>,
     chat: hub::Chat,
     chat_saved_revision: u64,
@@ -135,6 +139,9 @@ pub struct Editor {
     discord: discord::Presence,
     session_started: u64,
     explorer_rect: Option<egui::Rect>,
+    disk_checked: Option<std::time::Instant>,
+    /// Open files changed on disk while they had unsaved edits.
+    disk_conflicts: Vec<PathBuf>,
     #[cfg(test)]
     mood_override: Option<identity::Mood>,
 }
@@ -194,6 +201,8 @@ impl Editor {
             companion: companion::Companion::default(),
             identity: identity::Identity::default(),
             tools: tools::Tools::default(),
+            terminals: terminal::Terminals::default(),
+            preview: preview::Preview::default(),
             palette: None,
             chat: hub::Chat::default(),
             chat_saved_revision: 0,
@@ -221,6 +230,8 @@ impl Editor {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs()),
             explorer_rect: None,
+            disk_checked: None,
+            disk_conflicts: Vec::new(),
             #[cfg(test)]
             mood_override: None,
             syntax: egui_extras::syntax_highlighting::CodeTheme::dark(
@@ -265,6 +276,7 @@ impl Editor {
         self.root = Some(root);
         self.hub_open = false;
         self.tools.workspace_changed();
+        self.terminals.workspace_changed(self.root.as_deref());
         self.directories.clear();
         self.documents.clear();
         self.active = None;
@@ -676,6 +688,37 @@ impl Editor {
             .start(assistant::Scope::Workspace, root, input, ctx);
     }
 
+    /// Picks up files that agents, git or other tools changed on disk.
+    fn check_disk(&mut self, ctx: &egui::Context) {
+        if self
+            .disk_checked
+            .is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(900))
+        {
+            return;
+        }
+        self.disk_checked = Some(std::time::Instant::now());
+        ctx.request_repaint_after(std::time::Duration::from_secs(1));
+        let mut log = Vec::new();
+        for doc in &mut self.documents {
+            match doc.sync_from_disk() {
+                workspace::DiskState::Reloaded => {
+                    log.push(format!("Reloaded {} (changed on disk)", doc.path.display()));
+                }
+                workspace::DiskState::Conflict => {
+                    if !self.disk_conflicts.contains(&doc.path) {
+                        self.disk_conflicts.push(doc.path.clone());
+                    }
+                }
+                workspace::DiskState::Same => {}
+            }
+        }
+        for line in log {
+            self.editor_log(&line);
+        }
+        let open: Vec<PathBuf> = self.documents.iter().map(|d| d.path.clone()).collect();
+        self.disk_conflicts.retain(|p| open.contains(p));
+    }
+
     fn poll(&mut self) {
         if let Some(job) = &self.search_job {
             loop {
@@ -736,6 +779,11 @@ impl Editor {
         self.poll_chats(ctx);
         self.poll_agent_runtime(ctx);
         self.tools.poll();
+        self.terminals.poll();
+        self.check_disk(ctx);
+        if self.terminals.busy() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
         let snapshots = self.hub.snapshots(&self.chat, self.root.as_deref());
         self.companion.sync(
             snapshots,
@@ -799,6 +847,7 @@ impl Editor {
                 }
                 self.assistant_panel(ctx);
             }
+            self.preview_panel(ctx);
             egui::CentralPanel::default()
                 .frame(theme::island(egui::Margin::same(0)).fill(theme::colors().inset))
                 .show(ctx, |ui| self.editor_panel(ui));
@@ -810,6 +859,7 @@ impl Editor {
             self.floating_agents(ctx);
         }
         self.add_ai_modal(ctx);
+        self.tunnel_modal(ctx);
         self.settings_window(ctx);
         self.about_window(ctx);
         self.palette_modal(ctx);
@@ -886,8 +936,9 @@ fn language_name(extension: &str) -> &'static str {
 }
 
 impl eframe::App for Editor {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.render(ctx);
+        self.sync_preview(ctx, frame);
         self.autosave_conversation(ctx);
         if self.preferences != self.saved_preferences
             && !ctx.input(|input| input.pointer.any_down())
