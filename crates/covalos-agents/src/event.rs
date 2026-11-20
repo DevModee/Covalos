@@ -38,6 +38,10 @@ pub enum AgentEvent {
         allowed: bool,
     },
     Usage(Usage),
+    /// Cost as reported by the provider itself, in millionths of a US dollar.
+    Cost {
+        usd_micros: u64,
+    },
     TurnCompleted,
     Failed {
         message: String,
@@ -130,6 +134,14 @@ impl StreamDecoder for ClaudeDecoder {
                     });
                 }
                 events.extend(usage(&json["usage"]));
+                if let Some(usd) = json["total_cost_usd"]
+                    .as_f64()
+                    .filter(|c| c.is_finite() && *c >= 0.0)
+                {
+                    events.push(AgentEvent::Cost {
+                        usd_micros: (usd * 1_000_000.0).round() as u64,
+                    });
+                }
                 events.push(AgentEvent::TurnCompleted);
                 events
             }
@@ -222,7 +234,7 @@ mod tests {
                 json!({"type":"system","subtype":"init","session_id":"s1","model":"m"}),
                 json!({"type":"stream_event","event":{"type":"content_block_delta","delta":{"text":"he"}}}),
                 json!({"type":"assistant","message":{"content":[{"type":"text","text":"x"},{"type":"tool_use","name":"Read","input":{}}]}}),
-                json!({"type":"result","result":"done","usage":{"input_tokens":3,"output_tokens":4}}),
+                json!({"type":"result","result":"done","usage":{"input_tokens":3,"output_tokens":4},"total_cost_usd":0.0125}),
             ],
         );
         assert_eq!(
@@ -243,6 +255,7 @@ mod tests {
                     input_tokens: 3,
                     output_tokens: 4
                 }),
+                AgentEvent::Cost { usd_micros: 12_500 },
                 AgentEvent::TurnCompleted,
             ]
         );
