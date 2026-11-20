@@ -5,178 +5,175 @@
 <h1 align="center">COVALOS</h1>
 
 <p align="center">
-  <strong>IDE nativo en Rust con diseño futurista minimalista y orquestación multiagente.</strong><br/>
-  Velocidad nativa, control total del desarrollador y estética <em>Nocturne</em> — sin Electron.
+  <strong>A native Rust IDE built for speed, craft, and multi-agent development.</strong><br/>
+  Nocturne design system, GPU Dither Field, Clean Code floating editors, Library Studio, and full developer control — with zero Electron overhead.
 </p>
 
 <p align="center">
   <img alt="Rust Edition 2024" src="https://img.shields.io/badge/Rust-Edition_2024-8B5CF6?style=flat-square&logo=rust&logoColor=white" />
   <img alt="Renderer eframe/egui + OpenGL" src="https://img.shields.io/badge/Renderer-eframe_%2F_egui_+_OpenGL-6366F1?style=flat-square" />
   <img alt="Design System Nocturne" src="https://img.shields.io/badge/Design_System-Nocturne-3B82F6?style=flat-square" />
-  <img alt="Version 0.4.0" src="https://img.shields.io/badge/Release-v0.4.0-110F17?style=flat-square&labelColor=231F2E" />
+  <img alt="Release v0.4.0" src="https://img.shields.io/badge/Release-v0.4.0-110F17?style=flat-square&labelColor=231F2E" />
 </p>
 
 ---
 
-## Qué buscamos
+## Vision
 
-**COVALOS** nace con un objetivo concreto: construir un **IDE nativo de escritorio en Rust** que combine la ergonomía, precisión y disciplina visual de **IntelliJ IDEA**, **Zed**, **Linear** y **Raycast** con la potencia multiagente de **Cursor**, **Kiro** y **Google Antigravity**.
+**COVALOS** is a native desktop IDE written in Rust that brings together the speed, ergonomics, and visual discipline of **IntelliJ IDEA**, **Zed**, **Linear**, and **Raycast** with the multi-agent workflows of **Cursor**, **Kiro**, and **Google Antigravity**.
 
-El nombre viene de *enlace covalente*: distintos núcleos compartiendo un mismo campo para formar una estructura estable — la misma idea detrás de un entorno donde el desarrollador y múltiples agentes de IA colaboran sobre un workspace compartido, con supervisión explícita y control total sobre cada cambio.
+The name comes from *covalent* — distinct nuclei sharing a common field to form a stable structure. That is the core model of COVALOS: the developer and multiple AI agents operating over a shared workspace with explicit supervision, bounded authority, and zero black-box surprises.
 
-**Principios del proyecto:**
-- **Rendimiento nativo real:** binario único compilado en Rust (`covalos.exe`), sin runtime web ni consumo excesivo de memoria.
-- **Futurismo minimalista premium:** tema oscuro *Nocturne*, superficies redondeadas en islas, jerarquía tipográfica clara y animaciones con resortes amortiguados (nunca estética gamer ni sobrecarga visual).
-- **Control del desarrollador primero:** los agentes proponen, planifican y revisan; los cambios de código y las instalaciones de paquetes requieren aprobación explícita, con respaldo y reversión reales.
-
----
-
-## Capturas reales de COVALOS
-
-> Todas las imágenes provienen de ejecuciones reales de la compilación Release (`covalos.exe`) sobre OpenGL.
-
-| Pantalla de inicio · *Nocturne + Dither Field* | Editor Rust · *Sintaxis Nocturne* |
-| :---: | :---: |
-| ![Inicio COVALOS con Dither Field](artifacts/covalos-verification/design-system/01-home/home-nocturne-dither-field-1366x768@100.png) | ![Editor Rust en Nocturne](artifacts/covalos-verification/design-system/03-editor/rust/editor-rust-nocturne-1366x768@100.png) |
-
-| Clean Code · *Editores flotantes sobre el mismo buffer* | Library Studio · *Catálogo offline + plan verificable* |
-| :---: | :---: |
-| ![Clean Code flotante](artifacts/covalos-verification/design-system/05-clean-code/clean-floating-single-1366x768@100.png) | ![Library Studio en COVALOS](artifacts/covalos-verification/library-studio/10-install-review-1366x768@100.png) |
+**Core principles:**
+- **True native performance:** Single compiled Rust binary (`covalos.exe`) rendered on OpenGL — no bundled browser runtime.
+- **Minimalist futuristic craft:** The *Nocturne* dark design system — rounded island surfaces, crisp 1 px borders, disciplined typography, and critically damped spring motion (never noisy, gamer, or bloated).
+- **Developer control first:** Agents plan, review, and propose edits; code modifications and package installations require explicit user approval, backed by real snapshots and rollback.
 
 ---
 
-## Qué ya tenemos
+## Real Captures
 
-### 1. Editor nativo y flujo diario
-- **Explorador y pestañas:** apertura de carpetas/archivos, creación, renombrado, movimiento y borrado seguro con confirmación, proyectos recientes y breadcrumbs.
-- **Edición confiable:** archivos UTF-8 (hasta 1 MiB), preservación de BOM y saltos CRLF/LF, detección de cambios externos antes de sobrescribir y búsqueda en archivo (`Ctrl+F`, `F3` / `Shift+F3`) y en todo el workspace (`Ctrl+Shift+F`, respetando reglas de ignore).
-- **Resaltado de sintaxis semántico:** gramáticas `syntect` combinadas con clasificación semántica propia y paletas independientes del tema (*Nocturne*, *Graphite*, *Daylight*, *High Contrast*).
-- **Quick Access (`Ctrl+P`):** búsqueda unificada de archivos, comandos (`>`), proyectos recientes (`@`) y consultas a Codex (`?`).
-- **Git integrado:** detección de rama, cambios agrupados por estado (*staged*, *working tree*, *untracked*, conflictos) y visualización de diffs directamente en el área del editor.
-- **Panel de herramientas:** ejecutor de comandos desde la raíz del proyecto, salida en vivo con cancelación y registro de actividad de agentes.
+> Every screenshot below is captured directly from a real Windows Release build (`covalos.exe`) running on OpenGL.
 
-### 2. Nocturne Design System y movimiento
-- **Superficies en islas:** paneles redondeados separados sobre lienzo oscuro `#09080D` con bordes finos de 1 px y jerarquía clara.
-- **Dither Field y Dither Bloom:** fondo nativo en GLSL de dos pasadas (ruido de valor fbm → tramado ordenado Bayer 8×8 → píxeles cuadrados con estela del cursor y ondas al clic). Se pausa sin foco o con *Reduce Motion*; en estado estacionario consume ~2,1 % de CPU total y ~6 % de GPU en AMD Ryzen 5 5600G + Radeon integrada (0,0 % con fondo desactivado).
-- **Motor de springs (`src/editor/motion.rs`):** animaciones interrumpibles con tres presets cercanos al amortiguamiento crítico (*Snappy*, *Smooth*, *Gentle*), intensidad configurable y soporte completo de *Reduce Motion*.
-- **Personalización e idioma:** 6 temas (*COVALOS Nocturne*, *Graphite*, *Midnight*, *Violet*, *Light*, *High Contrast*), tamaño de fuente, densidad compacta/cómoda, vista previa en vivo y soporte completo en **Español** e **Inglés**.
+| Home · *Nocturne + Dither Field* | Rust Editor · *Nocturne Syntax* |
+| :---: | :---: |
+| ![COVALOS Home with Dither Field](artifacts/covalos-verification/design-system/01-home/home-nocturne-dither-field-1366x768@100.png) | ![COVALOS Rust Editor in Nocturne](artifacts/covalos-verification/design-system/03-editor/rust/editor-rust-nocturne-1366x768@100.png) |
 
-### 3. Clean Code (ventanas flotantes)
-- Permite desprender cualquier pestaña a una ventana flotante sin duplicar memoria ni estado: comparte exactamente el mismo `Document` (buffer, dirty state, guardado, resaltado y guardas de salida).
-- Admite múltiples editores flotantes simultáneos, modo enfoque y acople animado de vuelta a la barra de pestañas.
+| Clean Code · *Floating editors sharing the live buffer* | Library Studio · *Offline-first catalog + install review* |
+| :---: | :---: |
+| ![Clean Code floating editor](artifacts/covalos-verification/design-system/05-clean-code/clean-floating-single-1366x768@100.png) | ![Library Studio install review](artifacts/covalos-verification/library-studio/10-install-review-1366x768@100.png) |
+
+---
+
+## What Is Built
+
+### 1. Native Editor & Daily Workflow
+- **Explorer & tabs:** Open folders and files, create/rename/move/delete with confirmation guards, recent workspaces, and breadcrumbs.
+- **Reliable file handling:** UTF-8 files up to 1 MiB, BOM and CRLF/LF preservation, external-change detection before overwriting, in-file find (`Ctrl+F`, `F3` / `Shift+F3`), and ignore-aware workspace search (`Ctrl+Shift+F`).
+- **Semantic syntax highlighting:** `syntect` grammars paired with a semantic token classifier and independent code color schemes (*Nocturne*, *Graphite*, *Daylight*, *High Contrast*).
+- **Quick Access (`Ctrl+P`):** Unified modal for workspace files, editor commands (`>`), recent projects (`@`), and Codex queries (`?`).
+- **Integrated Git:** Branch detection, status grouped by state (*staged*, *working tree*, *untracked*, *conflicts*), and inline diffs in the editor area.
+- **Bottom tools panel:** Workspace command runner with live output and cancellation, editor log, and agent activity stream.
+
+### 2. Nocturne Design System & Motion
+- **Island architecture:** Rounded panels floating over a deep `#09080D` canvas with hairline 1 px borders and high-contrast visual hierarchy.
+- **Dither Field & Dither Bloom:** Original two-pass GLSL background renderer (value-noise fbm → Bayer 8×8 ordered dithering → square pixel grid with pointer trail and click ripples). Pauses automatically without focus or with *Reduce Motion*. Benchmarked on AMD Ryzen 5 5600G + integrated Radeon Graphics at ~2.1% total CPU (~6% GPU) in steady-state animation and 0.0% CPU/GPU when disabled.
+- **Spring motion engine (`src/editor/motion.rs`):** Interruptible critically damped springs (*Snappy*, *Smooth*, *Gentle*), global motion intensity slider, and full *Reduce Motion* support.
+- **Customization & localization:** 6 themes (*COVALOS Nocturne*, *Graphite*, *Midnight*, *Violet*, *Light*, *High Contrast*), configurable font size, compact/comfortable density, live syntax preview, and full **English** / **Spanish** localization.
+
+### 3. Clean Code (Floating Editors)
+- Detach any open tab into a floating editor window without copying state: every floating surface operates directly on the shared `Document` buffer, dirty flag, save path, and exit guards.
+- Supports multiple simultaneous floating editors, focus mode, and spring-animated docking back into the tab strip.
 
 ### 4. Library Studio
-- **Catálogo local-first:** 10 registros oficiales sincronizables por ETag incremental (más de **2.050 componentes reales** en 3–4 s), 5 fuentes de solo enlace y 7 recursos nativos de COVALOS con playground en vivo disponibles sin conexión.
-- **Respeto estricto de licencias:** fuentes permisivas (MIT/ISC) pueden cachear código; fuentes sin redistribución (Commons Clause / Aceternity) almacenan solo metadatos; fuentes comerciales muestran enlace únicamente.
-- **Compatibilidad honesta e instalación real con reversión:** detecta framework y gestor de paquetes (`npm`, `pnpm`, `yarn`, `bun`), muestra los comandos exactos, archivos y conflictos antes de ejecutar, respalda manifiestos y archivos conflictivos, y permite **revertir cambios** restaurando el estado previo.
-- **API estructurada para agentes (`--library`):** comandos CLI con salida JSON y separación explícita entre datos de terceros e instrucciones.
+- **Local-first component catalog:** Incremental ETag sync across 10 official registries (**2,050+ real entries** synced in ~3–4 s), 5 link-only sources, and 7 offline native COVALOS resources with live interactive playgrounds.
+- **Strict license compliance:** Permissive (MIT/ISC) sources cache source code locally; non-redistributable sources (Commons Clause / Aceternity) store metadata only and fetch source on demand; commercial libraries show links only.
+- **Honest compatibility & verified install/rollback:** Detects project framework and package manager (`npm`, `pnpm`, `yarn`, `bun`), previews exact CLI commands, target files, dependencies, and conflicts before running, backs up manifests and conflicting files, and supports full rollback (verified end-to-end with real `npm` / `npx shadcn@latest`).
+- **Structured Agent CLI (`--library`):** JSON output designed for agent workflows with explicit untrusted-data notices.
 
-### 5. Agent Hub y Companion Luma
-- **Conversaciones en workspace y aisladas:** integración funcional con **Codex** y **Claude Code** (descubrimiento preparado para **Gemini CLI** y **Antigravity**), adjuntado acotado del archivo activo y persistencia de conversaciones por workspace con recuperación tras cierre inesperado.
-- **Flujos Ask / Assist / Auto:** planificación, revisión, previsualización de parches con aprobación explícita y memoria local del proyecto + importación revisada de `SKILL.md` desde GitHub.
-- **Puente de hooks (`--agent-hook`) y mascota Luma:** supervisión en vivo de estados de agentes y aprobaciones acotadas, reflejados visualmente por Luma (arte vectorial nativo en `egui`).
+### 5. Agent Hub & Luma Companion
+- **Workspace & isolated agent sessions:** Working adapters for **Codex** and **Claude Code** (with discovery wired for **Gemini CLI** and **Antigravity**), bounded active-file context attachment, and persistent per-workspace conversations with interrupted-session recovery.
+- **Ask / Assist / Auto workflows:** Read-only planning and review, single-buffer patch preview with approval, local project memory, and reviewed `SKILL.md` imports from public GitHub repositories.
+- **Hook bridge (`--agent-hook`) & Luma:** Live agent status tracking and scoped permission approvals reflected by Luma, an original procedural vector companion rendered natively in `egui`.
 
-### 6. Identidad nativa y migración segura
-- **Empaquetado Windows nativo:** `build.rs` embebe el ícono `.ico` multicapa (16–256 px) y los metadatos PE (`COVALOS`, versión `0.4.0.0`) directamente en `covalos.exe` sin depender de herramientas externas.
-- **Migración no destructiva desde AEROS:** detecta perfiles previos en `AerosEditor` y los migra una sola vez hacia `Covalos` sin sobrescribir archivos existentes ni borrar los datos anteriores.
+### 6. Native Packaging & Safe Migration
+- **Windows executable identity:** `build.rs` embeds a multi-resolution `.ico` (16–256 px) and standard Windows PE `VERSIONINFO` (`COVALOS`, `0.4.0.0`) directly into `covalos.exe` with zero external build tools required.
+- **Non-destructive migration from AEROS:** Automatically detects legacy `AerosEditor` profiles on first launch, migrates settings, conversations, Library Studio state, and agent-bridge data once without overwriting existing COVALOS files or deleting legacy folders, and maps `aeros/*` native IDs to `covalos/*`.
 
 ---
 
-## Qué usamos (Stack técnico y activos)
+## Tech Stack & Assets
 
-### Núcleo Rust
-| Componente | Crate / Tecnología | Uso en COVALOS |
+### Core Rust Stack
+| Area | Crates / Technology | Role |
 | --- | --- | --- |
-| Lenguaje | **Rust (Edition 2024)** | Binario nativo de alto rendimiento, seguridad de memoria y compilación con LTO thin |
-| UI y Renderer | **`eframe` + `egui` 0.33.3 (`glow`)** | Interfaz nativa acelerada por OpenGL, ventanas flotantes y shaders GLSL personalizados |
-| Sintaxis | **`syntect` 5.3 + `egui_extras`** | Gramáticas Sublime y clasificación semántica propia por paleta |
-| Archivos y búsqueda | **`ignore`**, **`regex`**, **`rfd`**, **`tempfile`** | Indexado rápido respetando `.gitignore`, diálogos nativos del SO y escrituras atómicas |
-| Datos e imágenes | **`serde`**, **`serde_json`**, **`png`** | Preferencias, catálogo offline, estado persistente y texturas RGBA8 con mipmaps |
-| Integración SO | **`windows-sys` 0.61**, **`libc`** | Idioma del sistema, sistema de archivos y ejecución limpia de subprocesos |
+| Language | **Rust (Edition 2024)** | Native desktop performance, memory safety, thin-LTO release builds |
+| UI & Renderer | **`eframe` + `egui` 0.33.3 (`glow`)** | Native OpenGL desktop UI, floating surfaces, custom GLSL shaders |
+| Syntax | **`syntect` 5.3 + `egui_extras`** | Sublime grammars + custom semantic token classifier & themes |
+| Workspace I/O | **`ignore`**, **`regex`**, **`rfd`**, **`tempfile`** | `.gitignore`-aware indexing, native OS dialogs, atomic file writes |
+| Data & Imaging | **`serde`**, **`serde_json`**, **`png`** | Preferences, offline catalog, state persistence, mipmapped RGBA8 textures |
+| OS Integration | **`windows-sys` 0.61**, **`libc`** | System locale detection, filesystem APIs, clean subprocess handling |
 
-### Tipografía, iconografía y marcas de terceros
-- **Tipografía:** *Geist* (interfaz) e *IBM Plex Mono* (código), ambas bajo licencia **SIL OFL** (`assets/fonts/`).
-- **Iconos de interfaz:** *Lucide 0.460.0* (**ISC**), 71 iconos rasterizados como máscaras con mipmaps (`assets/icons/ui/`).
-- **Iconos de archivos y carpetas:** *Material Icon Theme 5.40.0* (**MIT**), 116 iconos (`assets/icons/material/`).
-- **Marcas de proveedores:** documentadas con términos y procedencia en [`assets/brands/PROVENANCE.md`](assets/brands/PROVENANCE.md).
-- **Isotipo de COVALOS (provisional):** diseño centralizado en [`assets/brand/`](assets/brand/PROVENANCE.md) regenerable desde un único SVG maestro mediante [`tools/generate_brand_assets.py`](tools/generate_brand_assets.py).
+### Typography, Icons & Third-Party Marks
+- **Fonts:** *Geist* (UI) and *IBM Plex Mono* (code), licensed under **SIL OFL** (`assets/fonts/`).
+- **UI Icons:** *Lucide 0.460.0* (**ISC**), 71 mipmapped monochrome icon masks (`assets/icons/ui/`).
+- **File & Folder Icons:** *Material Icon Theme 5.40.0* (**MIT**), 116 icons (`assets/icons/material/`).
+- **Provider Marks:** Documented with full terms and provenance in [`assets/brands/PROVENANCE.md`](assets/brands/PROVENANCE.md).
+- **COVALOS Mark (Provisional):** Centralized in [`assets/brand/`](assets/brand/PROVENANCE.md) and regenerated from a single master SVG via [`tools/generate_brand_assets.py`](tools/generate_brand_assets.py).
 
 ---
 
-## Compilación y ejecución
+## Building & Running
 
-### Requisitos
-- Rust estable (`rustup` / `cargo`)
-- En Windows: OpenGL 3.3+ (soportado por GPUs integradas AMD/Intel y dedicadas)
-- Opcional: `git`, `node`/`npm` (para instalar componentes web desde Library Studio) y `codex` / `claude` CLI para Agent Hub.
+### Prerequisites
+- Stable Rust toolchain (`rustup` / `cargo`)
+- OpenGL 3.3+ capable GPU (tested on integrated AMD Radeon Graphics)
+- Optional: `git`, `node` / `npm` (for Library Studio React component installs), and `codex` / `claude` CLIs for Agent Hub.
 
-### Comandos principales (PowerShell)
+### Build, Lint & Test
 
 ```powershell
-# Formateo, análisis estático estricto y suite de pruebas
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
-
-# Compilación Release (genera target/release/covalos.exe)
 cargo build --release
 
-# Ejecutar abriendo un proyecto directamente
-.\target\release\covalos.exe C:\ruta\a\tu\proyecto
+# Launch COVALOS directly into a workspace
+.\target\release\covalos.exe C:\path\to\your\project
 ```
 
-### CLI de Library Studio para agentes
+### Library Studio CLI (JSON)
 
 ```powershell
-covalos.exe --library search "animated button" --project C:\ruta\al\proyecto --compatible --limit 10
-covalos.exe --library show shadcn/button --project C:\ruta\al\proyecto
-covalos.exe --library compat shadcn/button --project C:\ruta\al\proyecto
-covalos.exe --library plan shadcn/button --project C:\ruta\al\proyecto
+covalos.exe --library search "animated button" --project C:\path\to\project --compatible --limit 10
+covalos.exe --library show shadcn/button --project C:\path\to\project
+covalos.exe --library compat shadcn/button --project C:\path\to\project
+covalos.exe --library plan shadcn/button --project C:\path\to\project
 covalos.exe --library sources
 covalos.exe --library sync [source]
 covalos.exe --library installed
 ```
 
-### Configuración y variables de entorno
+### Configuration & Environment Variables
 
-| Ruta / Variable | Descripción |
+| Path / Variable | Purpose |
 | --- | --- |
-| `%LOCALAPPDATA%\Covalos` | Perfil predeterminado en Windows (`~/Library/Application Support/Covalos` en macOS, `~/.config/covalos` en Linux) |
-| `COVALOS_CONFIG_DIR` | Sobrescribe el directorio de configuración (acepta `AEROS_CONFIG_DIR` como respaldo) |
-| `COVALOS_CODEX_BIN` / `COVALOS_CLAUDE_BIN` | Ruta absoluta opcional al binario del agente (`COVALOS_GEMINI_BIN`, `COVALOS_AGY_BIN` también soportadas) |
+| `%LOCALAPPDATA%\Covalos` | Default profile location on Windows (`~/Library/Application Support/Covalos` on macOS, `~/.config/covalos` on Linux) |
+| `COVALOS_CONFIG_DIR` | Override configuration directory (falls back to `AEROS_CONFIG_DIR` for compatibility) |
+| `COVALOS_CODEX_BIN` / `COVALOS_CLAUDE_BIN` | Optional absolute path override for agent CLIs (`COVALOS_GEMINI_BIN` and `COVALOS_AGY_BIN` supported as well) |
 
 ---
 
-## Atajos de teclado
+## Keyboard Shortcuts
 
-| Atajo | Acción |
+| Shortcut | Action |
 | --- | --- |
-| `Ctrl / Cmd + P` | Quick Access (archivos, `>` comandos, `@` proyectos, `?` Codex) |
-| `Ctrl / Cmd + Shift + L` | Abrir / cerrar Library Studio *(configurable en Settings)* |
-| `Ctrl / Cmd + O` | Abrir carpeta |
-| `Ctrl / Cmd + Shift + O` | Abrir archivo |
-| `Ctrl / Cmd + N` | Nuevo archivo |
-| `Ctrl / Cmd + S` | Guardar archivo activo |
-| `Ctrl / Cmd + W` | Cerrar pestaña activa |
-| `Ctrl / Cmd + F` | Buscar en el archivo (`F3` / `Shift+F3` siguiente/anterior) |
-| `Ctrl / Cmd + Shift + F` | Buscar en todo el workspace |
-| `` Ctrl / Cmd + ` `` | Mostrar / ocultar panel inferior y terminal |
+| `Ctrl / Cmd + P` | Quick Access (files, `>` commands, `@` recent projects, `?` Codex) |
+| `Ctrl / Cmd + Shift + L` | Toggle Library Studio *(configurable in Settings)* |
+| `Ctrl / Cmd + O` | Open folder |
+| `Ctrl / Cmd + Shift + O` | Open file |
+| `Ctrl / Cmd + N` | New file |
+| `Ctrl / Cmd + S` | Save active file |
+| `Ctrl / Cmd + W` | Close active tab |
+| `Ctrl / Cmd + F` | Find in active file (`F3` / `Shift + F3` next / previous) |
+| `Ctrl / Cmd + Shift + F` | Search workspace |
+| `` Ctrl / Cmd + ` `` | Toggle bottom tools & terminal panel |
 
 ---
 
-## Roadmap — Hacia dónde vamos
+## Roadmap
 
-- [ ] **Aprobación del isotipo definitivo** de COVALOS y paquete de instalador para Windows.
-- [ ] **Orquestación multiagente completa:** adaptadores headless verificados para **Gemini CLI** y **Antigravity (`agy`)**, memoria compartida entre agentes e inyección del CLI de Library Studio desde Agent Hub.
-- [ ] **Vista previa web aislada (WebView2)** en proceso separado para componentes React en Library Studio.
-- [ ] **IDE avanzado:** integración LSP (autocompletado, diagnósticos, formateo y navegación), depuración (DAP), terminal persistente con PTY real y soporte de extensiones.
-- [ ] **Pausa inmediata al minimizar ventanas sin bordes en Windows** mediante detección nativa `IsIconic`.
+- [ ] **Final brand isotype sign-off** and Windows installer packaging.
+- [ ] **Full multi-agent orchestration:** Verified headless adapters for **Gemini CLI** and **Antigravity (`agy`)**, shared cross-agent memory, and automatic Library Studio CLI guidance inside Agent Hub.
+- [ ] **Isolated WebView2 previews** for React components in Library Studio.
+- [ ] **Advanced IDE capabilities:** LSP (completion, diagnostics, formatting, go-to-definition), DAP debugging, persistent PTY terminal, and extension support.
+- [ ] **Instant minimize pause on borderless Windows frames** using native `IsIconic` state detection.
 
 ---
 
-## Documentación adicional
+## Documentation
 
-- [`docs/CHECKPOINT.md`](docs/CHECKPOINT.md) — Estado actual, métricas de benchmark, verificación E2E y próximos pasos.
-- [`docs/DESIGN_SYSTEM.md`](docs/DESIGN_SYSTEM.md) — Especificación del sistema visual Nocturne, paleta y shaders.
-- [`assets/brand/PROVENANCE.md`](assets/brand/PROVENANCE.md) — Estado provisional del isotipo y guía de reemplazo en un paso.
-- [`assets/brands/PROVENANCE.md`](assets/brands/PROVENANCE.md) — Licencias y términos de marcas de proveedores.
+- [`docs/CHECKPOINT.md`](docs/CHECKPOINT.md) — Current build status, benchmark metrics, E2E verification, and next steps.
+- [`docs/DESIGN_SYSTEM.md`](docs/DESIGN_SYSTEM.md) — Nocturne design system specification, tokens, and GLSL shaders.
+- [`assets/brand/PROVENANCE.md`](assets/brand/PROVENANCE.md) — Provisional brand assets and one-step replacement workflow.
+- [`assets/brands/PROVENANCE.md`](assets/brands/PROVENANCE.md) — Third-party provider mark licenses and terms.
