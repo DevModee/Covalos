@@ -8,6 +8,10 @@ use std::{
 #[serde(default)]
 pub(super) struct Preferences {
     pub(super) theme: super::theme::Theme,
+    /// Code colors, chosen independently of the interface theme.
+    pub(super) syntax: super::syntax::SyntaxStyle,
+    /// Motion intensity from 0 (instant) to 1 (full); Reduced Motion still wins.
+    pub(super) motion: f32,
     pub(super) language: super::i18n::Language,
     pub(super) identity: super::identity::IdentityPreferences,
     pub(super) font_size: f32,
@@ -31,7 +35,9 @@ pub(super) struct Preferences {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
-            theme: super::theme::Theme::Dark,
+            theme: super::theme::Theme::Nocturne,
+            syntax: super::syntax::SyntaxStyle::Auto,
+            motion: 1.0,
             language: super::i18n::Language::system(),
             identity: super::identity::IdentityPreferences::default(),
             font_size: 14.0,
@@ -81,6 +87,11 @@ impl Preferences {
         prefs.identity.sanitize();
         prefs.notification_interval = prefs.notification_interval.clamp(5, 120);
         prefs.font_size = prefs.font_size.clamp(11.0, 26.0);
+        prefs.motion = if prefs.motion.is_finite() {
+            prefs.motion.clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
         prefs.sidebar_width = prefs.sidebar_width.clamp(155.0, 340.0);
         prefs.assistant_width = prefs.assistant_width.clamp(230.0, 520.0);
         prefs.tools_height = prefs.tools_height.clamp(130.0, 420.0);

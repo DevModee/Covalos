@@ -71,13 +71,96 @@ pub(super) struct Palette {
     pub(super) bracket: Color32,
 }
 
+/// Code color scheme, independent from the interface theme. `Auto` follows the theme.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum SyntaxStyle {
+    #[default]
+    Auto,
+    Nocturne,
+    Graphite,
+    Daylight,
+    HighContrast,
+}
+
+impl SyntaxStyle {
+    pub(super) const ALL: [Self; 5] = [
+        Self::Auto,
+        Self::Nocturne,
+        Self::Graphite,
+        Self::Daylight,
+        Self::HighContrast,
+    ];
+    pub(super) fn name(self) -> &'static str {
+        match self {
+            Self::Auto => "Follow theme",
+            Self::Nocturne => "Nocturne",
+            Self::Graphite => "Graphite",
+            Self::Daylight => "Daylight",
+            Self::HighContrast => "High Contrast",
+        }
+    }
+    pub(super) fn resolve(self, theme: Theme) -> Self {
+        match self {
+            Self::Auto => match theme {
+                Theme::Light => Self::Daylight,
+                Theme::HighContrast => Self::HighContrast,
+                Theme::Dark | Theme::Midnight => Self::Graphite,
+                Theme::Nocturne | Theme::Violet => Self::Nocturne,
+            },
+            other => other,
+        }
+    }
+}
+
+thread_local! {
+    static STYLE: std::cell::Cell<SyntaxStyle> = const { std::cell::Cell::new(SyntaxStyle::Auto) };
+}
+
+pub(super) fn set_style(style: SyntaxStyle) {
+    STYLE.with(|s| s.set(style));
+}
+
+fn resolved() -> SyntaxStyle {
+    STYLE.with(|s| s.get()).resolve(super::theme::active())
+}
+
 const fn hex(v: u32) -> Color32 {
     Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
 }
 
-pub(super) fn palette(theme: Theme) -> Palette {
-    match theme {
-        Theme::Light => Palette {
+pub(super) fn palette(style: SyntaxStyle) -> Palette {
+    match style.resolve(Theme::Nocturne) {
+        // Nocturne: pink-lilac control flow, lilac declarations, aqua strings, warm yellow
+        // calls, periwinkle types and soft orange literals on a violet-black canvas.
+        SyntaxStyle::Nocturne | SyntaxStyle::Auto => Palette {
+            text: hex(0xE6E1F0),
+            keyword: hex(0xF392D3),
+            declaration: hex(0xC9A2FF),
+            ty: hex(0x92B6FF),
+            function: hex(0xF6D58E),
+            method: hex(0xEBCB8B),
+            macro_: hex(0x8FD6F2),
+            parameter: hex(0xEBD3C2),
+            property: hex(0xC7CFEF),
+            constant: hex(0xF8A97E),
+            string: hex(0x86E1C1),
+            escape: hex(0xF392D3),
+            number: hex(0xF8A97E),
+            operator: hex(0xB4A9CC),
+            punctuation: hex(0x8C85A1),
+            comment: hex(0x6F6A83),
+            attribute: hex(0xB29BEA),
+            namespace: hex(0xA9B1D4),
+            tag: hex(0xF392D3),
+            lifetime: hex(0xF8A97E),
+            invalid: hex(0xFF6E87),
+            active_line: Color32::from_rgba_unmultiplied(205, 170, 255, 11),
+            guide: Color32::from_rgba_unmultiplied(150, 138, 186, 30),
+            guide_active: Color32::from_rgba_unmultiplied(201, 162, 255, 120),
+            bracket: hex(0xF392D3),
+        },
+        SyntaxStyle::Daylight => Palette {
             text: hex(0x2B2F3A),
             keyword: hex(0x7A3FD1),
             declaration: hex(0x5B4BC4),
@@ -104,7 +187,7 @@ pub(super) fn palette(theme: Theme) -> Palette {
             guide_active: Color32::from_rgba_unmultiplied(122, 63, 209, 110),
             bracket: hex(0x7A3FD1),
         },
-        Theme::HighContrast => Palette {
+        SyntaxStyle::HighContrast => Palette {
             text: hex(0xFFFFFF),
             keyword: hex(0xE3B8FF),
             declaration: hex(0xC9B8FF),
@@ -131,8 +214,8 @@ pub(super) fn palette(theme: Theme) -> Palette {
             guide_active: Color32::from_rgba_unmultiplied(227, 184, 255, 170),
             bracket: hex(0xE3B8FF),
         },
-        // Dark, Midnight and Violet share one palette tuned for graphite canvases.
-        _ => Palette {
+        // Graphite: the previous cool palette, kept for the Graphite and Midnight themes.
+        SyntaxStyle::Graphite => Palette {
             text: hex(0xD5DAE6),
             keyword: hex(0xC9A0FF),
             declaration: hex(0x9F8CFF),
@@ -609,7 +692,7 @@ fn format(font: &FontId, color: Color32, line_height: f32) -> TextFormat {
 struct Key<'a> {
     code: &'a str,
     language: &'a str,
-    theme: u8,
+    style: u8,
     size: u32,
     line_height: u32,
 }
@@ -622,7 +705,7 @@ impl ComputerMut<&Key<'_>, LayoutJob> for Highlighter {
         layout(
             key.code,
             key.language,
-            palette(Theme::ALL[key.theme as usize]),
+            palette(SyntaxStyle::ALL[key.style as usize]),
             f32::from_bits(key.size),
             f32::from_bits(key.line_height),
         )
@@ -637,11 +720,14 @@ pub(super) fn highlight(
     size: f32,
     line_height: f32,
 ) -> LayoutJob {
-    let theme = super::theme::active();
+    let style = resolved();
     let key = Key {
         code,
         language,
-        theme: Theme::ALL.iter().position(|t| *t == theme).unwrap_or(0) as u8,
+        style: SyntaxStyle::ALL
+            .iter()
+            .position(|t| *t == style)
+            .unwrap_or(1) as u8,
         size: size.to_bits(),
         line_height: line_height.to_bits(),
     };
@@ -653,7 +739,7 @@ pub(super) fn highlight(
 }
 
 pub(super) fn current() -> Palette {
-    palette(super::theme::active())
+    palette(resolved())
 }
 
 #[cfg(test)]
@@ -753,9 +839,16 @@ mod tests {
             };
             0.2126 * f(c.r()) + 0.7152 * f(c.g()) + 0.0722 * f(c.b())
         }
-        for theme in Theme::ALL {
-            let p = palette(theme);
-            let bg = theme.colors().canvas;
+        let cases = Theme::ALL
+            .iter()
+            .map(|t| (t.name(), SyntaxStyle::Auto.resolve(*t), t.colors().inset))
+            .chain(
+                Theme::ALL
+                    .iter()
+                    .map(|t| (t.name(), SyntaxStyle::Auto.resolve(*t), t.colors().canvas)),
+            );
+        for (name, style, bg) in cases {
+            let p = palette(style);
             for c in [
                 p.text,
                 p.keyword,
@@ -772,7 +865,7 @@ mod tests {
             ] {
                 let (a, b) = (lum(c), lum(bg));
                 let ratio = (a.max(b) + 0.05) / (a.min(b) + 0.05);
-                assert!(ratio >= 4.5, "{}: {ratio:.2} for {c:?}", theme.name());
+                assert!(ratio >= 4.5, "{name}: {ratio:.2} for {c:?}");
             }
         }
     }

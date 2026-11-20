@@ -438,7 +438,7 @@ impl Editor {
         let panel = SidePanel::left("workspace")
             .default_width(self.preferences.sidebar_width)
             .width_range(155.0..=340.0)
-            .frame(panel_frame(Margin::same(PANEL_PADDING)))
+            .frame(island(Margin::same(PANEL_PADDING)))
             .show(ctx, |ui| {
                 self.luma_dock(ui);
                 ui.horizontal(|ui| {
@@ -846,128 +846,173 @@ impl Editor {
     fn tabs(&mut self, ui: &mut Ui) {
         let mut active = None;
         let mut close = None;
-        egui::Frame::new().fill(colors().surface).show(ui, |ui| {
-            ScrollArea::horizontal()
-                .id_salt("tabs")
-                .auto_shrink([false, true])
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.x = 0.0;
-                    ui.horizontal(|ui| {
-                        let mut indicator = None;
-                        for (index, document) in self.documents.iter().enumerate() {
-                            let selected = self.active == Some(index);
-                            let name = workspace::filename(&document.path);
-                            let label_width = ui.fonts_mut(|fonts| {
-                                fonts
-                                    .layout_no_wrap(
-                                        name.clone(),
-                                        egui::FontId::proportional(BODY),
-                                        colors().text,
-                                    )
-                                    .size()
-                                    .x
-                            });
-                            let width = (label_width + 72.0).clamp(128.0, 232.0);
-                            let response = ui
-                                .add_sized([width, TAB_HEIGHT], egui::Button::new("").frame(false));
-                            #[cfg(test)]
-                            super::motion::record(ui, format!("Tab {}", name), response.rect);
-                            let painter = ui.painter_at(response.rect);
-                            if selected {
-                                painter.rect_filled(response.rect, 0, colors().canvas);
-                            } else if response.hovered() {
-                                painter.rect_filled(response.rect, 0, colors().hover);
-                            }
-                            super::assets::file(
-                                ui,
-                                response.rect.left_center() + egui::vec2(18.0, 0.0),
-                                &document.path,
-                            );
-                            let text_rect = egui::Rect::from_min_max(
-                                response.rect.left_top() + egui::vec2(34.0, 0.0),
-                                response.rect.right_bottom() - egui::vec2(30.0, 0.0),
-                            );
-                            painter.with_clip_rect(text_rect).text(
-                                text_rect.left_center(),
-                                egui::Align2::LEFT_CENTER,
-                                &name,
-                                egui::FontId::proportional(BODY),
+        let bar = egui::Frame::new()
+            .inner_margin(Margin {
+                left: 6,
+                right: 6,
+                top: 5,
+                bottom: 0,
+            })
+            .show(ui, |ui| {
+                ScrollArea::horizontal()
+                    .id_salt("tabs")
+                    .auto_shrink([false, true])
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.x = 2.0;
+                        ui.horizontal(|ui| {
+                            let mut indicator = None;
+                            let tab_height = TAB_HEIGHT - 8.0;
+                            for (index, document) in self.documents.iter().enumerate() {
+                                let selected = self.active == Some(index);
+                                let name = workspace::filename(&document.path);
+                                let label_width = ui.fonts_mut(|fonts| {
+                                    fonts
+                                        .layout_no_wrap(
+                                            name.clone(),
+                                            egui::FontId::proportional(BODY),
+                                            colors().text,
+                                        )
+                                        .size()
+                                        .x
+                                });
+                                let width = (label_width + 62.0).clamp(96.0, 232.0);
+                                let response = ui.add_sized(
+                                    [width, tab_height],
+                                    egui::Button::new("").frame(false),
+                                );
+                                #[cfg(test)]
+                                super::motion::record(ui, format!("Tab {}", name), response.rect);
+                                let painter = ui.painter_at(response.rect.expand(2.0));
+                                let hover = super::motion::spring(
+                                    ui.ctx(),
+                                    response.id.with("hover"),
+                                    if response.hovered() && !selected {
+                                        1.0
+                                    } else {
+                                        0.0
+                                    },
+                                    super::motion::Spring::SNAPPY,
+                                );
+                                if hover > 0.01 {
+                                    painter.rect_filled(
+                                        response.rect,
+                                        7,
+                                        colors().hover.gamma_multiply(hover * 0.8),
+                                    );
+                                }
                                 if selected {
-                                    colors().text
-                                } else {
-                                    colors().muted
-                                },
-                            );
-                            if selected {
-                                indicator = Some(response.rect);
-                            }
-                            let close_rect = egui::Rect::from_center_size(
-                                response.rect.right_center() - egui::vec2(16.0, 0.0),
-                                egui::vec2(24.0, 24.0),
-                            );
-                            let close_response = ui.interact(
-                                close_rect,
-                                Id::new(("tab-close", &document.path)),
-                                egui::Sense::click(),
-                            );
-                            if close_response.hovered() {
-                                painter.rect_filled(close_rect, 4, colors().hover);
-                                draw_icon(
-                                    &painter,
-                                    close_rect.center(),
-                                    Icon::Close,
-                                    colors().text,
+                                    indicator = Some(response.rect);
+                                }
+                                super::assets::file(
+                                    ui,
+                                    response.rect.left_center() + egui::vec2(16.0, 0.0),
+                                    &document.path,
                                 );
-                            } else if document.dirty {
-                                painter.circle_filled(close_rect.center(), 3.0, colors().accent);
-                            } else if selected || response.hovered() {
-                                draw_icon(
-                                    &painter,
-                                    close_rect.center(),
-                                    Icon::Close,
-                                    colors().muted,
+                                let text_rect = egui::Rect::from_min_max(
+                                    response.rect.left_top() + egui::vec2(30.0, 0.0),
+                                    response.rect.right_bottom() - egui::vec2(26.0, 0.0),
                                 );
-                            }
-                            response.widget_info(|| {
-                                egui::WidgetInfo::labeled(
-                                    egui::WidgetType::SelectableLabel,
-                                    true,
+                                painter.with_clip_rect(text_rect).text(
+                                    text_rect.left_center(),
+                                    egui::Align2::LEFT_CENTER,
                                     &name,
-                                )
-                            });
-                            if close_response.clicked() {
-                                close = Some(index);
-                            } else if response.clicked() {
-                                active = Some(index);
+                                    egui::FontId::proportional(BODY),
+                                    if selected {
+                                        colors().text
+                                    } else {
+                                        colors().secondary
+                                    },
+                                );
+                                let close_rect = egui::Rect::from_center_size(
+                                    response.rect.right_center() - egui::vec2(14.0, 0.0),
+                                    egui::vec2(20.0, 20.0),
+                                );
+                                let close_response = ui.interact(
+                                    close_rect,
+                                    Id::new(("tab-close", &document.path)),
+                                    egui::Sense::click(),
+                                );
+                                if close_response.hovered() {
+                                    painter.rect_filled(close_rect, 5, colors().hover);
+                                    draw_icon_sized(
+                                        &painter,
+                                        close_rect.center(),
+                                        Icon::Close,
+                                        colors().text,
+                                        14.0,
+                                    );
+                                } else if document.dirty {
+                                    painter.circle_filled(
+                                        close_rect.center(),
+                                        3.5,
+                                        colors().accent,
+                                    );
+                                } else if selected || response.hovered() {
+                                    draw_icon_sized(
+                                        &painter,
+                                        close_rect.center(),
+                                        Icon::Close,
+                                        colors().muted,
+                                        14.0,
+                                    );
+                                }
+                                response.widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::WidgetType::SelectableLabel,
+                                        true,
+                                        &name,
+                                    )
+                                });
+                                if close_response.clicked() {
+                                    close = Some(index);
+                                } else if response.clicked() {
+                                    active = Some(index);
+                                }
+                                if response.middle_clicked() {
+                                    close = Some(index);
+                                }
+                                response.on_hover_text(document.path.display().to_string());
+                                close_response.on_hover_text(tr("Close tab"));
                             }
-                            if response.middle_clicked() {
-                                close = Some(index);
+                            if let Some(rect) = indicator {
+                                // The selected pill and its accent rule travel between tabs
+                                // on a damped spring instead of jumping.
+                                let pill = super::motion::spring_rect(
+                                    ui.ctx(),
+                                    Id::new("active-tab-pill"),
+                                    rect,
+                                    super::motion::Spring::SMOOTH,
+                                );
+                                let under = ui
+                                    .ctx()
+                                    .layer_painter(egui::LayerId::new(
+                                        egui::Order::Background,
+                                        Id::new("tab-pill"),
+                                    ))
+                                    .with_clip_rect(ui.clip_rect());
+                                under.rect_filled(pill, 7, colors().elevated);
+                                under.rect_stroke(
+                                    pill,
+                                    7,
+                                    egui::Stroke::new(1.0_f32, colors().border),
+                                    egui::StrokeKind::Inside,
+                                );
+                                ui.painter().hline(
+                                    (pill.left() + 10.0)..=(pill.right() - 10.0),
+                                    pill.bottom() + 3.0,
+                                    egui::Stroke::new(2.0_f32, colors().accent),
+                                );
                             }
-                            response.on_hover_text(document.path.display().to_string());
-                            close_response.on_hover_text(tr("Close tab"));
-                        }
-                        if let Some(rect) = indicator {
-                            let left = super::motion::value(
-                                ui.ctx(),
-                                Id::new("active-tab-left"),
-                                rect.left() + 14.0,
-                                super::motion::PANEL,
-                            );
-                            let right = super::motion::value(
-                                ui.ctx(),
-                                Id::new("active-tab-right"),
-                                rect.right() - 14.0,
-                                super::motion::PANEL,
-                            );
-                            ui.painter().hline(
-                                left..=right,
-                                rect.bottom() - 1.0,
-                                egui::Stroke::new(2.0_f32, colors().accent),
-                            );
-                        }
+                        });
                     });
-                });
-        });
+            });
+        ui.painter().hline(
+            bar.response.rect.x_range(),
+            bar.response.rect.bottom() + 3.5,
+            egui::Stroke::new(1.0_f32, colors().border),
+        );
+        ui.add_space(4.0);
         if let Some(index) = active {
             self.activate(index);
         }
@@ -1055,7 +1100,7 @@ impl Editor {
         let animating = progress < 0.999 || previous < 0.999;
         let panel = SidePanel::right("assistant")
             .default_width(desired)
-            .frame(panel_frame(Margin::same(12)));
+            .frame(island(Margin::same(12)));
         let panel = if animating {
             panel
                 .exact_width((desired * progress).max(1.0))
