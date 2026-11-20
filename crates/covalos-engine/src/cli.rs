@@ -30,7 +30,12 @@ pub struct CliExecutor {
     /// Explicit binaries per provider; others are discovered on `PATH`.
     pub programs: BTreeMap<ProviderKind, PathBuf>,
     pub limits: ProcessLimits,
+    /// Builds Claude Code `--settings` for an attempt, e.g. the host's
+    /// PreToolUse approval gate scoped to the attempt's workdir.
+    pub claude_settings: Option<SettingsFn>,
 }
+
+pub type SettingsFn = Arc<dyn Fn(&Assignment) -> Option<String> + Send + Sync>;
 
 fn fail(reason: impl Into<String>, retryable: bool) -> Outcome {
     Outcome::Failed {
@@ -75,6 +80,10 @@ impl Executor for CliExecutor {
             resume: None,
             model: assignment.model.clone(),
             sandbox: assignment.role.autonomy.sandbox(),
+            settings: self
+                .claude_settings
+                .as_ref()
+                .and_then(|build| build(assignment)),
         });
         let plan = {
             let credentials = match self.credentials.lock() {

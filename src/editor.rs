@@ -3,6 +3,7 @@ mod evidence;
 #[cfg(test)]
 mod visual_tests;
 
+mod agent_hub;
 mod assets;
 mod brands;
 mod clean;
@@ -729,6 +730,7 @@ impl Editor {
         });
         self.poll();
         self.poll_chats(ctx);
+        self.poll_agent_runtime(ctx);
         self.tools.poll();
         let snapshots = self.hub.snapshots(&self.chat, self.root.as_deref());
         self.companion.sync(

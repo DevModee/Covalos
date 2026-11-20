@@ -178,6 +178,7 @@ pub(super) struct Hub {
     task_request: String,
     note: String,
     tab: HubTab,
+    pub(super) agents: super::agent_hub::State,
 }
 
 #[derive(Default, PartialEq, Eq)]
@@ -185,6 +186,9 @@ enum HubTab {
     #[default]
     Conversations,
     Companion,
+    Accounts,
+    Sessions,
+    Autonomy,
     Tasks,
     Memory,
     Skills,
@@ -431,6 +435,9 @@ impl Editor {
                 for (tab, label) in [
                     (HubTab::Conversations, "Conversations"),
                     (HubTab::Companion, "Live agents"),
+                    (HubTab::Accounts, "Accounts"),
+                    (HubTab::Sessions, "Agent sessions"),
+                    (HubTab::Autonomy, "Autonomous"),
                     (HubTab::Tasks, "Tasks"),
                     (HubTab::Memory, "Project memory"),
                     (HubTab::Skills, "Skills"),
@@ -456,6 +463,23 @@ impl Editor {
             ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
                 ui.set_width(body.width());
                 match self.hub.tab {
+                    HubTab::Accounts => {
+                        section(
+                            ui,
+                            "Providers & accounts",
+                            "Connect Claude Code, Codex and Gemini with their official sign-in or an API key.",
+                        );
+                        self.accounts_panel(ui);
+                    }
+                    HubTab::Sessions => self.sessions_panel(ui),
+                    HubTab::Autonomy => {
+                        section(
+                            ui,
+                            "Autonomous engine",
+                            "Plan a goal into tasks, assign agents, and supervise budgets, approvals and recovery.",
+                        );
+                        self.autonomy_panel(ui);
+                    }
                     HubTab::Companion => {
                         egui::ScrollArea::vertical().show(ui, |ui| self.companion_panel(ui));
                     }

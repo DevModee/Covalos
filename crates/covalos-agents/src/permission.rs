@@ -275,6 +275,9 @@ mod tests {
     #[test]
     fn escapes_are_denied() {
         let (dir, policy) = setup(Preset::Worktree);
+        // The temp dir must outlive the policy; only the Unix symlink check reads it.
+        #[cfg(not(unix))]
+        let _ = &dir;
         assert_eq!(
             policy.evaluate(&Action::Write("../outside".into())),
             Decision::Deny

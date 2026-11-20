@@ -575,6 +575,8 @@ dependencies = [
 name = "covalos"
 version = "0.4.0"
 dependencies = [
+ "covalos-agents",
+ "covalos-engine",
  "eframe",
  "egui_extras",
  "ignore",
@@ -589,6 +591,26 @@ dependencies = [
  "tempfile",
  "windows-sys 0.61.2",
  "winit",
+]
+
+[[package]]
+name = "covalos-agents"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "covalos-engine"
+version = "0.1.0"
+dependencies = [
+ "covalos-agents",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

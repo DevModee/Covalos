@@ -8,6 +8,8 @@
 pub mod account;
 pub mod context;
 pub mod credentials;
+#[cfg(windows)]
+pub mod credentials_windows;
 pub mod event;
 pub mod launch;
 pub mod models;
