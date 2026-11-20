@@ -103,6 +103,10 @@ The name comes from *covalent* — distinct nuclei sharing a common field to for
 
 ---
 
+## Windows Installer
+
+Build a standard Windows x64 installer with `.\tools\build-windows-installer.ps1`. It registers COVALOS in Installed apps, adds a Start menu shortcut and offers desktop/context menu integration. See [`docs/WINDOWS_INSTALLER.md`](docs/WINDOWS_INSTALLER.md) for the installer location, rebuild command, validation and signing status.
+
 ## Building & Running
 
 ### Prerequisites
@@ -163,7 +167,8 @@ covalos.exe --library installed
 
 ## Roadmap
 
-- [ ] **Final brand isotype sign-off** and Windows installer packaging.
+- [ ] **Final brand isotype sign-off**.
+- [x] **Windows x64 installer** with Windows registration, shortcuts, optional context menus and non-destructive uninstallation.
 - [ ] **Full multi-agent orchestration:** Verified headless adapters for **Gemini CLI** and **Antigravity (`agy`)**, shared cross-agent memory, and automatic Library Studio CLI guidance inside Agent Hub.
 - [ ] **Isolated WebView2 previews** for React components in Library Studio.
 - [ ] **Advanced IDE capabilities:** LSP (completion, diagnostics, formatting, go-to-definition), DAP debugging, persistent PTY terminal, and extension support.
