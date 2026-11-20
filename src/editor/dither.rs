@@ -1,4 +1,4 @@
-//! Dither Field: the AEROS home background, rendered on the GPU.
+//! Dither Field: the COVALOS home background, rendered on the GPU.
 //!
 //! Art direction verified against the owner's reference video (x.com/sarthakguptadev,
 //! status 2122214682924900813) and React Bits "Pixel Blast", which the reference reproduces:
@@ -126,9 +126,35 @@ pub(super) fn paint(painter: &egui::Painter, rect: egui::Rect, frame: Frame) {
     painter.add(callback);
 }
 
+struct FieldUniforms {
+    size: Option<glow::UniformLocation>,
+    scale: Option<glow::UniformLocation>,
+    time: Option<glow::UniformLocation>,
+    pixel: Option<glow::UniformLocation>,
+    rows: Option<glow::UniformLocation>,
+    density: Option<glow::UniformLocation>,
+    variant: Option<glow::UniformLocation>,
+    trail: Option<glow::UniformLocation>,
+    ripples: Option<glow::UniformLocation>,
+}
+
+struct ComposeUniforms {
+    cells: Option<glow::UniformLocation>,
+    origin: Option<glow::UniformLocation>,
+    size: Option<glow::UniformLocation>,
+    pixel: Option<glow::UniformLocation>,
+    cell_count: Option<glow::UniformLocation>,
+    strength: Option<glow::UniformLocation>,
+    light: Option<glow::UniformLocation>,
+    ink: Option<glow::UniformLocation>,
+    accent: Option<glow::UniformLocation>,
+}
+
 struct Gpu {
     field: glow::Program,
+    field_u: FieldUniforms,
     compose: glow::Program,
+    compose_u: ComposeUniforms,
     vao: glow::VertexArray,
     texture: glow::Texture,
     framebuffer: glow::Framebuffer,
@@ -154,7 +180,7 @@ fn draw(info: egui::PaintCallbackInfo, gl: &Arc<glow::Context>, frame: &Frame) {
             match unsafe { compile(gl) } {
                 Ok(gpu) => *slot = Some(gpu),
                 Err(error) => {
-                    eprintln!("AEROS Dither Field unavailable: {error}");
+                    eprintln!("COVALOS Dither Field unavailable: {error}");
                     UNAVAILABLE.store(true, Ordering::Relaxed);
                     return;
                 }
@@ -192,29 +218,35 @@ fn draw(info: egui::PaintCallbackInfo, gl: &Arc<glow::Context>, frame: &Frame) {
             gl.disable(glow::SCISSOR_TEST);
             gl.disable(glow::BLEND);
             gl.use_program(Some(gpu.field));
-            let u = |name: &str| gl.get_uniform_location(gpu.field, name);
+            let fu = &gpu.field_u;
             gl.uniform_2_f32(
-                u("uSize").as_ref(),
+                fu.size.as_ref(),
                 viewport.width_px as f32,
                 viewport.height_px as f32,
             );
-            gl.uniform_1_f32(u("uScale").as_ref(), ppp);
-            gl.uniform_1_f32(u("uTime").as_ref(), frame.time);
-            gl.uniform_1_f32(u("uPixel").as_ref(), pixel);
-            gl.uniform_1_f32(u("uRows").as_ref(), cells.1 as f32);
-            gl.uniform_1_f32(u("uDensity").as_ref(), frame.density);
+            gl.uniform_1_f32(fu.scale.as_ref(), ppp);
+            gl.uniform_1_f32(fu.time.as_ref(), frame.time);
+            gl.uniform_1_f32(fu.pixel.as_ref(), pixel);
+            gl.uniform_1_f32(fu.rows.as_ref(), cells.1 as f32);
+            gl.uniform_1_f32(fu.density.as_ref(), frame.density);
             gl.uniform_1_f32(
-                u("uVariant").as_ref(),
+                fu.variant.as_ref(),
                 if frame.variant == Variant::Bloom {
                     1.0
                 } else {
                     0.0
                 },
             );
-            let trail: Vec<f32> = frame.trail.iter().flatten().copied().collect();
-            let ripples: Vec<f32> = frame.ripples.iter().flatten().copied().collect();
-            gl.uniform_3_f32_slice(u("uTrail[0]").as_ref(), &trail);
-            gl.uniform_3_f32_slice(u("uRipples[0]").as_ref(), &ripples);
+            let mut trail = [0.0f32; TRAIL * 3];
+            for (i, sample) in frame.trail.iter().enumerate() {
+                trail[i * 3..i * 3 + 3].copy_from_slice(sample);
+            }
+            let mut ripples = [0.0f32; RIPPLES * 3];
+            for (i, sample) in frame.ripples.iter().enumerate() {
+                ripples[i * 3..i * 3 + 3].copy_from_slice(sample);
+            }
+            gl.uniform_3_f32_slice(fu.trail.as_ref(), &trail);
+            gl.uniform_3_f32_slice(fu.ripples.as_ref(), &ripples);
             gl.bind_vertex_array(Some(gpu.vao));
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
             // Pass 2: compose the dithered pixels into egui's framebuffer.
@@ -234,32 +266,27 @@ fn draw(info: egui::PaintCallbackInfo, gl: &Arc<glow::Context>, frame: &Frame) {
             );
             gl.enable(glow::BLEND);
             gl.use_program(Some(gpu.compose));
-            let u = |name: &str| gl.get_uniform_location(gpu.compose, name);
+            let cu = &gpu.compose_u;
             gl.active_texture(glow::TEXTURE0);
             gl.bind_texture(glow::TEXTURE_2D, Some(gpu.texture));
-            gl.uniform_1_i32(u("uCells").as_ref(), 0);
+            gl.uniform_1_i32(cu.cells.as_ref(), 0);
             gl.uniform_2_f32(
-                u("uOrigin").as_ref(),
+                cu.origin.as_ref(),
                 viewport.left_px as f32,
                 viewport.from_bottom_px as f32,
             );
             gl.uniform_2_f32(
-                u("uSize").as_ref(),
+                cu.size.as_ref(),
                 viewport.width_px as f32,
                 viewport.height_px as f32,
             );
-            gl.uniform_1_f32(u("uPixel").as_ref(), pixel);
-            gl.uniform_2_i32(u("uCellCount").as_ref(), cells.0, cells.1);
-            gl.uniform_1_f32(u("uStrength").as_ref(), frame.strength);
-            gl.uniform_1_f32(u("uLight").as_ref(), if frame.light { 1.0 } else { 0.0 });
+            gl.uniform_1_f32(cu.pixel.as_ref(), pixel);
+            gl.uniform_2_i32(cu.cell_count.as_ref(), cells.0, cells.1);
+            gl.uniform_1_f32(cu.strength.as_ref(), frame.strength);
+            gl.uniform_1_f32(cu.light.as_ref(), if frame.light { 1.0 } else { 0.0 });
+            gl.uniform_3_f32(cu.ink.as_ref(), frame.ink.r(), frame.ink.g(), frame.ink.b());
             gl.uniform_3_f32(
-                u("uInk").as_ref(),
-                frame.ink.r(),
-                frame.ink.g(),
-                frame.ink.b(),
-            );
-            gl.uniform_3_f32(
-                u("uAccent").as_ref(),
+                cu.accent.as_ref(),
                 frame.accent.r(),
                 frame.accent.g(),
                 frame.accent.b(),
@@ -353,9 +380,33 @@ unsafe fn compile(gl: &glow::Context) -> Result<Gpu, String> {
         if !complete {
             return Err("offscreen framebuffer incomplete".into());
         }
+        let field_u = FieldUniforms {
+            size: gl.get_uniform_location(field, "uSize"),
+            scale: gl.get_uniform_location(field, "uScale"),
+            time: gl.get_uniform_location(field, "uTime"),
+            pixel: gl.get_uniform_location(field, "uPixel"),
+            rows: gl.get_uniform_location(field, "uRows"),
+            density: gl.get_uniform_location(field, "uDensity"),
+            variant: gl.get_uniform_location(field, "uVariant"),
+            trail: gl.get_uniform_location(field, "uTrail[0]"),
+            ripples: gl.get_uniform_location(field, "uRipples[0]"),
+        };
+        let compose_u = ComposeUniforms {
+            cells: gl.get_uniform_location(compose, "uCells"),
+            origin: gl.get_uniform_location(compose, "uOrigin"),
+            size: gl.get_uniform_location(compose, "uSize"),
+            pixel: gl.get_uniform_location(compose, "uPixel"),
+            cell_count: gl.get_uniform_location(compose, "uCellCount"),
+            strength: gl.get_uniform_location(compose, "uStrength"),
+            light: gl.get_uniform_location(compose, "uLight"),
+            ink: gl.get_uniform_location(compose, "uInk"),
+            accent: gl.get_uniform_location(compose, "uAccent"),
+        };
         Ok(Gpu {
             field,
+            field_u,
             compose,
+            compose_u,
             vao,
             texture,
             framebuffer,

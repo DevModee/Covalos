@@ -1,4 +1,4 @@
-//! Original AEROS identity primitives. Bounded work; no background threads or asset downloads.
+//! Original COVALOS identity primitives. Bounded work; no background threads or asset downloads.
 use super::theme;
 use eframe::egui::{self, Color32, FontId, Pos2, Rect, Stroke, Ui};
 use serde::{Deserialize, Serialize};
@@ -205,10 +205,14 @@ impl Identity {
         background_visible: bool,
         mood: Mood,
     ) {
+        let content = ctx.content_rect();
         let (now, visible, pointer, click) = ctx.input(|i| {
             (
                 i.time,
-                i.focused && !i.viewport().minimized.unwrap_or(false),
+                i.focused
+                    && !i.viewport().minimized.unwrap_or(false)
+                    && content.width() > 64.0
+                    && content.height() > 64.0,
                 i.pointer.hover_pos(),
                 i.pointer.primary_clicked(),
             )
