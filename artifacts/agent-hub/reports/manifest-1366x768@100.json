@@ -1,0 +1,43 @@
+{
+  "captures": [
+    {
+      "file": "engine/01-autonomous-running-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 5711,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "COVALOS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "engine/02-autonomous-settled-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 105446,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "COVALOS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    }
+  ],
+  "input": "eframe raw_input_hook in a native window (not OS-level SendInput)",
+  "ui_build_cpu_ms": {
+    "max": 2675.6032,
+    "p50": 1.1988,
+    "p95": 1.5414,
+    "samples": 6730
+  }
+}

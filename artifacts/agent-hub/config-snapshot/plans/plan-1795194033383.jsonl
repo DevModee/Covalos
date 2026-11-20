@@ -1,0 +1,9 @@
+{"record":"plan-created","plan":"plan-1795194033383","goal":"Review calc.py and publish one concrete improvement as a review entry.","budget":{"wall_ms":600000,"tokens":null,"cost_micros":null},"tasks":[{"id":"task-1","title":"Review calc.py and publish one concrete improvement as a review entry.","instructions":"Review calc.py and publish one concrete improvement as a review entry.","role":"reviewer","depends_on":[],"budget":{"wall_ms":1200000,"tokens":null,"cost_micros":null},"max_attempts":1}],"created_ms":1795194033401}
+{"record":"context","draft":{"author":null,"kind":"goal","text":"Review calc.py and publish one concrete improvement as a review entry.","pinned":true,"refs":[],"supersedes":null}}
+{"record":"task-started","task":"task-1","attempt":1,"account":"codex-main","model":null,"session":"task-1-1"}
+{"record":"task-spend","task":"task-1","attempt":1,"spend":{"wall_ms":0,"tokens":210547,"cost_micros":0,"cost_reported":false}}
+{"record":"context","draft":{"author":"task-1-1","kind":"review","text":"Add a regression test for `sub` in `calc.py:5` that asserts `sub(2, 5) == -3`. This single case catches reversed operands and accidental use of an absolute difference.","pinned":false,"refs":[],"supersedes":null}}
+{"record":"task-spend","task":"task-1","attempt":1,"spend":{"wall_ms":101999,"tokens":0,"cost_micros":0,"cost_reported":false}}
+{"record":"context","draft":{"author":"task-1-1","kind":"task-completed","text":"COVALOS-CONTEXT review: Add a regression test for `sub` in `calc.py:5` that asserts `sub(2, 5) == -3`. This single case catches reversed operands and accidental use of an absolute difference.","pinned":false,"refs":[{"ref":"task","id":"task-1"}],"supersedes":null}}
+{"record":"task-finished","task":"task-1","attempt":1,"status":{"status":"succeeded"}}
+{"record":"settled","state":{"state":"succeeded"}}

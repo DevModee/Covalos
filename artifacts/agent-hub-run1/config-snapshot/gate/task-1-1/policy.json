@@ -1,0 +1,1 @@
+{"root":"C:/Users/Matias/AppData/Local/Temp/.tmpMTILhW/config/agents/worktrees/agent-sandbox-5aa53ed6/task-1","preset":"read-only","grants":[{"kind":"execute","target":"git diff"},{"kind":"execute","target":"git log --oneline"}],"allow_safe_commands":false}

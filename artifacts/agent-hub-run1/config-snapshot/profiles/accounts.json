@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "accounts": [
+    {
+      "id": "codex-main",
+      "provider": "codex",
+      "label": "Codex - ChatGPT (system CLI)",
+      "method": "system-cli",
+      "enabled": true,
+      "declared_models": [],
+      "default_model": null
+    },
+    {
+      "id": "codex-isolated",
+      "provider": "codex",
+      "label": "Codex - second account (isolated)",
+      "method": "official-login",
+      "enabled": true,
+      "declared_models": [],
+      "default_model": null
+    },
+    {
+      "id": "claude-main",
+      "provider": "claude-code",
+      "label": "Claude - system CLI",
+      "method": "system-cli",
+      "enabled": true,
+      "declared_models": [],
+      "default_model": null
+    },
+    {
+      "id": "claude-work",
+      "provider": "claude-code",
+      "label": "Claude - work (isolated)",
+      "method": "official-login",
+      "enabled": true,
+      "declared_models": [],
+      "default_model": null
+    },
+    {
+      "id": "claude-alt",
+      "provider": "claude-code",
+      "label": "Claude - alt (isolated)",
+      "method": "official-login",
+      "enabled": true,
+      "declared_models": [],
+      "default_model": null
+    }
+  ]
+}

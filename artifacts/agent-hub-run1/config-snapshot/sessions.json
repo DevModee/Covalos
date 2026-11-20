@@ -1,0 +1,284 @@
+[
+  {
+    "id": "s192173958",
+    "title": "Agent A - add mul()",
+    "account": "codex-main",
+    "provider": "codex",
+    "model": null,
+    "workdir": "C:/Users/Matias/AppData/Local/Temp/.tmpMTILhW/config/agents/worktrees/agent-sandbox-5aa53ed6/s192173958",
+    "worktree_branch": "covalos/agent/s192173958",
+    "repo": "C:\\Users\\Matias\\AppData\\Local\\Temp\\.tmpMTILhW\\agent-sandbox",
+    "preset": "worktree",
+    "allow_safe_commands": true,
+    "share_context": true,
+    "provider_session": "01a1f9ca-c4d4-7cb1-8960-a76ab79374f4",
+    "created_ms": 1795192176739,
+    "status": "completed",
+    "turns": 1,
+    "input_tokens": 397238,
+    "output_tokens": 957,
+    "cost_micros": 0,
+    "log": [
+      {
+        "at_ms": 1795192176739,
+        "kind": "created",
+        "text": "OpenAI Codex · Codex - ChatGPT (system CLI) · C:/Users/Matias/AppData/Local/Temp/.tmpMTILhW/config/agents/worktrees/agent-sandbox-5aa53ed6/s192173958 (worktree, branch covalos/agent/s192173958)"
+      },
+      {
+        "at_ms": 1795192176746,
+        "kind": "you",
+        "text": "In calc.py add a function mul(a, b) that returns a * b. Edit only calc.py. Reply with one short sentence."
+      },
+      {
+        "at_ms": 1795192178792,
+        "kind": "started",
+        "text": "Provider session 01a1f9ca-c4d4-7cb1-8960-a76ab79374f4"
+      },
+      {
+        "at_ms": 1795192185427,
+        "kind": "agent",
+        "text": "I’ll check `calc.py` and add `mul(a, b)`."
+      },
+      {
+        "at_ms": 1795192281320,
+        "kind": "tool",
+        "text": "shell"
+      },
+      {
+        "at_ms": 1795192282750,
+        "kind": "tool",
+        "text": "shell"
+      },
+      {
+        "at_ms": 1795192332924,
+        "kind": "agent",
+        "text": "Added `mul(a, b)` to `calc.py` and verified that it returns `a * b`."
+      },
+      {
+        "at_ms": 1795192332962,
+        "kind": "usage",
+        "text": "397238 in · 957 out tokens"
+      },
+      {
+        "at_ms": 1795192332962,
+        "kind": "done",
+        "text": "Turn completed"
+      },
+      {
+        "at_ms": 1795192334359,
+        "kind": "context",
+        "text": "Shared its result as context entry #2"
+      }
+    ],
+    "context_cursor": 2
+  },
+  {
+    "id": "s192176754",
+    "title": "Agent B - add tests",
+    "account": "codex-main",
+    "provider": "codex",
+    "model": null,
+    "workdir": "C:/Users/Matias/AppData/Local/Temp/.tmpMTILhW/config/agents/worktrees/agent-sandbox-5aa53ed6/s192176754",
+    "worktree_branch": "covalos/agent/s192176754",
+    "repo": "C:\\Users\\Matias\\AppData\\Local\\Temp\\.tmpMTILhW\\agent-sandbox",
+    "preset": "worktree",
+    "allow_safe_commands": true,
+    "share_context": true,
+    "provider_session": "01a1f9ca-c821-7183-b0c3-78352a358696",
+    "created_ms": 1795192178365,
+    "status": "completed",
+    "turns": 1,
+    "input_tokens": 476517,
+    "output_tokens": 998,
+    "cost_micros": 0,
+    "log": [
+      {
+        "at_ms": 1795192178365,
+        "kind": "created",
+        "text": "OpenAI Codex · Codex - ChatGPT (system CLI) · C:/Users/Matias/AppData/Local/Temp/.tmpMTILhW/config/agents/worktrees/agent-sandbox-5aa53ed6/s192176754 (worktree, branch covalos/agent/s192176754)"
+      },
+      {
+        "at_ms": 1795192178372,
+        "kind": "you",
+        "text": "Create test_calc.py with two pytest tests, one for add and one for sub from calc.py. Create only that file. Reply with one short sentence."
+      },
+      {
+        "at_ms": 1795192179176,
+        "kind": "started",
+        "text": "Provider session 01a1f9ca-c821-7183-b0c3-78352a358696"
+      },
+      {
+        "at_ms": 1795192183717,
+        "kind": "agent",
+        "text": "I’ll check `calc.py` before writing the two tests."
+      },
+      {
+        "at_ms": 1795192283264,
+        "kind": "tool",
+        "text": "shell"
+      },
+      {
+        "at_ms": 1795192283264,
+        "kind": "tool",
+        "text": "shell"
+      },
+      {
+        "at_ms": 1795192288338,
+        "kind": "agent",
+        "text": "Created only `test_calc.py` with one pytest test each for `add` and `sub`; pytest could not run in this environment."
+      },
+      {
+        "at_ms": 1795192288378,
+        "kind": "usage",
+        "text": "476517 in · 998 out tokens"
+      },
+      {
+        "at_ms": 1795192288378,
+        "kind": "done",
+        "text": "Turn completed"
+      },
+      {
+        "at_ms": 1795192289749,
+        "kind": "context",
+        "text": "Shared its result as context entry #1"
+      }
+    ],
+    "context_cursor": 1
+  },
+  {
+    "id": "s192335997",
+    "title": "Agent C - reads shared context",
+    "account": "codex-main",
+    "provider": "codex",
+    "model": null,
+    "workdir": "C:\\Users\\Matias\\AppData\\Local\\Temp\\.tmpMTILhW\\agent-sandbox",
+    "worktree_branch": null,
+    "repo": null,
+    "preset": "read-only",
+    "allow_safe_commands": true,
+    "share_context": true,
+    "provider_session": "01a1f9cd-3286-7801-91bb-b37d7b74c28e",
+    "created_ms": 1795192335997,
+    "status": "failed",
+    "turns": 3,
+    "input_tokens": 20124,
+    "output_tokens": 62,
+    "cost_micros": 0,
+    "log": [
+      {
+        "at_ms": 1795192335997,
+        "kind": "created",
+        "text": "OpenAI Codex · Codex - ChatGPT (system CLI) · C:\\Users\\Matias\\AppData\\Local\\Temp\\.tmpMTILhW\\agent-sandbox"
+      },
+      {
+        "at_ms": 1795192336004,
+        "kind": "you",
+        "text": "Using only the shared COVALOS context above, say in one sentence what the other agents reported. Do not read or change files."
+      },
+      {
+        "at_ms": 1795192336004,
+        "kind": "context",
+        "text": "Included shared context up to entry #2"
+      },
+      {
+        "at_ms": 1795192337610,
+        "kind": "started",
+        "text": "Provider session 01a1f9cd-3286-7801-91bb-b37d7b74c28e"
+      },
+      {
+        "at_ms": 1795192341715,
+        "kind": "agent",
+        "text": "Agent B reported creating `test_calc.py` with one pytest test each for `add` and `sub` and said pytest could not run in the environment, while Agent A reported adding `mul(a, b)` to `calc.py` and verifying that it returns `a * b`."
+      },
+      {
+        "at_ms": 1795192341758,
+        "kind": "usage",
+        "text": "20124 in · 62 out tokens"
+      },
+      {
+        "at_ms": 1795192341758,
+        "kind": "done",
+        "text": "Turn completed"
+      },
+      {
+        "at_ms": 1795192343682,
+        "kind": "context",
+        "text": "Shared its result as context entry #3"
+      },
+      {
+        "at_ms": 1795192351006,
+        "kind": "you",
+        "text": "Reply with the single word READY."
+      },
+      {
+        "at_ms": 1795192352136,
+        "kind": "recovery",
+        "text": "COVALOS stopped during this turn. Send a message to resume the provider session."
+      },
+      {
+        "at_ms": 1795192353092,
+        "kind": "you",
+        "text": "We were interrupted. Reply with the single word RESUMED."
+      },
+      {
+        "at_ms": 1795192354324,
+        "kind": "error",
+        "text": "provider exited without a result"
+      },
+      {
+        "at_ms": 1795192354324,
+        "kind": "error",
+        "text": "2026-11-20T16:32:33.520671Z ERROR codex_core::session::session: failed to initialize thread persistence: thread-store conflict: thread 01a1f9cd-3286-7801-91bb-b37d7b74c28e already has an active writer\n2026-11-20T16:32:33.520799Z ERROR codex_core::session: Failed to create session: thread-store conflict: thread 01a1f9cd-3286-7801-91bb-b37d7b74c28e already has an active writer\nError: thread/resume: thread/resume failed: thread 01a1f9cd-3286-7801-91bb-b37d7b74c28e already has an active writer (code -32600)"
+      }
+    ],
+    "context_cursor": 3
+  },
+  {
+    "id": "s192344438",
+    "title": "Agent D - cancelled",
+    "account": "codex-main",
+    "provider": "codex",
+    "model": null,
+    "workdir": "C:\\Users\\Matias\\AppData\\Local\\Temp\\.tmpMTILhW\\agent-sandbox",
+    "worktree_branch": null,
+    "repo": null,
+    "preset": "read-only",
+    "allow_safe_commands": true,
+    "share_context": true,
+    "provider_session": "01a1f9cd-538a-76f2-b735-4902cc29754d",
+    "created_ms": 1795192344438,
+    "status": "cancelled",
+    "turns": 1,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_micros": 0,
+    "log": [
+      {
+        "at_ms": 1795192344438,
+        "kind": "created",
+        "text": "OpenAI Codex · Codex - ChatGPT (system CLI) · C:\\Users\\Matias\\AppData\\Local\\Temp\\.tmpMTILhW\\agent-sandbox"
+      },
+      {
+        "at_ms": 1795192344445,
+        "kind": "you",
+        "text": "Explain calc.py line by line in exhaustive detail with many examples."
+      },
+      {
+        "at_ms": 1795192344445,
+        "kind": "context",
+        "text": "Included shared context up to entry #3"
+      },
+      {
+        "at_ms": 1795192345801,
+        "kind": "started",
+        "text": "Provider session 01a1f9cd-538a-76f2-b735-4902cc29754d"
+      },
+      {
+        "at_ms": 1795192350242,
+        "kind": "cancelled",
+        "text": "Cancelled from COVALOS"
+      }
+    ],
+    "context_cursor": 3
+  }
+]

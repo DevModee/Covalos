@@ -1,0 +1,107 @@
+{
+  "captures": [
+    {
+      "file": "replay/01-accounts-1100x700@125.png",
+      "language": "English",
+      "ms_since_last_action": 877,
+      "pixels": [
+        1100,
+        700
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "COVALOS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        10000.0,
+        10000.0
+      ]
+    },
+    {
+      "file": "replay/02-session-a-1100x700@125.png",
+      "language": "English",
+      "ms_since_last_action": 748,
+      "pixels": [
+        1100,
+        700
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "COVALOS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        10000.0,
+        10000.0
+      ]
+    },
+    {
+      "file": "replay/03-session-b-1100x700@125.png",
+      "language": "English",
+      "ms_since_last_action": 750,
+      "pixels": [
+        1100,
+        700
+      ],
+      "pixels_per_point": 1.25,
+      "theme": "COVALOS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        8000.0,
+        8000.0
+      ]
+    },
+    {
+      "file": "replay/04-session-c-recovered-1100x700@125.png",
+      "language": "English",
+      "ms_since_last_action": 757,
+      "pixels": [
+        1100,
+        700
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "COVALOS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        10000.0,
+        10000.0
+      ]
+    },
+    {
+      "file": "replay/05-session-d-cancelled-1100x700@125.png",
+      "language": "English",
+      "ms_since_last_action": 749,
+      "pixels": [
+        1100,
+        700
+      ],
+      "pixels_per_point": 1.25,
+      "theme": "COVALOS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        8000.0,
+        8000.0
+      ]
+    },
+    {
+      "file": "replay/06-autonomy-1100x700@125.png",
+      "language": "English",
+      "ms_since_last_action": 749,
+      "pixels": [
+        1100,
+        700
+      ],
+      "pixels_per_point": 1.25,
+      "theme": "COVALOS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        8000.0,
+        8000.0
+      ]
+    }
+  ],
+  "input": "eframe raw_input_hook in a native window (not OS-level SendInput)",
+  "ui_build_cpu_ms": {
+    "max": 4.3718,
+    "p50": 1.7995,
+    "p95": 2.4149000000000003,
+    "samples": 1024
+  }
+}
