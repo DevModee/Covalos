@@ -102,6 +102,21 @@ fn steps(matrix: bool) -> Vec<Step> {
         Act(|e, _, _| caret_after(e, "fn summarize(")),
         Wait(0.5),
         Shot("03-editor/rust/editor-rust-nocturne"),
+        // MF-05: Explorer zoom leaves the code untouched, editor zoom leaves the tree.
+        Act(|e, _, _| e.preferences.explorer_zoom = 1.4),
+        Wait(0.4),
+        Shot("02-explorer/explorer-zoom-140-code-unchanged"),
+        Act(|e, c, _| {
+            e.preferences.explorer_zoom = 1.0;
+            e.preferences.font_size = 18.0;
+            theme::install(c, 18.0, false, e.preferences.theme);
+        }),
+        Wait(0.4),
+        Shot("03-editor/rust/editor-zoom-18pt-explorer-unchanged"),
+        Act(|e, c, _| {
+            e.preferences.font_size = 14.0;
+            theme::install(c, 14.0, false, e.preferences.theme);
+        }),
         Act(|e, c, _| open_git(e, c)),
         Until(|e| e.git_ready(), "git status"),
         Wait(0.3),
