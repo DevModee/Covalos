@@ -83,7 +83,8 @@ impl Policy {
         }
     }
 
-    fn grant(&mut self, action: Action) {
+    /// Pre-authorizes an exact action. Writes outside the worktree stay denied.
+    pub fn grant(&mut self, action: Action) {
         let action = match action {
             Action::Read(p) => Action::Read(resolve(&self.root, &p)),
             Action::Write(p) => Action::Write(resolve(&self.root, &p)),
@@ -206,6 +207,11 @@ impl ApprovalQueue {
             .partition(|r| r.expires_ms <= now_ms);
         self.pending = pending;
         expired
+    }
+
+    pub fn cancel_ticket(&mut self, ticket: &str) -> Option<ApprovalRequest> {
+        let index = self.pending.iter().position(|r| r.ticket == ticket)?;
+        Some(self.pending.remove(index))
     }
 
     pub fn cancel_session(&mut self, session: &SessionId) -> Vec<ApprovalRequest> {

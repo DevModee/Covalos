@@ -82,9 +82,9 @@ impl Session {
                 }
                 self.set(Running)?;
             }
-            AgentEvent::TextDelta { .. } | AgentEvent::ToolStarted { .. } => {
-                self.require_active()?
-            }
+            AgentEvent::TextDelta { .. }
+            | AgentEvent::ToolStarted { .. }
+            | AgentEvent::Cost { .. } => self.require_active()?,
             AgentEvent::Message { text } => {
                 self.require_active()?;
                 self.last_message = Some(text.clone());
