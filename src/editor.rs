@@ -7,6 +7,7 @@ mod assets;
 mod brands;
 mod clean;
 mod companion;
+mod discord;
 mod dither;
 mod files;
 mod hub;
@@ -127,6 +128,9 @@ pub struct Editor {
     clean: clean::Clean,
     studio: studio::Studio,
     studio_open: bool,
+    discord: discord::Presence,
+    session_started: u64,
+    explorer_rect: Option<egui::Rect>,
     #[cfg(test)]
     mood_override: Option<identity::Mood>,
 }
@@ -151,6 +155,8 @@ impl Editor {
 
     fn new(ctx: &egui::Context, root: Option<PathBuf>, preferences: Preferences) -> Self {
         theme::install_fonts(ctx);
+        // Ctrl +/- must zoom the panel under the pointer, not the whole interface.
+        ctx.options_mut(|o| o.zoom_with_keyboard = false);
         theme::install(
             ctx,
             preferences.font_size,
@@ -205,6 +211,11 @@ impl Editor {
             clean: clean::Clean::default(),
             studio: studio::Studio::default(),
             studio_open: false,
+            discord: discord::Presence::default(),
+            session_started: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs()),
+            explorer_rect: None,
             #[cfg(test)]
             mood_override: None,
             syntax: egui_extras::syntax_highlighting::CodeTheme::dark(
@@ -731,12 +742,18 @@ impl Editor {
             ctx,
             &self.preferences.identity,
             self.preferences.reduce_motion,
+            // The background only runs where it can be seen: Home (also when every
+            // file floats in Clean Code), the Agents area, or behind code if enabled.
             self.hub_open
                 || self.documents.is_empty()
-                || self.preferences.identity.behind_code
-                || self.settings_open,
+                || self.active.is_none()
+                || self.preferences.identity.behind_code,
             mood,
         );
+        if (ctx.zoom_factor() - self.preferences.ui_scale).abs() > 0.001 {
+            ctx.set_zoom_factor(self.preferences.ui_scale);
+        }
+        self.update_presence();
         if ctx.input(|input| input.viewport().close_requested()) && !self.force_close {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.request(Pending::Exit, ctx);
@@ -788,6 +805,72 @@ impl Editor {
         self.companion_surface(ctx);
     }
 }
+impl Editor {
+    /// Coarse, privacy-safe activity for Discord Rich Presence. Paths and file names are
+    /// never sent; the project name only with explicit opt-in.
+    fn update_presence(&mut self) {
+        let prefs = self.preferences.discord.clone();
+        let language = self
+            .active
+            .and_then(|i| self.documents.get(i))
+            .and_then(|d| d.path.extension())
+            .and_then(|e| e.to_str())
+            .map(language_name);
+        let state = if !prefs.show_activity {
+            None
+        } else if self.studio_open {
+            Some("In Library Studio".to_owned())
+        } else if self.hub_open || self.chat.run.is_some() {
+            Some("Coordinating agents".to_owned())
+        } else if self.sidebar == Sidebar::Git && self.tools.showing_diff() {
+            Some("Reviewing changes".to_owned())
+        } else if let Some(language) = language.filter(|_| prefs.show_language) {
+            Some(format!("Editing {language}"))
+        } else if self.active.is_some() {
+            Some("Editing code".to_owned())
+        } else if self.root.is_some() {
+            Some("Working on a project".to_owned())
+        } else {
+            None
+        };
+        let state = match (state, self.root.as_deref().filter(|_| prefs.show_project)) {
+            (Some(state), Some(root)) => Some(format!("{state} · {}", workspace::filename(root))),
+            (state, _) => state,
+        };
+        let activity = discord::Activity {
+            details: "Developing with COVALOS".to_owned(),
+            state,
+            started: prefs.show_elapsed.then_some(self.session_started),
+        };
+        self.discord.update(&prefs, activity);
+    }
+}
+
+fn language_name(extension: &str) -> &'static str {
+    match extension.to_ascii_lowercase().as_str() {
+        "rs" => "Rust",
+        "ts" | "tsx" | "mts" | "cts" => "TypeScript",
+        "js" | "jsx" | "mjs" | "cjs" => "JavaScript",
+        "py" => "Python",
+        "go" => "Go",
+        "java" => "Java",
+        "kt" | "kts" => "Kotlin",
+        "cs" => "C#",
+        "c" | "h" => "C",
+        "cpp" | "cc" | "hpp" => "C++",
+        "swift" => "Swift",
+        "rb" => "Ruby",
+        "php" => "PHP",
+        "html" | "htm" => "HTML",
+        "css" | "scss" => "CSS",
+        "md" => "Markdown",
+        "json" => "JSON",
+        "toml" => "TOML",
+        "yaml" | "yml" => "YAML",
+        _ => "code",
+    }
+}
+
 impl eframe::App for Editor {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.render(ctx);

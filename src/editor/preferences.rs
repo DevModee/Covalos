@@ -14,6 +14,12 @@ pub(super) struct Preferences {
     pub(super) motion: f32,
     /// Shortcut that opens Library Studio, e.g. "Ctrl+Shift+L".
     pub(super) library_shortcut: String,
+    /// Explorer zoom, independent from the editor font size and the interface scale.
+    pub(super) explorer_zoom: f32,
+    /// Whole-interface scale (egui zoom factor); separate from both panel zooms.
+    pub(super) ui_scale: f32,
+    pub(super) transitions: Transitions,
+    pub(super) discord: super::discord::DiscordPreferences,
     pub(super) language: super::i18n::Language,
     pub(super) identity: super::identity::IdentityPreferences,
     pub(super) font_size: f32,
@@ -41,6 +47,10 @@ impl Default for Preferences {
             syntax: super::syntax::SyntaxStyle::Auto,
             motion: 1.0,
             library_shortcut: "Ctrl+Shift+L".into(),
+            explorer_zoom: 1.0,
+            ui_scale: 1.0,
+            transitions: Transitions::Subtle,
+            discord: super::discord::DiscordPreferences::default(),
             language: super::i18n::Language::system(),
             identity: super::identity::IdentityPreferences::default(),
             font_size: 14.0,
@@ -63,6 +73,47 @@ impl Default for Preferences {
     }
 }
 
+pub(super) const EXPLORER_ZOOM: (f32, f32) = (0.8, 1.6);
+pub(super) const UI_SCALE: (f32, f32) = (0.8, 1.5);
+pub(super) const EDITOR_FONT: (f32, f32) = (11.0, 26.0);
+
+fn clamp_finite(value: f32, default: f32, (lo, hi): (f32, f32)) -> f32 {
+    if value.is_finite() {
+        value.clamp(lo, hi)
+    } else {
+        default
+    }
+}
+
+/// Continuity when moving between Home, a workspace and the first open file.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum Transitions {
+    Off,
+    #[default]
+    Subtle,
+    Expressive,
+}
+
+impl Transitions {
+    pub(super) const ALL: [Self; 3] = [Self::Off, Self::Subtle, Self::Expressive];
+    pub(super) fn name(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Subtle => "Subtle",
+            Self::Expressive => "Expressive",
+        }
+    }
+    /// Cross-fade length. Off is instant; nothing ever waits on it.
+    pub(super) fn seconds(self) -> f32 {
+        match self {
+            Self::Off => 0.0,
+            Self::Subtle => 0.16,
+            Self::Expressive => 0.28,
+        }
+    }
+}
+
 impl Preferences {
     pub(super) fn path() -> Option<PathBuf> {
         crate::paths::preferences_path()
@@ -77,12 +128,14 @@ impl Preferences {
         prefs.identity.sanitize();
         prefs.notification_interval = prefs.notification_interval.clamp(5, 120);
         prefs.font_size = prefs.font_size.clamp(11.0, 26.0);
+        prefs.explorer_zoom = clamp_finite(prefs.explorer_zoom, 1.0, EXPLORER_ZOOM);
+        prefs.ui_scale = clamp_finite(prefs.ui_scale, 1.0, UI_SCALE);
         prefs.motion = if prefs.motion.is_finite() {
             prefs.motion.clamp(0.0, 1.0)
         } else {
             1.0
         };
-        prefs.sidebar_width = prefs.sidebar_width.clamp(155.0, 340.0);
+        prefs.sidebar_width = prefs.sidebar_width.clamp(155.0, 480.0);
         prefs.assistant_width = prefs.assistant_width.clamp(230.0, 520.0);
         prefs.tools_height = prefs.tools_height.clamp(130.0, 420.0);
         prefs.recent.truncate(8);
@@ -168,6 +221,31 @@ mod tests {
         fs::write(&path, br#"{"font_size":98}"#)?;
         assert_eq!(Preferences::load(&path)?.font_size, 26.0);
         assert_eq!(Preferences::load(&path)?.assistant_width, 340.0);
+        // MF-01: the old default background moves to Dither Field once; a chosen one stays.
+        fs::write(&path, br#"{"identity":{"background":"orbital"}}"#)?;
+        assert_eq!(
+            Preferences::load(&path)?.identity.background,
+            super::super::identity::Background::Dither
+        );
+        fs::write(
+            &path,
+            br#"{"identity":{"background":"orbital","background_chosen":true}}"#,
+        )?;
+        assert_eq!(
+            Preferences::load(&path)?.identity.background,
+            super::super::identity::Background::Orbital
+        );
+        // MF-05: zooms are independent and clamped.
+        fs::write(
+            &path,
+            br#"{"explorer_zoom":9.0,"ui_scale":0.1,"font_size":12}"#,
+        )?;
+        let loaded = Preferences::load(&path)?;
+        assert_eq!(loaded.explorer_zoom, EXPLORER_ZOOM.1);
+        assert_eq!(loaded.ui_scale, UI_SCALE.0);
+        assert_eq!(loaded.font_size, 12.0);
+        assert_eq!(loaded.transitions, Transitions::Subtle);
+        assert!(!loaded.discord.enabled && !loaded.discord.show_project);
         Ok(())
     }
 }
