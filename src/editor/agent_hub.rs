@@ -535,7 +535,7 @@ impl Editor {
                     ui.label(small(path.display().to_string()));
                 } else if found.done && *kind == ProviderKind::Gemini {
                     ui.label(small(
-                        "Install the official Gemini CLI to detect it. COVALOS has no verified \
+                        "Install the official Gemini CLI to detect it. Covalos has no verified \
                          headless adapter for Gemini yet.",
                     ));
                 }
@@ -563,7 +563,7 @@ impl Editor {
             ui.add_space(4.0);
             ui.label(small(format!(
                 "API keys are kept in: {}. Sign-in tokens stay in each CLI's own folder; \
-                 COVALOS never reads or copies them.",
+                 Covalos never reads or copies them.",
                 runtime.credential_backend
             )));
         });
@@ -1145,7 +1145,9 @@ impl Editor {
         ui.add_space(12.0);
         let permissions = match meta.provider {
             ProviderKind::ClaudeCode => {
-                "Every tool call passes the COVALOS gate; edits outside the workspace are                  denied. The process still runs as your Windows user: a worktree isolates                  files, not the process."
+                "Every tool call passes the Covalos gate; edits outside the workspace are \
+                 denied. The process still runs as your Windows user: a worktree isolates \
+                 files, not the process."
             }
             _ => {
                 "Codex runs under its own sandbox (read-only or workspace-write). It has no \
@@ -1246,7 +1248,7 @@ impl Editor {
                         }
                         if !audit.is_empty() {
                             ui.add_space(6.0);
-                            ui.label(label("COVALOS gate decisions"));
+                            ui.label(label("Covalos gate decisions"));
                             ui.add_space(4.0);
                             for entry in &audit {
                                 let allowed = entry["allow"] == true;

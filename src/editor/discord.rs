@@ -166,7 +166,7 @@ fn activity_payload(activity: Option<&Activity>, nonce: u64) -> serde_json::Valu
     let activity = activity.map(|a| {
         let mut value = serde_json::json!({
             "details": a.details,
-            "assets": { "large_image": "covalos", "large_text": "COVALOS" },
+            "assets": { "large_image": "covalos", "large_text": "Covalos" },
         });
         if let Some(state) = &a.state {
             value["state"] = serde_json::json!(state);
@@ -271,7 +271,7 @@ mod tests {
     fn frames_and_payloads_follow_the_ipc_format_and_stay_private() {
         let payload = activity_payload(
             Some(&Activity {
-                details: "Developing with COVALOS".into(),
+                details: "Developing with Covalos".into(),
                 state: Some("Editing Rust".into()),
                 started: Some(1_700_000_000),
             }),
