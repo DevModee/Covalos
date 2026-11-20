@@ -1,0 +1,219 @@
+{
+  "captures": [
+    {
+      "file": "01-offline-before-sync-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 744,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "02-discover-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 3684,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "03-search-animated-button-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 636,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "04-search-react-chart-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 539,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "05-category-backgrounds-free-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 639,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "06-native-dither-playground-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 936,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "07-native-spring-playground-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 635,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "08-shadcn-button-overview-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 636,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "09-shadcn-button-source-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 877,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "10-install-review-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 667,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "11-commons-clause-entry-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 637,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "12-sources-licenses-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 643,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "13-discover-es-1366x768@100.png",
+      "language": "Español",
+      "ms_since_last_action": 642,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    }
+  ],
+  "input": "eframe raw_input_hook in a native window (not OS-level SendInput)",
+  "ui_build_cpu_ms": {
+    "max": 56.052,
+    "p50": 1.242,
+    "p95": 1.6340000000000001,
+    "samples": 2687
+  }
+}

@@ -1,0 +1,811 @@
+{
+  "captures": [
+    {
+      "file": "01-home/home-nocturne-dither-field-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 1080,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "02-explorer/explorer-expanded-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 576,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "03-editor/rust/editor-rust-nocturne-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 653,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "04-git/git-grouped-changes-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 568,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "04-git/git-diff-main-rs-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 565,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "04-git/git-diff-staged-app-ts-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 565,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "03-editor/typescript/editor-typescript-nocturne-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 650,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "03-editor/python/editor-python-nocturne-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 650,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "03-editor/rust/editor-rust-compact-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 650,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "03-editor/rust/editor-rust-graphite-syntax-before-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 555,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "11-motion/tab-spring-1-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 177,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "11-motion/tab-spring-2-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 256,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "11-motion/tab-spring-3-settled-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 685,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "11-motion/clean-open-1-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 206,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "05-clean-code/clean-floating-main-rs-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 734,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "05-clean-code/clean-two-surfaces-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 756,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "05-clean-code/clean-edit-dirty-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 458,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "05-clean-code/clean-focus-mode-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 971,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "11-motion/clean-dock-1-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 230,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "11-motion/clean-dock-2-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 377,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "05-clean-code/clean-docked-back-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 905,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "06-agent-hub/agent-hub-conversation-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 654,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "06-agent-hub/agent-hub-tasks-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 562,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "06-agent-hub/codex-panel-openai-mark-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 559,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "11-motion/companion-spring-1-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 212,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "11-motion/companion-spring-2-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 326,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "07-companion/companion-expanded-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 862,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "08-luma/luma-idle-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 461,
+      "pixels": [
+        420,
+        440
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": true,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "08-luma/luma-thinking-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 467,
+      "pixels": [
+        420,
+        440
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": true,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "08-luma/luma-success-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 454,
+      "pixels": [
+        420,
+        440
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": true,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "08-luma/luma-approval-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 455,
+      "pixels": [
+        420,
+        440
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": true,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "08-luma/luma-hover-look-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 585,
+      "pixels": [
+        420,
+        440
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": true,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "09-themes/editor-nocturne-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 553,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "09-themes/editor-graphite-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 555,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Graphite",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "09-themes/editor-midnight-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 545,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Midnight",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "09-themes/editor-violet-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 550,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Violet",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "09-themes/editor-light-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 554,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Light",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "09-themes/editor-high-contrast-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 545,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "High Contrast",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "09-themes/home-light-dither-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 872,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Light",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "01-home/dither-field-rest-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 1478,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "01-home/dither-field-cursor-trail-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 2144,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "01-home/dither-field-trail-faded-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 3183,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "11-motion/dither-ripple-1-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 279,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "11-motion/dither-ripple-2-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 661,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "11-motion/dither-ripple-3-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 1291,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "01-home/dither-bloom-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 1083,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "01-home/orbital-legacy-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 759,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "10-settings/settings-appearance-en-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 670,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "10-settings/settings-es-1366x768@100.png",
+      "language": "Español",
+      "ms_since_last_action": 565,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "11-motion/reduced-motion-no-ripple-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 553,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "AEROS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    }
+  ],
+  "input": "eframe raw_input_hook in a native window (not OS-level SendInput)",
+  "ui_build_cpu_ms": {
+    "max": 73.08539999999999,
+    "p50": 2.9967,
+    "p95": 4.2546,
+    "samples": 5323
+  }
+}
