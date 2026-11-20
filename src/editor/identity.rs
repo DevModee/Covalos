@@ -385,7 +385,15 @@ impl Identity {
                     } else {
                         palette.text
                     }),
-                    accent: gamma(tint),
+                    // The brush and ripples use a saturated violet like the reference; a
+                    // custom tint replaces it.
+                    accent: gamma(if prefs.custom_tint {
+                        tint
+                    } else if theme::active().is_dark() {
+                        Color32::from_rgb(128, 92, 246)
+                    } else {
+                        Color32::from_rgb(104, 60, 214)
+                    }),
                     strength: (prefs.intensity / 0.16).clamp(0.25, 2.4),
                     density: prefs.density,
                     pixel: 4.0,
@@ -1050,6 +1058,66 @@ mod interaction_tests {
             })
             .sum()
     }
+    #[test]
+    fn dither_records_trail_and_click_ripples() {
+        let ctx = egui::Context::default();
+        let prefs = IdentityPreferences::default();
+        assert_eq!(prefs.background, Background::Dither);
+        let mut identity = Identity::default();
+        let pos = Pos2::new(400.0, 300.0);
+        for (i, events) in [
+            vec![egui::Event::PointerMoved(pos)],
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(900.0, 650.0))),
+                    time: Some(i as f64 * 0.05),
+                    focused: true,
+                    events,
+                    ..Default::default()
+                },
+                |ctx| identity.begin(ctx, &prefs, false, true, Mood::Idle),
+            );
+        }
+        let mut frame = super::super::dither::Frame {
+            variant: super::super::dither::Variant::Field,
+            time: 0.0,
+            ink: egui::Rgba::WHITE,
+            accent: egui::Rgba::WHITE,
+            strength: 1.0,
+            density: 0.5,
+            pixel: 4.0,
+            light: false,
+            trail: [[0.0; 3]; super::super::dither::TRAIL],
+            ripples: [[0.0; 3]; super::super::dither::RIPPLES],
+        };
+        identity.dither.fill(
+            &mut frame,
+            Rect::from_min_size(Pos2::ZERO, egui::vec2(900.0, 650.0)),
+            0.3,
+        );
+        assert!(frame.trail[0][2] < 1.0, "{:?}", frame.trail);
+        assert!(frame.ripples[0][2] >= 0.0, "{:?}", frame.ripples);
+    }
+
     #[test]
     fn pointer_deforms_each_scene_and_reduced_motion_freezes_it() {
         for background in [

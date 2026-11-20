@@ -40,6 +40,8 @@ pub(super) struct Tools {
     git_view: String,
     git_mode: GitMode,
     git_selected: Option<String>,
+    /// Last complete `git status` output, kept while a diff is shown.
+    git_status: String,
 }
 
 /// What the Git job last produced: the working-tree summary or one file's diff.
@@ -168,6 +170,17 @@ impl Tools {
     pub(super) fn poll(&mut self) {
         drain(&mut self.process, &mut self.terminal);
         drain(&mut self.git, &mut self.git_view);
+        if self.git.is_none()
+            && self.git_mode == GitMode::Status
+            && self.git_status != self.git_view
+        {
+            self.git_status.clone_from(&self.git_view);
+        }
+    }
+
+    /// A file diff is open and owns the editor area.
+    pub(super) fn showing_diff(&self) -> bool {
+        matches!(self.git_mode, GitMode::Diff { .. })
     }
 }
 
@@ -324,7 +337,12 @@ impl Editor {
             ]);
         match diff {
             None => {
-                command.args(["status", "--porcelain=v1", "--branch"]);
+                command.args([
+                    "status",
+                    "--porcelain=v1",
+                    "--branch",
+                    "--untracked-files=all",
+                ]);
                 self.tools.git_mode = GitMode::Status;
             }
             Some(staged) => {
@@ -374,17 +392,31 @@ impl Editor {
     }
 
     pub(super) fn git_panel(&mut self, ui: &mut Ui) {
-        if self.tools.git.is_none() && self.tools.git_view.is_empty() && self.root.is_some() {
+        if self.tools.git.is_none()
+            && self.tools.git_view.is_empty()
+            && self.tools.git_status.is_empty()
+            && self.root.is_some()
+        {
             self.git_refresh(ui.ctx(), None);
         }
-        match self.tools.git_mode.clone() {
-            GitMode::Status => self.git_status_view(ui),
-            GitMode::Diff { path, staged } => self.git_diff_view(ui, path.as_deref(), staged),
+        self.git_status_view(ui);
+    }
+
+    /// The selected file's diff, shown in the editor area like an IntelliJ diff tab.
+    pub(super) fn git_diff_surface(&mut self, ui: &mut Ui) {
+        if let GitMode::Diff { path, staged } = self.tools.git_mode.clone() {
+            egui::Frame::new()
+                .inner_margin(Margin::symmetric(14, 10))
+                .show(ui, |ui| self.git_diff_view(ui, path.as_deref(), staged));
         }
     }
 
     fn git_status_view(&mut self, ui: &mut Ui) {
-        let status = parse_status(&self.tools.git_view);
+        let status = parse_status(if self.tools.git_mode == GitMode::Status {
+            &self.tools.git_view
+        } else {
+            &self.tools.git_status
+        });
         let not_repository = self.tools.git.is_none()
             && status.branch.is_none()
             && self.tools.git_view.contains("not a git repository");
@@ -530,15 +562,17 @@ impl Editor {
                     for change in items {
                         let selected = self.tools.git_selected.as_deref() == Some(&change.path);
                         let response = change_row(ui, change, selected);
+                        // Single click previews the diff; double click opens the file.
                         if response.clicked() {
                             self.tools.git_selected = Some(change.path.clone());
-                        }
-                        if response.double_clicked() {
-                            if change.group == Group::Untracked || change.code == 'D' {
+                            if change.group == Group::Untracked {
                                 open = Some(change.path.clone());
                             } else {
                                 diff = Some((change.path.clone(), change.group == Group::Staged));
                             }
+                        }
+                        if response.double_clicked() && change.code != 'D' {
+                            open = Some(change.path.clone());
                         }
                         response.context_menu(|ui| {
                             if change.group != Group::Untracked
@@ -573,7 +607,7 @@ impl Editor {
     fn git_diff_view(&mut self, ui: &mut Ui, path: Option<&str>, staged: bool) {
         let mut back = false;
         ui.horizontal(|ui| {
-            if icon_button(ui, Icon::Back, "Back to changes", false).clicked() {
+            if icon_button(ui, Icon::Close, "Close diff", false).clicked() {
                 back = true;
             }
             let name = path.map_or_else(
@@ -626,7 +660,13 @@ impl Editor {
                         }
                         let font = egui::FontId::monospace(12.0);
                         let mut job = egui::text::LayoutJob::default();
-                        for line in self.tools.git_view.lines().take(4000) {
+                        for line in self
+                            .tools
+                            .git_view
+                            .lines()
+                            .filter(|l| !l.starts_with("warning: "))
+                            .take(4000)
+                        {
                             let (color, background) = if line.starts_with("@@") {
                                 (colors().accent, egui::Color32::TRANSPARENT)
                             } else if line.starts_with("+++")
@@ -658,6 +698,7 @@ impl Editor {
                     });
             });
         if back {
+            self.tools.git_selected = None;
             self.git_refresh(ui.ctx(), None);
         }
     }

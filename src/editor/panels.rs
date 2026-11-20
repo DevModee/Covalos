@@ -583,6 +583,10 @@ impl Editor {
 
     pub(super) fn editor_panel(&mut self, ui: &mut Ui) {
         self.clean.dock_target = Some(ui.max_rect());
+        if self.sidebar == Sidebar::Git && self.tools.showing_diff() {
+            self.git_diff_surface(ui);
+            return;
+        }
         if self.documents.is_empty() || self.active.is_none() {
             self.welcome(ui);
             return;
@@ -880,6 +884,8 @@ impl Editor {
                         ui.horizontal(|ui| {
                             let mut indicator = None;
                             let tab_height = TAB_HEIGHT - 8.0;
+                            // Reserved before the tabs so the pill paints underneath them.
+                            let pill_slot = ui.painter().add(egui::Shape::Noop);
                             for (index, document) in self.documents.iter().enumerate() {
                                 if self.clean.is_floating(&document.path) {
                                     continue;
@@ -1014,19 +1020,17 @@ impl Editor {
                                     rect,
                                     super::motion::Spring::SMOOTH,
                                 );
-                                let under = ui
-                                    .ctx()
-                                    .layer_painter(egui::LayerId::new(
-                                        egui::Order::Background,
-                                        Id::new("tab-pill"),
-                                    ))
-                                    .with_clip_rect(ui.clip_rect());
-                                under.rect_filled(pill, 7, colors().elevated);
-                                under.rect_stroke(
-                                    pill,
-                                    7,
-                                    egui::Stroke::new(1.0_f32, colors().border),
-                                    egui::StrokeKind::Inside,
+                                ui.painter().set(
+                                    pill_slot,
+                                    egui::Shape::Vec(vec![
+                                        egui::Shape::rect_filled(pill, 7, colors().elevated),
+                                        egui::Shape::rect_stroke(
+                                            pill,
+                                            7,
+                                            egui::Stroke::new(1.0_f32, colors().border),
+                                            egui::StrokeKind::Inside,
+                                        ),
+                                    ]),
                                 );
                                 ui.painter().hline(
                                     (pill.left() + 10.0)..=(pill.right() - 10.0),

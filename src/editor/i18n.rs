@@ -77,6 +77,7 @@ pub(super) fn trf(template: &'static str, values: &[(&str, String)]) -> String {
 }
 
 const SPANISH: &[(&str, &str)] = &[
+    ("Close diff", "Cerrar diferencias"),
     ("Copy path", "Copiar ruta"),
     ("No repository", "Sin repositorio"),
     ("Show diff", "Ver diferencias"),
