@@ -486,13 +486,16 @@ impl Editor {
             .is_some_and(|n| n.at.elapsed() < Duration::from_secs(6));
         let busy = running + waiting > 0 || self.hub.approval_pending();
         let id = egui::Id::new("companion-island");
-        let p = super::super::motion::value(
+        // The island opens on a gently damped spring: it retargets mid-flight when the
+        // user toggles quickly and settles without a visible bounce.
+        let p = super::super::motion::spring(
             ctx,
             id.with("open"),
             if self.companion.open { 1.0 } else { 0.0 },
-            super::super::motion::PANEL,
-        );
-        let eased = egui::emath::easing::cubic_out(p);
+            super::super::motion::Spring::GENTLE,
+        )
+        .clamp(0.0, 1.0);
+        let eased = p;
         let presence = super::super::motion::value(
             ctx,
             id.with("presence"),

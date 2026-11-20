@@ -62,6 +62,8 @@ enum Action {
     Terminal,
     AgentHub,
     Settings,
+    Detach,
+    DockAll,
 }
 
 const ACTIONS: &[(Action, &str)] = &[
@@ -74,6 +76,8 @@ const ACTIONS: &[(Action, &str)] = &[
     (Action::Terminal, "Toggle terminal"),
     (Action::AgentHub, "Toggle Agent Hub"),
     (Action::Settings, "Open settings"),
+    (Action::Detach, "Detach to floating editor"),
+    (Action::DockAll, "Dock all"),
 ];
 
 enum Selection {
@@ -322,9 +326,35 @@ impl Editor {
                     if response.on_hover_text(theme.name()).clicked(){self.preferences.theme=theme;}
                 }});
                 ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.label(secondary(tr("Code colors")));
+                    egui::ComboBox::from_id_salt("syntax-style")
+                        .selected_text(tr(self.preferences.syntax.name()))
+                        .show_ui(ui, |ui| {
+                            for style in super::syntax::SyntaxStyle::ALL {
+                                ui.selectable_value(&mut self.preferences.syntax, style, tr(style.name()));
+                            }
+                        });
+                });
+                // Live preview of the chosen code colors at the editor's density.
+                super::syntax::set_style(self.preferences.syntax);
+                let preview = "fn orbit(r: f32) -> Vec2 {\n    let angle = TAU * 0.25; // quarter\n    vec2(r * angle.cos(), 42.0)\n}";
+                let size = self.preferences.font_size.min(15.0);
+                let line = size * if self.preferences.compact { COMPACT_CODE_LINE_HEIGHT } else { CODE_LINE_HEIGHT };
+                egui::Frame::new().fill(colors().inset).corner_radius(8).stroke(egui::Stroke::new(1.0_f32, colors().border)).inner_margin(egui::Margin::symmetric(12, 10)).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    let job = super::syntax::highlight(ui.ctx(), preview, "rs", size, line);
+                    ui.add(egui::Label::new(job).extend());
+                });
+                ui.add_space(8.0);
                 ui.add(egui::Slider::new(&mut self.preferences.font_size,11.0..=26.0).step_by(1.0).text(tr("Editor font size")).suffix(" pt"));
+                ui.horizontal(|ui| {
+                    ui.label(secondary(tr("Editor density")));
+                    ui.selectable_value(&mut self.preferences.compact, true, tr("Compact"));
+                    ui.selectable_value(&mut self.preferences.compact, false, tr("Comfortable"));
+                });
+                ui.add(egui::Slider::new(&mut self.preferences.motion, 0.0..=1.0).step_by(0.05).text(tr("Motion intensity")));
                 checkbox(ui,&mut self.preferences.high_contrast,tr("High contrast controls"));
-                checkbox(ui,&mut self.preferences.compact,tr("Compact interface"));
                 checkbox(ui,&mut self.preferences.reduce_motion,tr("Reduce motion"));
                 if old != (self.preferences.theme,self.preferences.font_size,self.preferences.high_contrast) {
                     install(ctx,self.preferences.font_size,self.preferences.high_contrast,self.preferences.theme);
@@ -533,6 +563,12 @@ impl Editor {
                 Action::Terminal => self.preferences.tools_open = !self.preferences.tools_open,
                 Action::AgentHub => self.hub_open = !self.hub_open,
                 Action::Settings => self.settings_open = true,
+                Action::Detach => {
+                    if let Some(index) = self.active {
+                        self.detach(index);
+                    }
+                }
+                Action::DockAll => self.dock_all(ctx.input(|i| i.time)),
             },
             Some(Selection::File(file)) => self.open_file(file),
             Some(Selection::Project(root)) => self.request(Pending::OpenWorkspace(root), ctx),

@@ -5,6 +5,7 @@ mod visual_tests;
 
 mod assets;
 mod brands;
+mod clean;
 mod companion;
 mod dither;
 mod files;
@@ -121,6 +122,7 @@ pub struct Editor {
     pending_delete: Option<PathBuf>,
     focus_new_file: bool,
     syntax: egui_extras::syntax_highlighting::CodeTheme,
+    clean: clean::Clean,
     #[cfg(test)]
     mood_override: Option<identity::Mood>,
 }
@@ -195,6 +197,7 @@ impl Editor {
             file_change: None,
             pending_delete: None,
             focus_new_file: false,
+            clean: clean::Clean::default(),
             #[cfg(test)]
             mood_override: None,
             syntax: egui_extras::syntax_highlighting::CodeTheme::dark(
@@ -293,6 +296,11 @@ impl Editor {
     }
 
     fn activate(&mut self, index: usize) {
+        if let Some(path) = self.documents.get(index).map(|d| d.path.clone())
+            && self.raise_floating(&path)
+        {
+            return;
+        }
         if self.active != Some(index) {
             self.active = Some(index);
             self.include_active_file = false;
@@ -305,7 +313,16 @@ impl Editor {
     }
 
     fn save_active(&mut self) {
-        let Some(document) = self.active.and_then(|index| self.documents.get_mut(index)) else {
+        // A focused floating editor saves its own document.
+        let floating = self
+            .clean
+            .focused
+            .as_ref()
+            .and_then(|path| self.documents.iter().position(|d| &d.path == path));
+        let Some(document) = floating
+            .or(self.active)
+            .and_then(|index| self.documents.get_mut(index))
+        else {
             return;
         };
         match document.save() {
@@ -362,6 +379,11 @@ impl Editor {
                     std::cmp::Ordering::Equal => Some(active.min(self.documents.len() - 1)),
                     std::cmp::Ordering::Greater => Some(active - 1),
                 });
+                if let Some(active) = self.active
+                    && self.clean.is_floating(&self.documents[active].path)
+                {
+                    self.active = self.next_docked(active);
+                }
                 self.cursor = 0;
                 self.selection = None;
                 self.find_match = None;
@@ -729,15 +751,21 @@ impl Editor {
                 .frame(theme::island(egui::Margin::same(0)).fill(theme::colors().canvas))
                 .show(ctx, |ui| self.agent_hub(ui));
         } else {
-            if self.preferences.tools_open {
+            let focus = self.clean.focus;
+            if self.preferences.tools_open && !focus {
                 self.tools_panel(ctx);
             }
             self.activity_rail(ctx);
-            self.sidebar(ctx);
-            self.assistant_panel(ctx);
+            if !focus {
+                self.sidebar(ctx);
+                self.assistant_panel(ctx);
+            }
             egui::CentralPanel::default()
                 .frame(theme::island(egui::Margin::same(0)).fill(theme::colors().inset))
                 .show(ctx, |ui| self.editor_panel(ui));
+        }
+        if !self.hub_open {
+            self.floating_editors(ctx);
         }
         self.settings_window(ctx);
         self.palette_modal(ctx);

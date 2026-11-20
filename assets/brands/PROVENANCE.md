@@ -14,4 +14,8 @@ PNG files are 128 px white RGBA masks rasterised with resvg from the SVG next to
 
 ## OpenAI, ChatGPT and Codex
 
-OpenAI's design guidelines at [openai.com/brand](https://openai.com/brand/) allow the Blossom only where it relates directly to OpenAI services, without added colour, not more prominent than your own brand, and after accepting OpenAI's terms of use. The logo download is gated behind that terms checkbox. OpenAI also asked Simple Icons to remove its mark. Accepting those terms is the owner's decision, so this build uses a neutral terminal monogram for Codex. To switch, download the official package after accepting the terms, export the monochrome Blossom as a 128 px white mask to `openai.png`, register it in `src/editor/assets.rs` and set `mark: Some("brand_openai")` for `Provider::Codex` in `src/editor/brands.rs`.
+| File | Product | Source | Terms |
+| --- | --- | --- | --- |
+| `openai.svg` / `openai.png` | OpenAI Blossom, used to identify Codex | `OpenAI-logos/SVGs/OAI_OpenAI-Blossom_White.svg` from the official package `https://cdn.openai.com/brand/openai-logos.zip`, downloaded on 2026-11-19 after the owner accepted the brand terms at [openai.com/brand](https://openai.com/brand/) | Shown only beside the Codex integration it identifies, monochrome (tinted with the interface text colour, never a brand or accent colour), never larger or more prominent than the AEROS mark, unmodified shape with its clear space. |
+
+ChatGPT has no separate integration in AEROS, so no ChatGPT mark is shown. The same Blossom identifies Codex because OpenAI publishes it as the mark for its products; no other logo is substituted.

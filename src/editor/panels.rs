@@ -582,7 +582,8 @@ impl Editor {
     }
 
     pub(super) fn editor_panel(&mut self, ui: &mut Ui) {
-        if self.documents.is_empty() {
+        self.clean.dock_target = Some(ui.max_rect());
+        if self.documents.is_empty() || self.active.is_none() {
             self.welcome(ui);
             return;
         }
@@ -601,7 +602,8 @@ impl Editor {
             ui.separator();
         }
         let Some(index) = self.active else { return };
-        let doc = &mut self.documents[index];
+        let mut detach_active = false;
+        let doc = &self.documents[index];
         let breadcrumb = self
             .root
             .as_ref()
@@ -619,11 +621,25 @@ impl Editor {
                     egui::vec2(ui.available_width(), BREADCRUMB_HEIGHT),
                     Layout::left_to_right(Align::Center),
                     |ui| {
-                        ui.add(egui::Label::new(muted(&path_label)).truncate())
-                            .on_hover_text(doc.path.display().to_string());
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if icon_button(ui, Icon::Detach, "Detach to floating editor", false)
+                                .clicked()
+                            {
+                                detach_active = true;
+                            }
+                            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                                ui.add(egui::Label::new(muted(&path_label)).truncate())
+                                    .on_hover_text(doc.path.display().to_string());
+                            });
+                        });
                     },
                 );
             });
+        if detach_active {
+            self.detach(index);
+            return;
+        }
+        let doc = &mut self.documents[index];
         ui.add_space(4.0);
         let id = Id::new(("document", &doc.path));
         let selection = self.selection.take();
@@ -846,6 +862,7 @@ impl Editor {
     fn tabs(&mut self, ui: &mut Ui) {
         let mut active = None;
         let mut close = None;
+        let mut detach = None;
         let bar = egui::Frame::new()
             .inner_margin(Margin {
                 left: 6,
@@ -864,6 +881,9 @@ impl Editor {
                             let mut indicator = None;
                             let tab_height = TAB_HEIGHT - 8.0;
                             for (index, document) in self.documents.iter().enumerate() {
+                                if self.clean.is_floating(&document.path) {
+                                    continue;
+                                }
                                 let selected = self.active == Some(index);
                                 let name = workspace::filename(&document.path);
                                 let label_width = ui.fonts_mut(|fonts| {
@@ -972,6 +992,16 @@ impl Editor {
                                 if response.middle_clicked() {
                                     close = Some(index);
                                 }
+                                response.context_menu(|ui| {
+                                    if ui.button(tr("Detach to floating editor")).clicked() {
+                                        detach = Some(index);
+                                        ui.close();
+                                    }
+                                    if ui.button(tr("Close tab")).clicked() {
+                                        close = Some(index);
+                                        ui.close();
+                                    }
+                                });
                                 response.on_hover_text(document.path.display().to_string());
                                 close_response.on_hover_text(tr("Close tab"));
                             }
@@ -1013,6 +1043,9 @@ impl Editor {
             egui::Stroke::new(1.0_f32, colors().border),
         );
         ui.add_space(4.0);
+        if let Some(index) = detach {
+            self.detach(index);
+        }
         if let Some(index) = active {
             self.activate(index);
         }
@@ -1078,7 +1111,7 @@ impl Editor {
             )
             .clamp(240.0, 520.0);
         let id = Id::new("assistant-panel-motion");
-        let progress = super::motion::value(
+        let progress = super::motion::spring(
             ctx,
             id,
             if self.preferences.assistant_open {
@@ -1086,8 +1119,9 @@ impl Editor {
             } else {
                 0.0
             },
-            super::motion::PANEL,
-        );
+            super::motion::Spring::SMOOTH,
+        )
+        .clamp(0.0, 1.0);
         let previous = ctx.data_mut(|d| {
             let previous = d.get_temp::<f32>(id.with("previous")).unwrap_or(progress);
             d.insert_temp(id.with("previous"), progress);
@@ -1353,22 +1387,15 @@ fn tree_row(
     let x = rect.left() + 6.0 + depth as f32 * TREE_INDENT;
     let center_y = rect.center().y;
     if let Some(open) = openness {
-        // Chevron rotates from right (closed) to down (open).
-        let c = egui::pos2(x + 6.0, center_y);
-        let angle = open * std::f32::consts::FRAC_PI_2;
-        let (s, co) = angle.sin_cos();
-        let rot = |v: egui::Vec2| c + egui::vec2(v.x * co - v.y * s, v.x * s + v.y * co);
-        painter.add(egui::Shape::line(
-            vec![
-                rot(egui::vec2(-1.5, -3.5)),
-                rot(egui::vec2(2.0, 0.0)),
-                rot(egui::vec2(-1.5, 3.5)),
-            ],
-            egui::Stroke::new(
-                1.4_f32,
-                super::motion::blend(colors().muted, colors().text, hover),
-            ),
-        ));
+        // Lucide chevron, rotated from right (closed) to down (open).
+        let texture = super::assets::texture(ui.ctx(), "lucide-chevron-right");
+        egui::Image::from_texture(&texture)
+            .tint(super::motion::blend(colors().muted, colors().text, hover))
+            .rotate(open * std::f32::consts::FRAC_PI_2, egui::Vec2::splat(0.5))
+            .paint_at(
+                ui,
+                egui::Rect::from_center_size(egui::pos2(x + 6.0, center_y), egui::vec2(14.0, 14.0)),
+            );
     }
     super::assets::paint(
         ui,
