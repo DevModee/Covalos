@@ -2,6 +2,34 @@
 
 Leé este archivo primero. Todo lo marcado como **verificado** se ejecutó de verdad en Windows con el CLI real de Codex. Lo marcado como **solo compila** o **no verificado** no tiene evidencia de ejecución.
 
+## 0. Developer Preview (2026-11-20, sesión 2) — leer primero
+
+Commits: `544ad08` agents, `2e193da` terminal/ports/preview/tunnel/reload, `e129b70` LSP, más el commit de este checkpoint. Todo en `integration/v4-v5`.
+
+| Bloque | Estado | Evidencia |
+| --- | --- | --- |
+| Chat de agentes en el dock derecho del editor, página Agents con split, ventanas desacopladas (egui, mismo patrón que Clean Code), layout persistido en preferencias | verificado en harness | `artifacts/agents-workspace/replay/02,07` |
+| Cabecera de cada chat: proveedor, cuenta, modelo, estado de sign-in real (comando oficial, async), preset de permisos | verificado en harness | `replay/07-editor-dock` |
+| Compositor universal (Enter envía, Shift+Enter salto, archivo activo opcional, destino = cuenta u Orchestrator); timeline compacta; log técnico y diff por carpeta plegables | verificado en harness | `replay/02` |
+| **+ Add AI**: solo métodos oficiales por CLI (Claude: CLI/aislado/ANTHROPIC_API_KEY; Codex: CLI/aislado/`codex login --with-api-key`; Gemini: guarda cuenta, chat deshabilitado; Other: explica por qué no) | verificado en harness | `replay/08-add-ai` |
+| Orchestrator: planner plantilla / un rol / **agente escribe el plan** (`PlanSpec::from_json`), rol → cuenta (`Preferences::pinned`), presupuestos, tareas en vivo, aprobaciones, resultados, pausa/cancelar | compila + UI en harness; el planner-agente no se corrió con un proveedor real | `replay/06-autonomy` |
+| **Bug 1 resuelto** (reanudar tras cancelar): el turno cancelado solo informa salida cuando su árbol libera el pipe; un resume silencioso se reintenta una vez (75 s) | **verificado con Codex real**: cancel 0,32 s, resume `RESUMED` en 5,5 s | test `codex_resumes_right_after_a_cancelled_turn` (ignored) |
+| Terminal: pestañas, `powershell.exe` real por comando, cwd por pestaña, salida incremental, historial, Stop (kill del árbol), split | verificado | tests `terminal::*`, `web/01` |
+| Ports: `GetExtendedTcpTable` + Toolhelp; atribuye el puerto a la pestaña dueña; Preview, Copy link, Stop solo si es de Covalos | verificado (puerto 5179 → terminal 1) | `web/02-ports` |
+| Preview: WebView2 vía `wry 0.53.5` como hijo de la ventana eframe; se oculta bajo modales | verificado: cargó `http://localhost:5179/` (la captura GL no incluye la ventana nativa) | `web/03` |
+| Cloudflare Tunnel: detecta `cloudflared`, pide confirmación, URL trycloudflare real, copiar, detener | verificado con un servidor de prueba, detenido al final | `web/04,05,06` |
+| Recarga de archivos cambiados en disco (agentes): buffer limpio recarga; con cambios, banner Reload / Keep mine | test `external_edits_reload_*` | — |
+| LSP (TS/JS/React, CSS, HTML, JSON): diagnósticos con subrayado y hover, pestaña Problems, completado (Ctrl+Space, trigger chars, 2 letras); sin servidor, completa palabras del archivo | test de ida y vuelta con servidor stdio de prueba; **no probado con `typescript-language-server` real (no instalado)** | tests `lsp::*` |
+
+Pendiente, en orden:
+1. Instalar `npm i -g typescript-language-server typescript vscode-langservers-extracted` y probar diagnósticos/completado reales en un proyecto React.
+2. Correr el planner-agente del Orchestrator con una cuenta real (1 turno) y un objetivo con rol fijado.
+3. Claude Code real (login vencido) y Gemini CLI (no instalado): siguen como en §3.
+4. Editor flotante de Clean Code no tiene LSP (solo el editor principal).
+5. Terminal sin PTY: programas interactivos que piden input (prompts de `npm create`) no reciben stdin; usar flags no interactivos (`npm create vite@latest web -- --template react-ts`).
+
+Reproducir: `capture_agent_hub_replay` (ver §6, ahora con `COVALOS_EVIDENCE_DIR=artifacts/agents-workspace`) y `capture_web_workflow` (`COVALOS_EVIDENCE_DIR` solamente; usa node y cloudflared).
+
 ## 1. Estado del repositorio
 
 | Dato | Valor |
@@ -49,7 +77,7 @@ Commits de esta integración (en orden): `5e99370` merge del instalador, `d61c4a
 
 ## 4. Bugs conocidos
 
-1. **Reanudar justo después de matar un turno se cuelga.** Si COVALOS mata un turno de Codex en curso y enseguida reanuda el mismo hilo, Codex 0.167 no emite eventos durante más de 240 s. El mismo `resume` funciona cuando el lock del CLI se libera (comprobado a mano: respondió `RESUMED`). Pendiente: agregar un timeout de primer evento con reintento, o esperar a que el proceso anterior termine antes de reanudar. Evidencia: `artifacts/agent-hub-run2` y la corrida 3.
+1. **(Resuelto en la sesión 2, ver §0.)** Reanudar justo después de matar un turno se cuelga. Si COVALOS mata un turno de Codex en curso y enseguida reanuda el mismo hilo, Codex 0.167 no emite eventos durante más de 240 s. El mismo `resume` funciona cuando el lock del CLI se libera (comprobado a mano: respondió `RESUMED`). Pendiente: agregar un timeout de primer evento con reintento, o esperar a que el proceso anterior termine antes de reanudar. Evidencia: `artifacts/agent-hub-run2` y la corrida 3.
 2. Codex informa `input_tokens` sumando la caché (≈400–860k por turno chico). COVALOS los muestra tal cual y no los convierte en costo.
 3. La cuenta Codex aislada creada bajo `%TEMP%` imprime un `WARNING` de PATH aliases. Ya se filtra del estado; no aparece con rutas normales.
 
@@ -113,8 +141,6 @@ cargo test --release --target-dir E:\workspace\covalos-integration-build capture
 - **Evidencia:** `artifacts/welcome-review/welcome/` (sin proyecto, Agentes desde la bienvenida, Explorador a pedido, proyecto abierto). El exe Release reconstruido abre con el título `Covalos` y responde.
 - Una instancia de COVALOS (PID 14824) ya estaba corriendo desde esta carpeta de build y no se cerró.
 
-## 8. Próximas tres prioridades
+## 8. Próximas prioridades
 
-1. **Arreglar el bug 1** (reanudar tras un kill). Antes de reanudar, esperar a que salga el proceso anterior y aplicar un timeout de primer evento con un reintento. Verificarlo con un solo turno.
-2. **Verificar Claude Code real:** el usuario tiene que correr `claude auth login` (o "Sign in (official)" en Accounts). Después, una sesión con preset Supervised que pida un comando sensible, para validar el gate y las aprobaciones de punta a punta.
-3. **Instalar el Gemini CLI oficial** y escribir y probar su decodificador headless. Recién entonces habilitar sesiones de Gemini. No reutilizar sesiones de Antigravity.
+Ver la lista "Pendiente" de §0.

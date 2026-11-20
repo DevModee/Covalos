@@ -326,7 +326,7 @@ impl Server {
 }
 
 enum Slot {
-    Running(Server),
+    Running(Box<Server>),
     Missing,
     Failed(String),
 }
@@ -459,7 +459,7 @@ impl Lsp {
                     .or_insert_with(|| match server_command(lang, &root) {
                         None => Slot::Missing,
                         Some(command) => match Server::start(command, &root, ctx.clone()) {
-                            Ok(server) => Slot::Running(server),
+                            Ok(server) => Slot::Running(Box::new(server)),
                             Err(e) => Slot::Failed(e),
                         },
                     });
@@ -1074,7 +1074,9 @@ mod tests {
         };
         lsp.servers.insert(
             Lang::Ts,
-            Slot::Running(Server::start(command, &root, ctx.clone()).unwrap()),
+            Slot::Running(Box::new(
+                Server::start(command, &root, ctx.clone()).unwrap(),
+            )),
         );
         let docs = vec![doc];
         let until = Instant::now() + Duration::from_secs(20);
