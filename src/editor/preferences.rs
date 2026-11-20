@@ -34,6 +34,10 @@ pub(super) struct Preferences {
     pub(super) sidebar_width: f32,
     pub(super) assistant_width: f32,
     pub(super) tools_height: f32,
+    /// Conversation shown in the right dock, by runtime session id.
+    pub(super) agent_session: Option<String>,
+    /// Conversations open in their own windows.
+    pub(super) agent_detached: Vec<String>,
     pub(super) recent: Vec<PathBuf>,
     notes: Vec<(PathBuf, String)>,
     tasks: Vec<(PathBuf, Vec<super::hub::Task>)>,
@@ -65,6 +69,8 @@ impl Default for Preferences {
             sidebar_width: 220.0,
             assistant_width: 340.0,
             tools_height: 210.0,
+            agent_session: None,
+            agent_detached: Vec::new(),
             recent: Vec::new(),
             notes: Vec::new(),
             tasks: Vec::new(),

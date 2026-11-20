@@ -1285,9 +1285,12 @@ fn agent_steps() -> Vec<Step> {
                         role: "reviewer".into(),
                     },
                     root,
-                    true,
-                    budget,
-                    1,
+                    crate::agents_runtime::PlanSetup {
+                        worktrees: true,
+                        budget,
+                        max_parallel: 1,
+                        pins: Default::default(),
+                    },
                 )
                 .unwrap();
         }),
@@ -1502,6 +1505,30 @@ fn replay_steps() -> Vec<Step> {
         Act(|e, _, _| e.hub.focus_agents("autonomy")),
         Wait(0.6),
         Shot("replay/06-autonomy"),
+        Act(|e, _, root| {
+            e.hub_open = false;
+            e.preferences.assistant_open = true;
+            e.preferences.assistant_width = 420.0;
+            let index = session_index(e, A).expect("session A");
+            let id = agents_ref(e).expect("runtime").sessions[index]
+                .meta
+                .id
+                .as_str()
+                .to_owned();
+            e.hub.agents.chat.dock = Some(id);
+            if let Some(file) = ["calc.py", "README.md"]
+                .iter()
+                .map(|f| root.join(f))
+                .find(|p| p.exists())
+            {
+                e.open_file(file);
+            }
+        }),
+        Wait(0.8),
+        Shot("replay/07-editor-dock"),
+        Act(|e, _, _| e.hub.agents.chat.add_ai = Some(Default::default())),
+        Wait(0.6),
+        Shot("replay/08-add-ai"),
     ]
 }
 
@@ -1535,9 +1562,12 @@ fn engine_steps() -> Vec<Step> {
                         role: "reviewer".into(),
                     },
                     root,
-                    true,
-                    budget,
-                    1,
+                    crate::agents_runtime::PlanSetup {
+                        worktrees: true,
+                        budget,
+                        max_parallel: 1,
+                        pins: Default::default(),
+                    },
                 )
                 .unwrap();
         }),

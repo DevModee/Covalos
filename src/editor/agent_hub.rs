@@ -4,15 +4,13 @@
 use std::{path::PathBuf, sync::Arc};
 
 use covalos_agents::{
-    Account, AccountId, ConnectionMethod, ProviderKind,
-    context::EntryKind,
-    permission::{Preset, Resolution},
+    Account, AccountId, ConnectionMethod, ProviderKind, context::EntryKind, permission::Resolution,
 };
 use covalos_engine::{TaskStatus, budget::Budget, role::RoleCatalog};
 use eframe::egui::{self, Align, Frame, Layout, Margin, RichText, ScrollArea, TextEdit, Ui};
 
 use super::{Editor, theme::*};
-use crate::agents_runtime::{NewSession, PlanMode, Runtime, Status};
+use crate::agents_runtime::{PlanMode, PlanSetup, Runtime};
 
 pub(super) struct State {
     pub(super) runtime: Option<Runtime>,
@@ -25,13 +23,6 @@ pub(super) struct State {
     secret: String,
     secret_for: Option<AccountId>,
     status: Vec<(AccountId, String)>,
-    new_title: String,
-    new_account: Option<AccountId>,
-    new_model: String,
-    new_worktree: bool,
-    new_preset: usize,
-    new_safe: bool,
-    new_share: bool,
     pub(super) selected: Option<usize>,
     note: String,
     goal: String,
@@ -40,6 +31,21 @@ pub(super) struct State {
     budget_minutes: u32,
     budget_tokens: u32,
     max_parallel: usize,
+    pub(super) chat: super::agent_chat::ChatState,
+    /// 0 template, 1 one role, 2 an agent writes the plan.
+    planner: u8,
+    planner_account: Option<AccountId>,
+    pins: std::collections::BTreeMap<String, AccountId>,
+}
+
+impl State {
+    pub(super) fn runtime_and_chat(&mut self) -> (&mut Runtime, &mut super::agent_chat::ChatState) {
+        (self.runtime.as_mut().expect("runtime"), &mut self.chat)
+    }
+
+    pub(super) fn open_error_text(&self) -> Option<String> {
+        self.open_error.clone()
+    }
 }
 
 impl Default for State {
@@ -55,13 +61,6 @@ impl Default for State {
             secret: String::new(),
             secret_for: None,
             status: Vec::new(),
-            new_title: String::new(),
-            new_account: None,
-            new_model: String::new(),
-            new_worktree: false,
-            new_preset: 1,
-            new_safe: true,
-            new_share: true,
             selected: None,
             note: String::new(),
             goal: String::new(),
@@ -70,6 +69,10 @@ impl Default for State {
             budget_minutes: 20,
             budget_tokens: 0,
             max_parallel: 2,
+            chat: super::agent_chat::ChatState::default(),
+            planner: 0,
+            planner_account: None,
+            pins: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -96,12 +99,6 @@ const METHODS: [(ConnectionMethod, &str, &str); 3] = [
         "Stored in Windows Credential Manager, passed only through the provider's variable.",
     ),
 ];
-const PRESETS: [(Preset, &str); 3] = [
-    (Preset::ReadOnly, "Read only"),
-    (Preset::Supervised, "Supervised"),
-    (Preset::Worktree, "Edit inside workdir"),
-];
-
 // ---------------------------------------------------------------- reading style
 //
 // Agent Hub reads like a document: solid panels over a dimmed field, three
@@ -203,16 +200,6 @@ fn heading(text: impl Into<String>) -> RichText {
         .color(ink::primary())
 }
 
-fn status_color(status: Status) -> egui::Color32 {
-    match status {
-        Status::Running => colors().accent,
-        Status::Completed => colors().success,
-        Status::Failed => colors().error,
-        Status::Interrupted | Status::Cancelled => colors().warning,
-        Status::Idle => ink::meta(),
-    }
-}
-
 /// Small rounded tag with a tinted fill.
 fn badge(ui: &mut Ui, text: &str, color: egui::Color32) {
     Frame::new()
@@ -229,163 +216,6 @@ fn badge(ui: &mut Ui, text: &str, color: egui::Color32) {
                     .color(color),
             );
         });
-}
-
-/// Neutral metadata chip.
-fn chip(ui: &mut Ui, text: impl Into<String>) {
-    Frame::new()
-        .fill(ink::raised())
-        .corner_radius(6)
-        .inner_margin(Margin::symmetric(8, 3))
-        .show(ui, |ui| {
-            ui.label(
-                RichText::new(text.into())
-                    .size(META)
-                    .color(ink::secondary()),
-            );
-        });
-}
-
-fn event_style(kind: &str) -> (&'static str, egui::Color32) {
-    let c = colors();
-    match kind {
-        "created" => ("CREATED", ink::secondary()),
-        "started" => ("STARTED", c.accent),
-        "you" => ("YOU", c.accent),
-        "agent" => ("AGENT", ink::primary()),
-        "tool" => ("TOOL", super::motion::blend(c.accent, c.success, 0.55)),
-        "running" => ("RUNNING", c.accent),
-        "usage" => ("USAGE", ink::meta()),
-        "cost" => ("COST", ink::meta()),
-        "provider" => ("LIMITS", ink::meta()),
-        "done" => ("DONE", c.success),
-        "context" => ("CONTEXT", c.syntax_string),
-        "approval" => ("APPROVAL", c.warning),
-        "recovery" => ("RECOVERY", c.warning),
-        "cancelled" => ("CANCELLED", c.warning),
-        "error" => ("ERROR", c.error),
-        "closed" => ("CLOSED", ink::meta()),
-        _ => ("EVENT", ink::meta()),
-    }
-}
-
-/// Minutes and seconds since the session's first event.
-fn clock(at_ms: u64, base_ms: u64) -> String {
-    let s = at_ms.saturating_sub(base_ms) / 1000;
-    format!("{:02}:{:02}", s / 60, s % 60)
-}
-
-struct Entry<'a> {
-    kind: &'a str,
-    text: String,
-    at_ms: u64,
-}
-
-/// Collapses consecutive tool events into one row ("shell ×3").
-fn timeline_entries(log: &[crate::agents_runtime::LogLine]) -> Vec<Entry<'_>> {
-    fn flush<'a>(out: &mut Vec<Entry<'a>>, tools: &mut Vec<&'a str>, at_ms: u64) {
-        if tools.is_empty() {
-            return;
-        }
-        let mut names: Vec<String> = Vec::new();
-        let mut seen: Vec<&str> = Vec::new();
-        for name in tools.iter() {
-            if seen.contains(name) {
-                continue;
-            }
-            seen.push(name);
-            let count = tools.iter().filter(|t| *t == name).count();
-            names.push(if count > 1 {
-                format!("{name} ×{count}")
-            } else {
-                (*name).to_owned()
-            });
-        }
-        out.push(Entry {
-            kind: "tool",
-            text: names.join(" · "),
-            at_ms,
-        });
-        tools.clear();
-    }
-    let mut out: Vec<Entry<'_>> = Vec::new();
-    let mut tools: Vec<&str> = Vec::new();
-    let mut first_tool_at = 0;
-    for line in log {
-        if line.kind == "tool" {
-            if tools.is_empty() {
-                first_tool_at = line.at_ms;
-            }
-            tools.push(&line.text);
-            continue;
-        }
-        flush(&mut out, &mut tools, first_tool_at);
-        out.push(Entry {
-            kind: &line.kind,
-            text: line.text.clone(),
-            at_ms: line.at_ms,
-        });
-    }
-    flush(&mut out, &mut tools, first_tool_at);
-    out
-}
-
-/// One timeline row: time, a rail with a dot, a badge and the content.
-fn timeline_row(ui: &mut Ui, time: &str, kind: &str, add: impl FnOnce(&mut Ui)) {
-    let (badge_text, color) = event_style(kind);
-    let response = ui.horizontal_top(|ui| {
-        ui.add_sized(
-            [40.0, 20.0],
-            egui::Label::new(
-                RichText::new(time)
-                    .monospace()
-                    .size(11.0)
-                    .color(ink::meta()),
-            ),
-        );
-        ui.add_space(22.0);
-        ui.vertical(|ui| {
-            ui.set_width(ui.available_width());
-            badge(ui, badge_text, color);
-            ui.add_space(2.0);
-            add(ui);
-        });
-    });
-    let rect = response.response.rect;
-    let x = rect.left() + 52.0;
-    let painter = ui.painter();
-    painter.line_segment(
-        [
-            egui::pos2(x, rect.top() + 16.0),
-            egui::pos2(x, rect.bottom() + 12.0),
-        ],
-        egui::Stroke::new(1.0_f32, colors().border),
-    );
-    painter.circle_filled(egui::pos2(x, rect.top() + 10.0), 3.5, color);
-    painter.circle_stroke(
-        egui::pos2(x, rect.top() + 10.0),
-        6.0,
-        egui::Stroke::new(1.0_f32, color.gamma_multiply(0.35)),
-    );
-    ui.add_space(12.0);
-}
-
-fn bubble(ui: &mut Ui, fill: egui::Color32, text: RichText) {
-    Frame::new()
-        .fill(fill)
-        .corner_radius(8)
-        .inner_margin(Margin::symmetric(12, 9))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.add(egui::Label::new(text).wrap());
-        });
-}
-
-fn provider_label(kind: &ProviderKind) -> &'static str {
-    PROVIDERS
-        .iter()
-        .find(|(k, _)| k == kind)
-        .map_or("Custom", |(_, l)| *l)
 }
 
 impl Editor {
@@ -591,7 +421,7 @@ impl Editor {
                     ui.label(RichText::new(&account.label).strong());
                     ui.label(small(format!(
                         "{} · {} · id {}",
-                        provider_label(&account.provider),
+                        super::agent_chat::provider_name(&account.provider),
                         METHODS
                             .iter()
                             .find(|(m, _, _)| *m == account.method)
@@ -767,29 +597,54 @@ impl Editor {
         if self.runtime_unavailable(ui) {
             return;
         }
-        self.agent_notice(ui);
-        self.approvals_strip(ui);
+        // Older callers (and the evidence harness) select a session by index.
+        if let Some(index) = self.hub.agents.selected.take()
+            && let Some(id) = self
+                .hub
+                .agents
+                .runtime
+                .as_ref()
+                .and_then(|r| r.sessions.get(index))
+                .map(|s| s.meta.id.as_str().to_owned())
+        {
+            self.hub.agents.chat.page = Some(id);
+        }
         let rect = ui.available_rect_before_wrap();
-        let list_width = (rect.width() * 0.32).clamp(270.0, 340.0);
-        let list = egui::Rect::from_min_size(rect.min, egui::vec2(list_width, rect.height()));
-        let detail =
-            egui::Rect::from_min_max(egui::pos2(list.right() + GUTTER, rect.top()), rect.max);
-        ui.scope_builder(egui::UiBuilder::new().max_rect(list), |ui| {
-            ui.set_max_width(list.width());
-            ScrollArea::vertical()
-                .id_salt("agent-session-list")
-                .max_width(list.width())
-                .auto_shrink([false, false])
+        let side = if rect.width() > 960.0 { 290.0 } else { 0.0 };
+        let main = egui::Rect::from_min_max(
+            rect.min,
+            egui::pos2(
+                rect.right() - side - if side > 0.0 { GUTTER } else { 0.0 },
+                rect.bottom(),
+            ),
+        );
+        ui.scope_builder(egui::UiBuilder::new().max_rect(main), |ui| {
+            if side == 0.0 {
+                self.approvals_strip(ui);
+            }
+            Frame::new()
+                .fill(ink::panel())
+                .stroke(egui::Stroke::new(1.0_f32, colors().border))
+                .corner_radius(12)
+                .inner_margin(Margin::same(14))
                 .show(ui, |ui| {
-                    ui.set_max_width(list.width() - 14.0);
-                    self.session_list(ui);
-                    self.session_form(ui);
-                    self.context_panel(ui);
+                    ui.set_min_size(ui.available_size());
+                    self.agents_page(ui);
                 });
         });
-        ui.scope_builder(egui::UiBuilder::new().max_rect(detail), |ui| {
-            self.session_detail(ui);
-        });
+        if side > 0.0 {
+            let column =
+                egui::Rect::from_min_max(egui::pos2(rect.right() - side, rect.top()), rect.max);
+            ui.scope_builder(egui::UiBuilder::new().max_rect(column), |ui| {
+                ScrollArea::vertical()
+                    .id_salt("agent-side")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        self.approvals_strip(ui);
+                        self.context_panel(ui);
+                    });
+            });
+        }
     }
 
     fn approvals_strip(&mut self, ui: &mut Ui) {
@@ -834,193 +689,6 @@ impl Editor {
                     }
                 });
                 ui.add_space(4.0);
-            }
-        });
-    }
-
-    fn session_list(&mut self, ui: &mut Ui) {
-        let state = &mut self.hub.agents;
-        let runtime = state.runtime.as_ref().expect("runtime");
-        card(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(label("Sessions"));
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let live = runtime.sessions.iter().filter(|s| s.running()).count();
-                    if live > 0 {
-                        badge(ui, &format!("{live} RUNNING"), colors().accent);
-                    }
-                });
-            });
-            if runtime.sessions.is_empty() {
-                ui.label(support("No sessions yet. Create one below."));
-            }
-            for (index, session) in runtime.sessions.iter().enumerate() {
-                let meta = &session.meta;
-                let selected = state.selected == Some(index);
-                let detail = format!(
-                    "{} · {}{}",
-                    provider_label(&meta.provider),
-                    tr(meta.status.label()),
-                    if meta.worktree_branch.is_some() {
-                        " · worktree"
-                    } else {
-                        ""
-                    }
-                );
-                let item = Frame::new()
-                    .fill(if selected {
-                        colors().accent_bg
-                    } else {
-                        egui::Color32::TRANSPARENT
-                    })
-                    .corner_radius(8)
-                    .inner_margin(Margin::symmetric(10, 8))
-                    .show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        ui.horizontal_top(|ui| {
-                            let (dot, _) = ui
-                                .allocate_exact_size(egui::vec2(10.0, 18.0), egui::Sense::hover());
-                            ui.painter().circle_filled(
-                                dot.center(),
-                                4.0,
-                                status_color(meta.status),
-                            );
-                            ui.vertical(|ui| {
-                                ui.spacing_mut().item_spacing.y = 2.0;
-                                ui.add(
-                                    egui::Label::new(
-                                        RichText::new(&meta.title).size(BODY + 1.0).strong().color(
-                                            if selected {
-                                                ink::primary()
-                                            } else {
-                                                ink::secondary()
-                                            },
-                                        ),
-                                    )
-                                    .truncate(),
-                                );
-                                ui.label(small(detail));
-                            });
-                        });
-                    })
-                    .response
-                    .interact(egui::Sense::click());
-                if item.hovered() && !selected {
-                    ui.painter().rect_stroke(
-                        item.rect,
-                        8,
-                        egui::Stroke::new(1.0_f32, colors().border),
-                        egui::StrokeKind::Inside,
-                    );
-                }
-                if item.clicked() {
-                    state.selected = Some(index);
-                }
-            }
-        });
-    }
-
-    fn session_form(&mut self, ui: &mut Ui) {
-        let root = self.root.clone();
-        let state = &mut self.hub.agents;
-        let runtime = state.runtime.as_mut().expect("runtime");
-        let accounts: Vec<Account> = runtime
-            .profiles
-            .accounts()
-            .iter()
-            .filter(|a| a.provider != ProviderKind::Gemini && a.enabled)
-            .cloned()
-            .collect();
-        card(ui, |ui| {
-            ui.label(label("New session"));
-            let Some(root) = root.clone() else {
-                ui.label(secondary("Open a project folder first."));
-                return;
-            };
-            if accounts.is_empty() {
-                ui.label(secondary("Add a Claude Code or Codex account in Accounts."));
-                return;
-            }
-            if state
-                .new_account
-                .as_ref()
-                .is_none_or(|id| !accounts.iter().any(|a| &a.id == id))
-            {
-                state.new_account = Some(accounts[0].id.clone());
-            }
-            ui.add(
-                TextEdit::singleline(&mut state.new_title)
-                    .hint_text(tr("Title (optional)"))
-                    .desired_width(f32::INFINITY),
-            );
-            egui::ComboBox::from_id_salt("agent-new-account")
-                .width(ui.available_width())
-                .truncate()
-                .selected_text(
-                    accounts
-                        .iter()
-                        .find(|a| Some(&a.id) == state.new_account.as_ref())
-                        .map(|a| format!("{} · {}", a.label, provider_label(&a.provider)))
-                        .unwrap_or_default(),
-                )
-                .show_ui(ui, |ui| {
-                    for account in &accounts {
-                        ui.selectable_value(
-                            &mut state.new_account,
-                            Some(account.id.clone()),
-                            format!("{} · {}", account.label, provider_label(&account.provider)),
-                        );
-                    }
-                });
-            ui.add(
-                TextEdit::singleline(&mut state.new_model)
-                    .hint_text(tr("Model (empty = account default)"))
-                    .desired_width(f32::INFINITY),
-            );
-            ui.horizontal_wrapped(|ui| {
-                for (i, (_, label)) in PRESETS.iter().enumerate() {
-                    ui.selectable_value(&mut state.new_preset, i, *label);
-                }
-            });
-            checkbox(ui, &mut state.new_worktree, tr("Own git worktree"));
-            checkbox(
-                ui,
-                &mut state.new_safe,
-                tr("Auto-approve commands classified safe"),
-            );
-            checkbox(
-                ui,
-                &mut state.new_share,
-                tr("Share context with other agents"),
-            );
-            ui.label(small(format!(
-                "Project: {}",
-                crate::agents_runtime::plain(&root).display()
-            )));
-            if ui.add(primary("Create session")).clicked() {
-                let account = state.new_account.clone().expect("selected");
-                let model = Some(state.new_model.trim().to_owned())
-                    .filter(|m| !m.is_empty())
-                    .or_else(|| {
-                        accounts
-                            .iter()
-                            .find(|a| a.id == account)
-                            .and_then(|a| a.default_model.clone())
-                    });
-                let result = runtime.create_session(NewSession {
-                    title: std::mem::take(&mut state.new_title),
-                    account,
-                    model,
-                    root,
-                    worktree: state.new_worktree,
-                    preset: PRESETS[state.new_preset].0,
-                    allow_safe_commands: state.new_safe,
-                    share_context: state.new_share,
-                });
-                match result {
-                    Ok(index) => state.selected = Some(index),
-                    Err(e) => runtime.notice = Some((false, e)),
-                }
             }
         });
     }
@@ -1078,279 +746,319 @@ impl Editor {
         });
     }
 
-    fn session_detail(&mut self, ui: &mut Ui) {
-        let state = &mut self.hub.agents;
-        let runtime = state.runtime.as_mut().expect("runtime");
-        let Some(index) = state.selected.filter(|i| *i < runtime.sessions.len()) else {
-            section(
-                ui,
-                "Agent sessions",
-                "Create a session to run Claude Code or Codex in this project. Events stream \
-                 here as the provider reports them.",
-            );
-            return;
-        };
-        let audit = runtime.audit(&runtime.sessions[index].meta.id);
-        let session = &mut runtime.sessions[index];
-        let meta = session.meta.clone();
-        let running = session.running();
-        let mut close = false;
-        let mut cancel = false;
-        let mut send = None;
-
-        // Header: title, status and the facts that identify the session.
-        ui.horizontal(|ui| {
-            ui.label(heading(&meta.title));
-            ui.add_space(6.0);
-            badge(
-                ui,
-                &tr(meta.status.label()).to_uppercase(),
-                status_color(meta.status),
-            );
-        });
-        ui.add_space(6.0);
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
-            chip(ui, provider_label(&meta.provider));
-            chip(
-                ui,
-                meta.model.clone().unwrap_or_else(|| "Default model".into()),
-            );
-            chip(
-                ui,
-                PRESETS
-                    .iter()
-                    .find(|(p, _)| *p == meta.preset)
-                    .map_or("", |(_, l)| *l),
-            );
-            chip(
-                ui,
-                format!(
-                    "{} turn{}",
-                    meta.turns,
-                    if meta.turns == 1 { "" } else { "s" }
-                ),
-            );
-            chip(
-                ui,
-                format!("{} in · {} out", meta.input_tokens, meta.output_tokens),
-            );
-            if meta.cost_micros > 0 {
-                chip(
-                    ui,
-                    format!("US$ {:.4} reported", meta.cost_micros as f64 / 1e6),
-                );
-            }
-        });
-        ui.add_space(12.0);
-        let permissions = match meta.provider {
-            ProviderKind::ClaudeCode => {
-                "Every tool call passes the Covalos gate; edits outside the workspace are \
-                 denied. The process still runs as your Windows user: a worktree isolates \
-                 files, not the process."
-            }
-            _ => {
-                "Codex runs under its own sandbox (read-only or workspace-write). It has no \
-                 approval hook, so its sandbox is the effective limit."
-            }
-        };
-        ui.columns(2, |cols| {
-            // Left-aligned, unjustified text in both columns.
-            cols[0].with_layout(Layout::top_down(Align::Min), |ui| {
-                ui.label(label("Workspace"));
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(meta.workdir.display().to_string())
-                            .monospace()
-                            .size(11.5)
-                            .color(ink::secondary()),
-                    )
-                    .wrap(),
-                );
-                if let Some(branch) = &meta.worktree_branch {
-                    ui.label(small(format!("Own worktree · branch {branch}")));
-                }
-                if let Some(id) = &meta.provider_session {
-                    ui.label(small(format!("Provider session {id}")));
-                }
-            });
-            cols[1].with_layout(Layout::top_down(Align::Min), |ui| {
-                ui.label(label("Permissions"));
-                ui.add(egui::Label::new(support(permissions)).wrap());
-            });
-        });
-        ui.add_space(14.0);
-
-        // Activity timeline.
-        let composer = 132.0;
-        let height = (ui.available_height() - composer).max(160.0);
-        Frame::new()
-            .fill(ink::panel())
-            .stroke(egui::Stroke::new(1.0_f32, colors().border))
-            .corner_radius(12)
-            .inner_margin(Margin::symmetric(16, 14))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    ui.label(label("Activity"));
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.label(small(format!("{} events", meta.log.len())));
-                    });
-                });
-                ui.add_space(8.0);
-                ScrollArea::vertical()
-                    .id_salt(("agent-log", index))
-                    .max_height(height - 40.0)
-                    .auto_shrink([false, false])
-                    .stick_to_bottom(true)
-                    .show(ui, |ui| {
-                        let base = meta.log.first().map_or(0, |l| l.at_ms);
-                        for entry in timeline_entries(&meta.log) {
-                            let time = clock(entry.at_ms, base);
-                            timeline_row(ui, &time, entry.kind, |ui| match entry.kind {
-                                "agent" => bubble(ui, ink::raised(), read(&entry.text)),
-                                "you" => bubble(
-                                    ui,
-                                    colors().accent_bg,
-                                    read(&entry.text).color(ink::primary()),
-                                ),
-                                "error" => bubble(
-                                    ui,
-                                    colors().error.gamma_multiply(0.12),
-                                    RichText::new(&entry.text)
-                                        .size(META)
-                                        .line_height(Some(META_LINE))
-                                        .color(colors().error),
-                                ),
-                                "usage" | "cost" | "provider" | "closed" => {
-                                    ui.label(small(&entry.text));
-                                }
-                                _ => {
-                                    ui.add(egui::Label::new(support(&entry.text)).wrap());
-                                }
-                            });
-                        }
-                        if running {
-                            let base_time = clock(covalos_agents::now_ms(), base);
-                            timeline_row(ui, &base_time, "running", |ui| {
-                                ui.horizontal(|ui| {
-                                    busy_indicator(ui);
-                                    ui.label(support("Working…"));
-                                });
-                                if !session.streaming.is_empty() {
-                                    bubble(
-                                        ui,
-                                        ink::raised(),
-                                        read(&session.streaming).color(ink::secondary()),
-                                    );
-                                }
-                            });
-                        }
-                        if !audit.is_empty() {
-                            ui.add_space(6.0);
-                            ui.label(label("Covalos gate decisions"));
-                            ui.add_space(4.0);
-                            for entry in &audit {
-                                let allowed = entry["allow"] == true;
-                                ui.horizontal_wrapped(|ui| {
-                                    badge(
-                                        ui,
-                                        if allowed { "ALLOW" } else { "DENY" },
-                                        if allowed {
-                                            colors().success
-                                        } else {
-                                            colors().error
-                                        },
-                                    );
-                                    ui.label(support(
-                                        entry["tool"].as_str().unwrap_or_default().to_owned(),
-                                    ));
-                                    ui.label(
-                                        RichText::new(entry["target"].as_str().unwrap_or_default())
-                                            .monospace()
-                                            .size(11.5)
-                                            .color(ink::secondary()),
-                                    );
-                                    ui.label(small(
-                                        entry["reason"].as_str().unwrap_or_default().to_owned(),
-                                    ));
-                                });
-                            }
-                        }
-                    });
-            });
-        ui.add_space(12.0);
-
-        // Composer.
-        ui.add(
-            TextEdit::multiline(&mut session.draft)
-                .hint_text(tr(if running {
-                    "Running… you can cancel the turn"
-                } else {
-                    "Message the agent"
-                }))
-                .font(egui::FontId::proportional(READ))
-                .margin(Margin::symmetric(12, 10))
-                .desired_rows(2)
-                .desired_width(f32::INFINITY),
-        );
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            if running {
-                if ui.button(tr("Cancel turn")).clicked() {
-                    cancel = true;
-                }
-            } else {
-                if ui.add(primary("Send")).clicked() {
-                    send = Some(std::mem::take(&mut session.draft));
-                }
-                if ui.button(tr("Close session")).clicked() {
-                    close = true;
-                }
-            }
-        });
-        if cancel {
-            runtime.cancel(index);
-        }
-        if let Some(prompt) = send
-            && let Err(e) = runtime.send(index, &prompt)
-        {
-            runtime.sessions[index].draft = prompt;
-            runtime.notice = Some((false, e));
-        }
-        if close {
-            runtime.notice = Some(match runtime.close(index) {
-                Ok(note) => (true, note),
-                Err(e) => (false, e),
-            });
-            state.selected = None;
-        }
-    }
-
-    // ---------------------------------------------------------------- autonomy
+    // ---------------------------------------------------------------- orchestrator
 
     pub(super) fn autonomy_panel(&mut self, ui: &mut Ui) {
         if self.runtime_unavailable(ui) {
             return;
         }
-        self.agent_notice(ui);
         let root = self.root.clone();
-        ScrollArea::vertical()
-            .id_salt("agent-autonomy")
-            .show(ui, |ui| {
-                self.approvals_strip(ui);
-                self.autonomy_controls(ui, root);
+        let rect = ui.available_rect_before_wrap();
+        let wide = rect.width() > 900.0;
+        let setup_width = if wide {
+            (rect.width() * 0.4).clamp(340.0, 440.0)
+        } else {
+            rect.width()
+        };
+        ui.label(heading(tr("Orchestrator")));
+        ui.label(support(tr(
+            "Turn an objective into tasks, assign each role to one of your accounts, and supervise \
+             the run. Everything shown comes from the engine's live state.",
+        )));
+        ui.add_space(12.0);
+        self.agent_notice(ui);
+        let top = ui.cursor().min.y;
+        let setup = egui::Rect::from_min_max(
+            egui::pos2(rect.left(), top),
+            egui::pos2(rect.left() + setup_width, rect.bottom()),
+        );
+        ui.scope_builder(egui::UiBuilder::new().max_rect(setup), |ui| {
+            ScrollArea::vertical()
+                .id_salt("orchestrator-setup")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.set_max_width(setup_width - 12.0);
+                    self.orchestrator_setup(ui, root.clone());
+                    if !wide {
+                        self.orchestrator_live(ui);
+                    }
+                });
+        });
+        if wide {
+            let live = egui::Rect::from_min_max(egui::pos2(setup.right() + GUTTER, top), rect.max);
+            ui.scope_builder(egui::UiBuilder::new().max_rect(live), |ui| {
+                ScrollArea::vertical()
+                    .id_salt("orchestrator-live")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| self.orchestrator_live(ui));
             });
+        }
     }
 
-    fn autonomy_controls(&mut self, ui: &mut Ui, root: Option<PathBuf>) {
+    fn orchestrator_setup(&mut self, ui: &mut Ui, root: Option<PathBuf>) {
         let state = &mut self.hub.agents;
         let runtime = state.runtime.as_mut().expect("runtime");
-        let running = runtime
-            .plan
-            .as_ref()
-            .is_some_and(|p| !p.engine.plan().state.is_settled());
+        let accounts: Vec<Account> = runtime
+            .profiles
+            .accounts()
+            .iter()
+            .filter(|a| {
+                a.enabled && matches!(a.provider, ProviderKind::ClaudeCode | ProviderKind::Codex)
+            })
+            .cloned()
+            .collect();
+        let describe = |a: &Account| {
+            format!(
+                "{} · {} · {}",
+                a.label,
+                super::agent_chat::provider_name(&a.provider),
+                a.default_model
+                    .clone()
+                    .unwrap_or_else(|| "default model".into())
+            )
+        };
+        card(ui, |ui| {
+            ui.label(label("Orchestrator"));
+            for (i, (title, detail)) in [
+                (
+                    "Template planner",
+                    "Offline and deterministic: design → build → tests → review → release.",
+                ),
+                ("One role", "A single role does the whole objective."),
+                (
+                    "An agent writes the plan",
+                    "Your chosen account plans the tasks as JSON; the engine validates it.",
+                ),
+            ]
+            .iter()
+            .enumerate()
+            {
+                ui.horizontal(|ui| {
+                    ui.radio_value(
+                        &mut state.planner,
+                        i as u8,
+                        RichText::new(tr(title)).strong(),
+                    );
+                });
+                ui.label(small(tr(detail)));
+            }
+            if state.planner == 1 {
+                ui.horizontal_wrapped(|ui| {
+                    for role in RoleCatalog::builtin().iter() {
+                        ui.selectable_value(
+                            &mut state.single_role,
+                            Some(role.id.to_string()),
+                            &role.name,
+                        );
+                    }
+                });
+            }
+            if state.planner == 2 {
+                if accounts.is_empty() {
+                    ui.label(small(tr("Add an account first.")));
+                }
+                egui::ComboBox::from_id_salt("planner-account")
+                    .width(ui.available_width())
+                    .truncate()
+                    .selected_text(
+                        accounts
+                            .iter()
+                            .find(|a| Some(&a.id) == state.planner_account.as_ref())
+                            .map_or_else(|| tr("Choose the planning account").to_owned(), describe),
+                    )
+                    .show_ui(ui, |ui| {
+                        for a in &accounts {
+                            ui.selectable_value(
+                                &mut state.planner_account,
+                                Some(a.id.clone()),
+                                describe(a),
+                            );
+                        }
+                    });
+            }
+        });
+        card(ui, |ui| {
+            ui.label(label("Roles"));
+            ui.label(small(tr(
+                "Automatic lets the engine pick a signed-in account. A pinned role only runs on that \
+                 account and uses its model.",
+            )));
+            ui.add_space(4.0);
+            for role in RoleCatalog::builtin().iter() {
+                let key = role.id.to_string();
+                ui.horizontal(|ui| {
+                    ui.add_sized(
+                        [110.0, 22.0],
+                        egui::Label::new(RichText::new(&role.name).strong()).truncate(),
+                    );
+                    let current = state.pins.get(&key).cloned();
+                    egui::ComboBox::from_id_salt(("pin", &key))
+                        .width(ui.available_width())
+                        .truncate()
+                        .selected_text(
+                            current
+                                .as_ref()
+                                .and_then(|id| accounts.iter().find(|a| &a.id == id))
+                                .map_or_else(|| tr("Automatic").to_owned(), describe),
+                        )
+                        .show_ui(ui, |ui| {
+                            if ui
+                                .selectable_label(current.is_none(), tr("Automatic"))
+                                .clicked()
+                            {
+                                state.pins.remove(&key);
+                            }
+                            for a in &accounts {
+                                if ui
+                                    .selectable_label(current.as_ref() == Some(&a.id), describe(a))
+                                    .clicked()
+                                {
+                                    state.pins.insert(key.clone(), a.id.clone());
+                                }
+                            }
+                        });
+                });
+            }
+        });
+        card(ui, |ui| {
+            ui.label(label("Budget"));
+            ui.horizontal_wrapped(|ui| {
+                ui.label(small("Minutes"));
+                ui.add(egui::DragValue::new(&mut state.budget_minutes).range(1..=240));
+                ui.label(small("Tokens (0 = none)"));
+                ui.add(
+                    egui::DragValue::new(&mut state.budget_tokens)
+                        .range(0..=5_000_000)
+                        .speed(1000),
+                );
+                ui.label(small("Parallel"));
+                ui.add(egui::DragValue::new(&mut state.max_parallel).range(1..=4));
+            });
+            checkbox(
+                ui,
+                &mut state.plan_worktrees,
+                tr("Each task in its own git worktree"),
+            );
+        });
+        let mut start = None;
+        card(ui, |ui| {
+            ui.label(label("Objective"));
+            let Some(root) = root else {
+                ui.label(secondary("Open a project folder first."));
+                return;
+            };
+            ui.add(
+                TextEdit::multiline(&mut state.goal)
+                    .hint_text(tr(
+                        "e.g. Build the landing page hero and pricing sections in React",
+                    ))
+                    .desired_rows(3)
+                    .desired_width(f32::INFINITY),
+            );
+            ui.label(small(format!(
+                "Project: {}",
+                crate::agents_runtime::plain(&root).display()
+            )));
+            let busy = runtime.planning.is_some()
+                || runtime
+                    .plan
+                    .as_ref()
+                    .is_some_and(|p| !p.engine.plan().state.is_settled());
+            if ui
+                .add_enabled(
+                    !busy && !state.goal.trim().is_empty(),
+                    primary(tr("Start objective")),
+                )
+                .clicked()
+            {
+                start = Some(std::mem::take(&mut state.goal));
+            }
+        });
+        if let Some(goal) = start {
+            self.start_objective(&goal);
+        }
+    }
+
+    /// Starts an objective with the orchestrator settings; used by the
+    /// Orchestrator page and by the universal composer.
+    pub(super) fn start_objective(&mut self, goal: &str) {
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        let state = &mut self.hub.agents;
+        let Some(runtime) = state.runtime.as_mut() else {
+            return;
+        };
+        let mut pins = std::collections::BTreeMap::new();
+        for (role, account) in &state.pins {
+            if let Ok(role) = covalos_agents::RoleId::new(role.clone()) {
+                pins.insert(role, account.clone());
+            }
+        }
+        let setup = PlanSetup {
+            worktrees: state.plan_worktrees,
+            budget: Budget {
+                wall_ms: Some(u64::from(state.budget_minutes) * 60_000),
+                tokens: (state.budget_tokens > 0).then_some(u64::from(state.budget_tokens)),
+                cost_micros: None,
+            },
+            max_parallel: state.max_parallel,
+            pins,
+        };
+        let result = match state.planner {
+            2 => match state.planner_account.clone() {
+                Some(account) => {
+                    let model = runtime
+                        .profiles
+                        .accounts()
+                        .iter()
+                        .find(|a| a.id == account)
+                        .and_then(|a| a.default_model.clone());
+                    runtime.request_plan(goal, account, model, &root, setup)
+                }
+                None => Err("Choose the account that writes the plan.".into()),
+            },
+            1 => runtime.start_plan(
+                goal,
+                PlanMode::Single {
+                    role: state
+                        .single_role
+                        .clone()
+                        .unwrap_or_else(|| "reviewer".into()),
+                },
+                &root,
+                setup,
+            ),
+            _ => runtime.start_plan(goal, PlanMode::Template, &root, setup),
+        };
+        runtime.notice = Some(match result {
+            Ok(()) if state.planner == 2 => (true, "The planner agent is writing the plan.".into()),
+            Ok(()) => (true, "Objective started.".into()),
+            Err(e) => (false, e),
+        });
+    }
+
+    fn orchestrator_live(&mut self, ui: &mut Ui) {
+        let state = &mut self.hub.agents;
+        let runtime = state.runtime.as_mut().expect("runtime");
+        let mut open_session = None;
+        if let Some(planning) = &runtime.planning {
+            card(ui, |ui| {
+                ui.horizontal(|ui| {
+                    busy_indicator(ui);
+                    ui.label(read(tr("An agent is writing the plan…")));
+                });
+                ui.label(small(planning.goal.clone()));
+                if ui.small_button(tr("Watch its conversation")).clicked() {
+                    open_session = Some(planning.session.as_str().to_owned());
+                }
+            });
+        }
         if !runtime.recoverable.is_empty() {
+            let running = runtime
+                .plan
+                .as_ref()
+                .is_some_and(|p| !p.engine.plan().state.is_settled());
             card(ui, |ui| {
                 ui.label(label("Interrupted plans"));
                 let mut recover: Option<PathBuf> = None;
@@ -1374,90 +1082,34 @@ impl Editor {
                 }
             });
         }
-        if !running {
-            card(ui, |ui| {
-                ui.label(label("New objective"));
-                ui.add(
-                    TextEdit::multiline(&mut state.goal)
-                        .hint_text(tr("Describe the goal"))
-                        .desired_rows(3)
-                        .desired_width(f32::INFINITY),
-                );
-                ui.horizontal_wrapped(|ui| {
-                    ui.selectable_value(&mut state.single_role, None, tr("Template plan"));
-                    for role in RoleCatalog::builtin().iter() {
-                        ui.selectable_value(
-                            &mut state.single_role,
-                            Some(role.id.to_string()),
-                            format!("1 task · {}", role.name),
-                        );
-                    }
-                });
-                ui.label(small(
-                    "Template plan: architecture → backend/frontend → tests → review → release \
-                     (the goal must name components). One task: a single role does the whole \
-                     goal.",
-                ));
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(small("Time budget (min)"));
-                    ui.add(egui::DragValue::new(&mut state.budget_minutes).range(1..=240));
-                    ui.label(small("Token budget (0 = none)"));
-                    ui.add(
-                        egui::DragValue::new(&mut state.budget_tokens)
-                            .range(0..=5_000_000)
-                            .speed(1000),
-                    );
-                    ui.label(small("Parallel"));
-                    ui.add(egui::DragValue::new(&mut state.max_parallel).range(1..=4));
-                });
-                checkbox(
-                    ui,
-                    &mut state.plan_worktrees,
-                    tr("Each task in its own git worktree"),
-                );
-                let Some(root) = root.clone() else {
-                    ui.label(secondary("Open a project folder first."));
-                    return;
-                };
-                ui.label(small(format!(
-                    "Project: {}",
-                    crate::agents_runtime::plain(&root).display()
-                )));
-                if ui.add(primary("Start objective")).clicked() {
-                    let budget = Budget {
-                        wall_ms: Some(u64::from(state.budget_minutes) * 60_000),
-                        tokens: (state.budget_tokens > 0).then_some(u64::from(state.budget_tokens)),
-                        cost_micros: None,
-                    };
-                    let mode = match state.single_role.clone() {
-                        Some(role) => PlanMode::Single { role },
-                        None => PlanMode::Template,
-                    };
-                    if let Err(e) = runtime.start_plan(
-                        &state.goal,
-                        mode,
-                        &root,
-                        state.plan_worktrees,
-                        budget,
-                        state.max_parallel,
-                    ) {
-                        runtime.notice = Some((false, e));
-                    }
-                }
-            });
-        }
         let Some(run) = runtime.plan.as_mut() else {
+            if runtime.planning.is_none() {
+                card(ui, |ui| {
+                    ui.label(label("Live run"));
+                    ui.label(support(tr(
+                        "No objective yet. Start one here or send it from any chat with \
+                         Covalos Orchestrator selected.",
+                    )));
+                });
+            }
+            if let Some(id) = open_session {
+                state.chat.page = Some(id);
+                self.hub.focus_agents("agents");
+            }
             return;
         };
         let plan = run.engine.plan().clone();
         card(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new(&plan.goal).strong());
-                ui.label(small(format!("{:?}", plan.state)));
+                ui.label(heading(&plan.goal));
+                badge(
+                    ui,
+                    &format!("{:?}", plan.state).to_uppercase(),
+                    plan_color(&plan.state),
+                );
             });
             ui.label(small(format!(
-                "{} · spent {:.1} min · {} tokens{}",
-                plan.id,
+                "spent {:.1} min · {} tokens{}",
                 plan.spend.wall_ms as f64 / 60_000.0,
                 plan.spend.tokens,
                 if plan.spend.cost_reported {
@@ -1485,85 +1137,143 @@ impl Editor {
             if let Some(error) = &run.error {
                 ui.colored_label(colors().error, error);
             }
-            ui.add_space(6.0);
-            for task in plan.tasks() {
-                let (color, label) = match &task.status {
-                    TaskStatus::Succeeded => (colors().success, "Succeeded".to_owned()),
-                    TaskStatus::Failed { reason } => (colors().error, format!("Failed: {reason}")),
-                    TaskStatus::Running => (colors().accent, "Running".into()),
-                    TaskStatus::AwaitingApproval => (colors().warning, "Awaiting approval".into()),
-                    TaskStatus::Retrying { reason, .. } => {
-                        (colors().warning, format!("Retrying: {reason}"))
-                    }
-                    TaskStatus::Skipped { because } => {
-                        (colors().muted, format!("Skipped (needs {because})"))
-                    }
-                    TaskStatus::Cancelled => (colors().muted, "Cancelled".into()),
-                    TaskStatus::Pending => (colors().muted, "Pending".into()),
-                };
-                ui.horizontal_wrapped(|ui| {
-                    ui.colored_label(color, "●");
+        });
+        let pending: Vec<(String, String)> = run
+            .engine
+            .pending_approvals()
+            .into_iter()
+            .map(|(request, task)| {
+                (
+                    request.ticket.clone(),
+                    format!("{task}: {}", crate::agent_gate::describe(&request.action)),
+                )
+            })
+            .collect();
+        if !pending.is_empty() {
+            card(ui, |ui| {
+                badge(ui, "APPROVALS WAITING", colors().warning);
+                let mut resolve = None;
+                for (ticket, text) in &pending {
                     ui.label(
-                        RichText::new(format!("{} · {}", task.spec.id, task.spec.title)).strong(),
+                        RichText::new(crate::agent_gate::redact(text))
+                            .monospace()
+                            .size(SMALL),
                     );
-                    ui.label(small(format!(
-                        "{} · {} · attempt {} · {} tokens · {}",
-                        task.spec.role,
-                        task.account
-                            .as_ref()
-                            .map_or_else(|| "unassigned".into(), ToString::to_string),
-                        task.attempts,
-                        task.spend.tokens,
-                        label
-                    )));
-                });
-            }
-            let pending: Vec<(String, String)> = run
-                .engine
-                .pending_approvals()
-                .into_iter()
-                .map(|(request, task)| {
-                    (
-                        request.ticket.clone(),
-                        format!("{task}: {}", crate::agent_gate::describe(&request.action)),
-                    )
-                })
-                .collect();
-            let mut resolve = None;
-            for (ticket, text) in &pending {
-                ui.horizontal_wrapped(|ui| {
-                    ui.colored_label(colors().warning, tr("Engine approval"));
-                    ui.label(crate::agent_gate::redact(text));
-                    if ui.add(primary("Allow once")).clicked() {
-                        resolve = Some((ticket.clone(), Resolution::AllowOnce));
-                    }
-                    if ui.button(tr("Deny")).clicked() {
-                        resolve = Some((ticket.clone(), Resolution::Deny));
-                    }
-                });
-            }
-            if let Some((ticket, resolution)) = resolve
-                && let Err(e) = run.engine.resolve(&ticket, resolution)
-            {
-                run.error = Some(e.to_string());
-            }
-            let context: Vec<_> = run.engine.context().since(0).cloned().collect();
-            if !context.is_empty() {
-                ui.add_space(6.0);
-                ui.label(small("Plan context"));
-                for entry in context.iter().rev().take(10) {
-                    ui.label(small(format!(
-                        "#{} {:?} · {}",
-                        entry.seq,
-                        entry.kind,
-                        entry.text.chars().take(260).collect::<String>()
-                    )));
+                    ui.horizontal(|ui| {
+                        if ui.add(primary("Allow once")).clicked() {
+                            resolve = Some((ticket.clone(), Resolution::AllowOnce));
+                        }
+                        if ui.button(tr("Deny")).clicked() {
+                            resolve = Some((ticket.clone(), Resolution::Deny));
+                        }
+                    });
                 }
+                if let Some((ticket, resolution)) = resolve
+                    && let Err(e) = run.engine.resolve(&ticket, resolution)
+                {
+                    run.error = Some(e.to_string());
+                }
+            });
+        }
+        card(ui, |ui| {
+            ui.label(label("Tasks"));
+            for task in plan.tasks() {
+                let status = task_label(&task.status);
+                Frame::new()
+                    .fill(ink::raised())
+                    .corner_radius(8)
+                    .inner_margin(Margin::symmetric(10, 7))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.horizontal(|ui| {
+                            let (dot, _) = ui
+                                .allocate_exact_size(egui::vec2(10.0, 16.0), egui::Sense::hover());
+                            ui.painter()
+                                .circle_filled(dot.center(), 4.0, task_color(&task.status));
+                            ui.label(
+                                RichText::new(&task.spec.title)
+                                    .strong()
+                                    .color(ink::primary()),
+                            );
+                        });
+                        ui.label(small(format!(
+                            "{} · {} · attempt {} · {} tokens · {}",
+                            task.spec.role,
+                            task.account
+                                .as_ref()
+                                .map_or_else(|| "unassigned".into(), ToString::to_string),
+                            task.attempts,
+                            task.spend.tokens,
+                            status
+                        )));
+                    });
+                ui.add_space(4.0);
+            }
+        });
+        let context: Vec<_> = run.engine.context().since(0).cloned().collect();
+        card(ui, |ui| {
+            ui.label(label("Results"));
+            if context.is_empty() {
+                ui.label(small(tr(
+                    "Agents publish their results here as tasks finish.",
+                )));
+            }
+            for entry in context.iter().rev().take(12) {
+                egui::CollapsingHeader::new(small(format!(
+                    "#{} {:?} · {}",
+                    entry.seq,
+                    entry.kind,
+                    entry.text.chars().take(70).collect::<String>()
+                )))
+                .id_salt(("plan-result", entry.seq))
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::Label::new(support(entry.text.clone()))
+                            .wrap()
+                            .selectable(true),
+                    );
+                });
             }
             ui.label(small(format!(
                 "Journal: {}",
                 run.engine.journal_path().display()
             )));
         });
+        if let Some(id) = open_session {
+            state.chat.page = Some(id);
+            self.hub.focus_agents("agents");
+        }
+    }
+}
+
+pub(super) fn task_color(status: &TaskStatus) -> egui::Color32 {
+    match status {
+        TaskStatus::Succeeded => colors().success,
+        TaskStatus::Failed { .. } => colors().error,
+        TaskStatus::Running => colors().accent,
+        TaskStatus::AwaitingApproval | TaskStatus::Retrying { .. } => colors().warning,
+        _ => colors().muted,
+    }
+}
+
+fn task_label(status: &TaskStatus) -> String {
+    match status {
+        TaskStatus::Succeeded => "Succeeded".into(),
+        TaskStatus::Failed { reason } => format!("Failed: {reason}"),
+        TaskStatus::Running => "Running".into(),
+        TaskStatus::AwaitingApproval => "Awaiting approval".into(),
+        TaskStatus::Retrying { reason, .. } => format!("Retrying: {reason}"),
+        TaskStatus::Skipped { because } => format!("Skipped (needs {because})"),
+        TaskStatus::Cancelled => "Cancelled".into(),
+        TaskStatus::Pending => "Pending".into(),
+    }
+}
+
+fn plan_color(state: &covalos_engine::PlanState) -> egui::Color32 {
+    use covalos_engine::PlanState;
+    match state {
+        PlanState::Paused => colors().warning,
+        s if s.is_settled() => colors().secondary,
+        _ => colors().accent,
     }
 }

@@ -3,6 +3,7 @@ mod evidence;
 #[cfg(test)]
 mod visual_tests;
 
+mod agent_chat;
 mod agent_hub;
 mod assets;
 mod brands;
@@ -805,6 +806,10 @@ impl Editor {
         if !self.hub_open && !self.studio_open {
             self.floating_editors(ctx);
         }
+        if !self.studio_open {
+            self.floating_agents(ctx);
+        }
+        self.add_ai_modal(ctx);
         self.settings_window(ctx);
         self.about_window(ctx);
         self.palette_modal(ctx);

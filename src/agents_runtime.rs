@@ -8,7 +8,7 @@
 use crate::agent_gate::{self, GatePolicy, GateRequest};
 use covalos_agents::{
     Account, AccountId, AgentEvent, ConnectionMethod, PlanId, ProviderKind, ProviderRegistry,
-    ProviderSpec, SessionId,
+    ProviderSpec, RoleId, SessionId,
     context::{Draft, EntryKind, SharedContext},
     credentials::{CredentialStore, Secret},
     event::{ClaudeDecoder, CodexDecoder, StreamDecoder},
@@ -303,6 +303,13 @@ impl LiveSession {
         self.turn.is_some()
     }
 
+    /// Cancel was requested and the process tree is still shutting down.
+    pub(crate) fn stopping(&self) -> bool {
+        self.turn
+            .as_ref()
+            .is_some_and(|(_, cancel)| cancel.load(Ordering::SeqCst))
+    }
+
     fn log(&mut self, kind: &str, text: impl Into<String>) {
         let text = agent_gate::redact(&text.into());
         self.meta.log.push(LogLine {
@@ -332,6 +339,26 @@ pub(crate) struct NewSession {
 struct PlanSidecar {
     root: PathBuf,
     worktrees: bool,
+    #[serde(default)]
+    pins: BTreeMap<RoleId, AccountId>,
+}
+
+/// Orchestrator settings chosen in the UI, applied to the engine as-is.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct PlanSetup {
+    pub worktrees: bool,
+    pub budget: Budget,
+    pub max_parallel: usize,
+    /// Roles that must run on a specific account (engine `Preferences::pinned`).
+    pub pins: BTreeMap<RoleId, AccountId>,
+}
+
+/// An agent is writing the plan; the engine starts when it answers.
+pub(crate) struct Planning {
+    pub session: SessionId,
+    pub goal: String,
+    pub root: PathBuf,
+    pub setup: PlanSetup,
 }
 
 pub(crate) struct AutoRun {
@@ -341,7 +368,11 @@ pub(crate) struct AutoRun {
 
 pub(crate) enum PlanMode {
     Template,
-    Single { role: String },
+    Single {
+        role: String,
+    },
+    /// A plan an agent wrote, validated by the engine.
+    Spec(PlanSpec),
 }
 
 // ---------------------------------------------------------------- runtime
@@ -361,10 +392,26 @@ pub(crate) struct Runtime {
     pub approvals: Vec<GateRequest>,
     last_scan: Option<Instant>,
     pub plan: Option<AutoRun>,
+    pub planning: Option<Planning>,
     pub recoverable: Vec<PathBuf>,
     pub notice: Option<(bool, String)>,
+    /// Last sign-in check per account, from the provider's own status command.
+    pub connection: BTreeMap<AccountId, Connection>,
+    status_tx: Sender<(AccountId, Result<String, String>)>,
+    status_rx: Receiver<(AccountId, Result<String, String>)>,
     exe: PathBuf,
     wake: Wake,
+}
+
+/// What Covalos knows about an account's sign-in, never inferred.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Connection {
+    Checking,
+    SignedIn(String),
+    SignedOut(String),
+    /// API-key accounts: whether a key is stored.
+    Key(bool),
+    Unknown(String),
 }
 
 fn credential_store() -> (Store, &'static str) {
@@ -400,6 +447,7 @@ impl Runtime {
         let profiles = ProfileStore::open(dir.join("profiles")).map_err(|e| e.to_string())?;
         let (credentials, credential_backend) = credential_store();
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let (status_tx, status_rx) = mpsc::channel();
         let context = std::fs::read(dir.join("context.json"))
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
@@ -419,8 +467,12 @@ impl Runtime {
             approvals: Vec::new(),
             last_scan: None,
             plan: None,
+            planning: None,
             recoverable: Vec::new(),
             notice: None,
+            connection: BTreeMap::new(),
+            status_tx,
+            status_rx,
             exe,
             wake,
         };
@@ -583,11 +635,49 @@ impl Runtime {
     }
 
     /// Sign-in state of one account through the CLI's own status command.
+    /// Checks an account's sign-in in the background with the CLI's own status
+    /// command; the result lands in `connection` on a later `tick`.
+    pub(crate) fn refresh_connection(&mut self, id: &AccountId) {
+        let Some(account) = self
+            .profiles
+            .accounts()
+            .iter()
+            .find(|a| &a.id == id)
+            .cloned()
+        else {
+            return;
+        };
+        if account.method == ConnectionMethod::ApiKey {
+            let stored = self.has_api_key(&account).unwrap_or(false);
+            self.connection.insert(id.clone(), Connection::Key(stored));
+            return;
+        }
+        match self.status_command_for(id) {
+            Ok(command) => {
+                self.connection.insert(id.clone(), Connection::Checking);
+                let tx = self.status_tx.clone();
+                let wake = self.wake.clone();
+                let id = id.clone();
+                thread::spawn(move || {
+                    let _ = tx.send((id, run_capture(command, Duration::from_secs(20))));
+                    wake();
+                });
+            }
+            Err(e) => {
+                self.connection.insert(id.clone(), Connection::Unknown(e));
+            }
+        }
+    }
+
     pub(crate) fn account_status(&self, id: &AccountId) -> Result<String, String> {
         self.account_status_raw(id).map(|t| sanitize_status(&t))
     }
 
     fn account_status_raw(&self, id: &AccountId) -> Result<String, String> {
+        run_capture(self.status_command_for(id)?, Duration::from_secs(20))
+    }
+
+    fn status_command_for(&self, id: &AccountId) -> Result<Command, String> {
         let (account, spec, program) = self.spec_for(id)?;
         let args = status_command(&spec).ok_or("No official status command.")?;
         let plan = account_plan(
@@ -610,7 +700,7 @@ impl Runtime {
             }
         }
         command.args(args);
-        run_capture(command, Duration::from_secs(20))
+        Ok(command)
     }
 
     // ------------------------------------------------------------ sessions
@@ -787,6 +877,11 @@ impl Runtime {
         )
         .map_err(|e| e.to_string())?;
         let command = plan.isolated_command(INHERITED_ENV);
+        // A resumed turn gets one silent-start retry (see `FIRST_EVENT`).
+        let retry = meta
+            .provider_session
+            .is_some()
+            .then(|| plan.isolated_command(INHERITED_ENV));
 
         let mut full = String::new();
         let latest = self.context.latest_seq();
@@ -811,6 +906,7 @@ impl Runtime {
         let (tx, rx) = mpsc::channel();
         spawn_turn(
             command,
+            retry,
             full,
             decoder,
             cancel.clone(),
@@ -938,7 +1034,13 @@ impl Runtime {
         found
     }
 
-    fn deps(&self, root: &Path, worktrees: bool, max_parallel: usize) -> Result<Deps, String> {
+    fn deps(
+        &self,
+        root: &Path,
+        worktrees: bool,
+        max_parallel: usize,
+        pins: &BTreeMap<RoleId, AccountId>,
+    ) -> Result<Deps, String> {
         let roles = RoleCatalog::builtin();
         let all: std::collections::BTreeSet<Capability> = roles
             .iter()
@@ -946,7 +1048,10 @@ impl Runtime {
             .collect();
         let mut agents = Vec::new();
         let mut programs = BTreeMap::new();
-        let mut prefs = Preferences::default();
+        let mut prefs = Preferences {
+            pinned: pins.clone(),
+            ..Preferences::default()
+        };
         for account in self.profiles.accounts() {
             let Ok(spec) = self.registry.get(&account.provider) else {
                 continue;
@@ -1027,10 +1132,14 @@ impl Runtime {
         goal: &str,
         mode: PlanMode,
         root: &Path,
-        worktrees: bool,
-        budget: Budget,
-        max_parallel: usize,
+        setup: PlanSetup,
     ) -> Result<(), String> {
+        let PlanSetup {
+            worktrees,
+            budget,
+            max_parallel,
+            pins,
+        } = setup;
         if self
             .plan
             .as_ref()
@@ -1043,8 +1152,9 @@ impl Runtime {
             return Err("Describe the goal first.".into());
         }
         let root = &plain(root);
-        let deps = self.deps(root, worktrees, max_parallel)?;
+        let deps = self.deps(root, worktrees, max_parallel, &pins)?;
         let spec = match mode {
+            PlanMode::Spec(spec) => spec,
             PlanMode::Template => TemplatePlanner
                 .plan(goal, &deps.roles)
                 .map_err(|e| e.to_string())?,
@@ -1067,6 +1177,7 @@ impl Runtime {
         let sidecar = PlanSidecar {
             root: root.to_path_buf(),
             worktrees,
+            pins,
         };
         write_atomic(
             &journal.with_extension("json"),
@@ -1082,6 +1193,103 @@ impl Runtime {
         Ok(())
     }
 
+    /// Asks an agent (read-only, no worktree) to write the plan as JSON. The
+    /// engine starts from `tick` once the answer parses and validates.
+    pub(crate) fn request_plan(
+        &mut self,
+        goal: &str,
+        account: AccountId,
+        model: Option<String>,
+        root: &Path,
+        setup: PlanSetup,
+    ) -> Result<(), String> {
+        if self.planning.is_some()
+            || self
+                .plan
+                .as_ref()
+                .is_some_and(|p| !p.engine.plan().state.is_settled())
+        {
+            return Err("A plan is already being prepared or running.".into());
+        }
+        let goal = goal.trim();
+        if goal.is_empty() {
+            return Err("Describe the goal first.".into());
+        }
+        let roles: Vec<String> = RoleCatalog::builtin()
+            .iter()
+            .map(|r| format!("- {}: {}", r.id, r.responsibilities.join("; ")))
+            .collect();
+        let prompt = format!(
+            "You are the Covalos orchestrator. Do not edit files and do not run commands. \
+             Break the objective below into a small plan for these roles:\n{}\n\n\
+             Answer with ONLY one JSON object, no prose, shaped like:\n\
+             {{\"goal\": \"...\", \"tasks\": [{{\"id\": \"task-1\", \"title\": \"...\", \
+             \"instructions\": \"...\", \"role\": \"frontend\", \"depends_on\": []}}]}}\n\
+             Use at most 6 tasks, lowercase ids, and only the role ids listed.\n\n\
+             Objective: {goal}",
+            roles.join("\n")
+        );
+        let index = self.create_session(NewSession {
+            title: format!("Plan: {}", goal.chars().take(40).collect::<String>()),
+            account,
+            model,
+            root: root.to_path_buf(),
+            worktree: false,
+            preset: Preset::ReadOnly,
+            allow_safe_commands: false,
+            share_context: false,
+        })?;
+        self.send(index, &prompt)?;
+        self.planning = Some(Planning {
+            session: self.sessions[index].meta.id.clone(),
+            goal: goal.to_owned(),
+            root: root.to_path_buf(),
+            setup,
+        });
+        Ok(())
+    }
+
+    /// Starts the engine from the planner agent's answer, once it finished.
+    fn finish_planning(&mut self) {
+        let Some(planning) = &self.planning else {
+            return;
+        };
+        let Some(session) = self.sessions.iter().find(|s| s.meta.id == planning.session) else {
+            self.planning = None;
+            return;
+        };
+        if session.running() {
+            return;
+        }
+        let answer = session
+            .meta
+            .log
+            .iter()
+            .rev()
+            .find(|l| l.kind == "agent")
+            .map(|l| l.text.clone());
+        let ok = session.meta.status == Status::Completed;
+        let planning = self.planning.take().expect("checked");
+        let result = match (ok, answer) {
+            (true, Some(text)) => extract_json(&text)
+                .ok_or_else(|| "The planner did not answer with a JSON plan.".to_owned())
+                .and_then(|json| PlanSpec::from_json(json).map_err(|e| e.to_string()))
+                .and_then(|spec| {
+                    self.start_plan(
+                        &planning.goal,
+                        PlanMode::Spec(spec),
+                        &planning.root,
+                        planning.setup,
+                    )
+                }),
+            _ => Err("The planner agent did not finish; see its conversation.".into()),
+        };
+        self.notice = Some(match result {
+            Ok(()) => (true, "The orchestrator's plan is running.".into()),
+            Err(e) => (false, format!("Plan not started: {e}")),
+        });
+    }
+
     pub(crate) fn recover_plan(&mut self, journal: &Path) -> Result<(), String> {
         if self
             .plan
@@ -1094,7 +1302,7 @@ impl Runtime {
             &std::fs::read(journal.with_extension("json")).map_err(|e| e.to_string())?,
         )
         .map_err(|e| e.to_string())?;
-        let deps = self.deps(&sidecar.root, sidecar.worktrees, 2)?;
+        let deps = self.deps(&sidecar.root, sidecar.worktrees, 2, &sidecar.pins)?;
         let engine = Engine::recover(journal, deps).map_err(|e| e.to_string())?;
         self.plan = Some(AutoRun {
             engine,
@@ -1116,6 +1324,14 @@ impl Runtime {
             if self.detections.values().all(|d| d.done) {
                 self.detect_rx = None;
             }
+        }
+        while let Ok((id, result)) = self.status_rx.try_recv() {
+            let state = match result {
+                Ok(text) if signed_out(&text) => Connection::SignedOut(sanitize_status(&text)),
+                Ok(text) => Connection::SignedIn(sanitize_status(&text)),
+                Err(e) => Connection::Unknown(e),
+            };
+            self.connection.insert(id, state);
         }
         let mut changed = false;
         let mut publish: Vec<(SessionId, Draft)> = Vec::new();
@@ -1180,6 +1396,9 @@ impl Runtime {
         if changed {
             self.save_sessions();
         }
+        if self.planning.is_some() {
+            self.finish_planning();
+        }
         let running = self.sessions.iter().any(LiveSession::running);
         let plan_active = self
             .plan
@@ -1199,7 +1418,8 @@ impl Runtime {
             agent_gate::heartbeat(&self.gate_dir);
             self.approvals = agent_gate::pending(&self.gate_dir);
         }
-        running || plan_active || !self.approvals.is_empty() || self.detect_rx.is_some()
+        let checking = self.connection.values().any(|c| *c == Connection::Checking);
+        running || plan_active || checking || !self.approvals.is_empty() || self.detect_rx.is_some()
     }
 
     pub(crate) fn audit(&self, session: &SessionId) -> Vec<serde_json::Value> {
@@ -1314,10 +1534,25 @@ fn rate_limit_note(line: &str) -> Option<String> {
     ))
 }
 
+/// How long a resumed turn may stay silent before Covalos assumes the provider
+/// is stuck on the previous turn's lock and retries once.
+const FIRST_EVENT: Duration = Duration::from_secs(75);
+/// How long to wait for a killed turn's process tree to release its pipes.
+const DRAIN: Duration = Duration::from_secs(10);
+
+enum Attempt {
+    Finished,
+    /// Spawned but produced no output before `FIRST_EVENT`; already killed.
+    Silent,
+}
+
+/// Runs one provider turn. `retry` is a second copy of the command, used once
+/// when a resumed turn produces no output at all (bug 1 in the checkpoint).
 fn spawn_turn(
-    mut command: Command,
+    command: Command,
+    retry: Option<Command>,
     prompt: String,
-    mut decoder: Box<dyn StreamDecoder + Send>,
+    decoder: Box<dyn StreamDecoder + Send>,
     cancel: Arc<AtomicBool>,
     tx: Sender<TurnMsg>,
     wake: Wake,
@@ -1327,98 +1562,156 @@ fn spawn_turn(
             let _ = tx.send(message);
             wake();
         };
-        own_group(&mut command);
-        let mut child = match command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-        {
-            Ok(child) => {
-                covalos_engine::process::contain(&child);
-                child
-            }
-            Err(error) => {
-                send(TurnMsg::Exit {
-                    ok: false,
-                    detail: format!("Could not start the provider: {error}"),
-                });
-                return;
-            }
-        };
-        let mut stdin = child.stdin.take().expect("piped");
-        thread::spawn(move || {
-            let _ = stdin.write_all(prompt.as_bytes());
-        });
-        let mut stderr = child.stderr.take().expect("piped");
-        let diagnostics = thread::spawn(move || {
-            let mut kept = Vec::new();
-            let mut buffer = [0_u8; 4096];
-            while let Ok(n) = stderr.read(&mut buffer) {
-                if n == 0 {
-                    break;
+        let mut decoder = decoder;
+        let watchdog = retry.is_some();
+        match run_attempt(command, &prompt, &mut decoder, &cancel, &send, watchdog) {
+            Attempt::Finished => {}
+            Attempt::Silent => {
+                send(TurnMsg::Note(
+                    "The provider stayed silent after resuming; retrying once.".into(),
+                ));
+                if let Some(command) = retry
+                    && let Attempt::Silent =
+                        run_attempt(command, &prompt, &mut decoder, &cancel, &send, true)
+                {
+                    send(TurnMsg::Exit {
+                        ok: false,
+                        detail: "The provider did not answer after resuming twice. Try again                                  in a moment or start a new session."
+                            .into(),
+                    });
                 }
-                let room = 8192_usize.saturating_sub(kept.len());
-                kept.extend_from_slice(&buffer[..n.min(room)]);
-            }
-            String::from_utf8_lossy(&kept).trim().to_owned()
-        });
-        let stdout = child.stdout.take().expect("piped");
-        let (lines_tx, lines) = mpsc::channel::<String>();
-        thread::spawn(move || {
-            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                if lines_tx.send(line).is_err() {
-                    break;
-                }
-            }
-        });
-        let started = Instant::now();
-        let mut bytes = 0_usize;
-        loop {
-            if cancel.load(Ordering::SeqCst) {
-                kill_tree(&mut child);
-                send(TurnMsg::Event(AgentEvent::Cancelled));
-                send(TurnMsg::Exit {
-                    ok: false,
-                    detail: String::new(),
-                });
-                return;
-            }
-            if started.elapsed() > TURN_WALL || bytes > TURN_OUTPUT {
-                kill_tree(&mut child);
-                send(TurnMsg::Exit {
-                    ok: false,
-                    detail: "Stopped: the turn exceeded Covalos time or output limits.".into(),
-                });
-                return;
-            }
-            match lines.recv_timeout(Duration::from_millis(30)) {
-                Ok(line) => {
-                    bytes += line.len();
-                    if let Some(note) = rate_limit_note(&line) {
-                        send(TurnMsg::Note(note));
-                    }
-                    for event in decoder.decode(&line) {
-                        send(TurnMsg::Event(event));
-                    }
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
         }
-        let status = child.wait();
-        let ok = status.as_ref().is_ok_and(|s| s.success());
-        let mut failed = false;
-        for event in decoder.finish(ok) {
-            failed |= matches!(event, AgentEvent::Failed { .. });
-            send(TurnMsg::Event(event));
-        }
-        let detail = diagnostics.join().unwrap_or_default();
-        send(TurnMsg::Exit {
-            ok: ok && !failed,
-            detail: agent_gate::redact(&detail),
-        });
     });
+}
+
+/// Kills the tree and waits until every process holding the output pipe is
+/// gone, so a following `resume` never meets the provider's session lock.
+fn stop_and_drain(child: &mut std::process::Child, lines: &Receiver<String>) {
+    kill_tree(child);
+    let until = Instant::now() + DRAIN;
+    while Instant::now() < until {
+        match lines.recv_timeout(Duration::from_millis(50)) {
+            Ok(_) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+}
+
+fn run_attempt(
+    mut command: Command,
+    prompt: &str,
+    decoder: &mut Box<dyn StreamDecoder + Send>,
+    cancel: &AtomicBool,
+    send: &dyn Fn(TurnMsg),
+    watchdog: bool,
+) -> Attempt {
+    own_group(&mut command);
+    let mut child = match command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => {
+            covalos_engine::process::contain(&child);
+            child
+        }
+        Err(error) => {
+            send(TurnMsg::Exit {
+                ok: false,
+                detail: format!("Could not start the provider: {error}"),
+            });
+            return Attempt::Finished;
+        }
+    };
+    let mut stdin = child.stdin.take().expect("piped");
+    let input = prompt.to_owned();
+    thread::spawn(move || {
+        let _ = stdin.write_all(input.as_bytes());
+    });
+    let mut stderr = child.stderr.take().expect("piped");
+    let diagnostics = thread::spawn(move || {
+        let mut kept = Vec::new();
+        let mut buffer = [0_u8; 4096];
+        while let Ok(n) = stderr.read(&mut buffer) {
+            if n == 0 {
+                break;
+            }
+            let room = 8192_usize.saturating_sub(kept.len());
+            kept.extend_from_slice(&buffer[..n.min(room)]);
+        }
+        String::from_utf8_lossy(&kept).trim().to_owned()
+    });
+    let stdout = child.stdout.take().expect("piped");
+    let (lines_tx, lines) = mpsc::channel::<String>();
+    thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if lines_tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let started = Instant::now();
+    let mut bytes = 0_usize;
+    let mut heard = false;
+    loop {
+        if cancel.load(Ordering::SeqCst) {
+            stop_and_drain(&mut child, &lines);
+            send(TurnMsg::Event(AgentEvent::Cancelled));
+            send(TurnMsg::Exit {
+                ok: false,
+                detail: String::new(),
+            });
+            return Attempt::Finished;
+        }
+        if watchdog && !heard && started.elapsed() > FIRST_EVENT {
+            stop_and_drain(&mut child, &lines);
+            return Attempt::Silent;
+        }
+        if started.elapsed() > TURN_WALL || bytes > TURN_OUTPUT {
+            stop_and_drain(&mut child, &lines);
+            send(TurnMsg::Exit {
+                ok: false,
+                detail: "Stopped: the turn exceeded Covalos time or output limits.".into(),
+            });
+            return Attempt::Finished;
+        }
+        match lines.recv_timeout(Duration::from_millis(30)) {
+            Ok(line) => {
+                heard = true;
+                bytes += line.len();
+                if let Some(note) = rate_limit_note(&line) {
+                    send(TurnMsg::Note(note));
+                }
+                for event in decoder.decode(&line) {
+                    send(TurnMsg::Event(event));
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    let status = child.wait();
+    let ok = status.as_ref().is_ok_and(|s| s.success());
+    let mut failed = false;
+    for event in decoder.finish(ok) {
+        failed |= matches!(event, AgentEvent::Failed { .. });
+        send(TurnMsg::Event(event));
+    }
+    let detail = diagnostics.join().unwrap_or_default();
+    send(TurnMsg::Exit {
+        ok: ok && !failed,
+        detail: agent_gate::redact(&detail),
+    });
+    Attempt::Finished
+}
+
+/// The outermost `{...}` in an agent answer, tolerating code fences and prose.
+fn extract_json(text: &str) -> Option<&str> {
+    let start = text.find('{')?;
+    let end = text.rfind('}')?;
+    (end > start).then(|| &text[start..=end])
 }
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -1436,6 +1729,89 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Bug 1: cancel a real Codex turn, resume the same thread at once, and
+    /// expect an answer. Needs COVALOS_AGENT_RUN (a recorded config with the
+    /// `codex-main` account) and COVALOS_AGENT_SANDBOX (a disposable repo).
+    #[test]
+    #[ignore = "spends two real Codex turns"]
+    fn codex_resumes_right_after_a_cancelled_turn() {
+        let config =
+            PathBuf::from(std::env::var_os("COVALOS_AGENT_RUN").expect("COVALOS_AGENT_RUN"))
+                .join("config")
+                .join("agents");
+        let root = PathBuf::from(
+            std::env::var_os("COVALOS_AGENT_SANDBOX").expect("COVALOS_AGENT_SANDBOX"),
+        );
+        let mut runtime = Runtime::open(config, Arc::new(|| {})).expect("runtime");
+        let until = Instant::now() + Duration::from_secs(90);
+        while runtime.program(&ProviderKind::Codex).is_none() && Instant::now() < until {
+            runtime.tick();
+            thread::sleep(Duration::from_millis(100));
+        }
+        let index = runtime
+            .create_session(NewSession {
+                title: "bug-1 resume".into(),
+                account: AccountId::new("codex-main").unwrap(),
+                model: None,
+                root,
+                worktree: false,
+                preset: Preset::ReadOnly,
+                allow_safe_commands: false,
+                share_context: false,
+            })
+            .expect("session");
+        runtime
+            .send(
+                index,
+                "List the files here with a shell command, then explain each one in detail.",
+            )
+            .expect("first turn");
+        let wait = |runtime: &mut Runtime, done: &dyn Fn(&LiveSession) -> bool, secs: u64| {
+            let until = Instant::now() + Duration::from_secs(secs);
+            while Instant::now() < until {
+                runtime.tick();
+                if done(&runtime.sessions[index]) {
+                    return true;
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+            false
+        };
+        assert!(
+            wait(&mut runtime, &|s| s.meta.provider_session.is_some(), 120),
+            "Codex never reported its thread id"
+        );
+        thread::sleep(Duration::from_secs(2));
+        runtime.cancel(index);
+        let cancelled_at = Instant::now();
+        assert!(
+            wait(&mut runtime, &|s| !s.running(), 30),
+            "cancel did not finish"
+        );
+        eprintln!("cancel settled in {:?}", cancelled_at.elapsed());
+        let started = Instant::now();
+        runtime
+            .send(index, "Reply with exactly the word RESUMED.")
+            .expect("resume");
+        assert!(wait(&mut runtime, &|s| !s.running(), 300), "resume hung");
+        let session = &runtime.sessions[index];
+        let answer = session
+            .meta
+            .log
+            .iter()
+            .rev()
+            .find(|l| l.kind == "agent")
+            .map(|l| l.text.clone());
+        eprintln!(
+            "resume took {:?}: {answer:?} status {:?}",
+            started.elapsed(),
+            session.meta.status
+        );
+        assert_eq!(session.meta.status, Status::Completed);
+        assert!(answer.unwrap_or_default().contains("RESUMED"));
+        let _ = runtime.close(index);
+    }
 
     #[test]
     fn verbatim_prefix_is_removed() {
