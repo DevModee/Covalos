@@ -29,6 +29,9 @@ pub struct Turn {
     pub resume: Option<String>,
     pub model: Option<String>,
     pub sandbox: Sandbox,
+    /// Extra Claude Code settings JSON (`--settings`), used by the host to
+    /// install its PreToolUse approval gate. Ignored by other providers.
+    pub settings: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -208,6 +211,9 @@ fn turn_args(spec: &ProviderSpec, turn: &Turn) -> Result<Vec<String>> {
                 Sandbox::WorkspaceWrite => "acceptEdits",
             };
             args.extend(["--permission-mode".into(), mode.into()]);
+            if let Some(settings) = &turn.settings {
+                args.extend(["--settings".into(), settings.clone()]);
+            }
             if let Some(model) = &turn.model {
                 args.extend(["--model".into(), model.clone()]);
             }
@@ -252,10 +258,41 @@ pub fn discover(spec: &ProviderSpec) -> Option<PathBuf> {
     } else {
         vec![spec.executable.clone()]
     };
-    std::env::split_paths(&std::env::var_os("PATH")?)
-        .filter(|dir| dir.is_absolute())
-        .flat_map(|dir| names.iter().map(move |n| dir.join(n)))
-        .find(|path| path.is_file())
+    let on_path = std::env::var_os("PATH").and_then(|path| {
+        std::env::split_paths(&path)
+            .filter(|dir| dir.is_absolute())
+            .flat_map(|dir| names.iter().map(move |n| dir.join(n)))
+            .find(|path| path.is_file())
+    });
+    on_path.or_else(|| fallback(spec, &names))
+}
+
+/// Official install locations that are not always on `PATH`: the native
+/// installer's `~/.local/bin`, and the CLI bundled with the Codex desktop app
+/// on Windows (newest copy under `%LOCALAPPDATA%\OpenAI\Codex\bin`).
+fn fallback(spec: &ProviderSpec, names: &[String]) -> Option<PathBuf> {
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })?;
+    if let Some(path) = names
+        .iter()
+        .map(|n| Path::new(&home).join(".local").join("bin").join(n))
+        .find(|p| p.is_file())
+    {
+        return Some(path);
+    }
+    if cfg!(windows) && spec.executable == "codex" {
+        let local = std::env::var_os("LOCALAPPDATA")?;
+        let entries = Path::new(&local).join("OpenAI/Codex/bin").read_dir().ok()?;
+        return entries
+            .flatten()
+            .map(|entry| entry.path().join("codex.exe"))
+            .filter_map(|path| {
+                let modified = path.metadata().ok().filter(|m| m.is_file())?.modified();
+                Some((modified.ok(), path))
+            })
+            .max_by_key(|(modified, _)| *modified)
+            .map(|(_, path)| path);
+    }
+    None
 }
 
 /// Runs a non-interactive plan (normally `Purpose::Probe`) and returns the
@@ -331,6 +368,7 @@ mod tests {
             resume: Some("abc".into()),
             model: Some("m".into()),
             sandbox,
+            settings: None,
         })
     }
 
@@ -499,6 +537,7 @@ mod tests {
             resume: Some("--dangerous".into()),
             model: None,
             sandbox: Sandbox::ReadOnly,
+            settings: None,
         };
         assert!(turn_args(&ProviderSpec::claude_code(), &bad).is_err());
         bad.resume = None;

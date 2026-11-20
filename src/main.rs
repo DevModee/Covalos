@@ -1,6 +1,8 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod agent_bridge;
+mod agent_gate;
+mod agents_runtime;
 mod assistant;
 mod brand;
 mod editor;
@@ -15,6 +17,14 @@ fn main() -> eframe::Result {
     if std::env::args().nth(1).as_deref() == Some("--agent-hook") {
         if let Err(error) = agent_bridge::hook_entry() {
             eprintln!("{} hook: {error}", brand::NAME);
+        }
+        return Ok(());
+    }
+    if std::env::args().nth(1).as_deref() == Some("--agent-gate") {
+        // PreToolUse approval gate for agent sessions started by COVALOS.
+        let args: Vec<String> = std::env::args().skip(2).collect();
+        if let Err(error) = agent_gate::hook_entry(&args) {
+            eprintln!("{} gate: {error}", brand::NAME);
         }
         return Ok(());
     }

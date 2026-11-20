@@ -5,7 +5,12 @@ edition = "2024"
 description = "COVALOS — Native Rust IDE with multi-agent orchestration"
 publish = false
 
+[workspace]
+members = [".", "crates/covalos-agents", "crates/covalos-engine"]
+
 [dependencies]
+covalos-agents = { path = "crates/covalos-agents" }
+covalos-engine = { path = "crates/covalos-engine" }
 eframe = { version = "0.33.3", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
 egui_extras = { version = "0.33.3", default-features = false, features = ["syntect"] }
 ignore = "0.4"

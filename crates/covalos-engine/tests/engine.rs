@@ -827,6 +827,7 @@ mod cli {
             credentials: Arc::new(Mutex::new(MemoryStore::default())),
             programs: [(ProviderKind::ClaudeCode, fake_claude(dir, body))].into(),
             limits: ProcessLimits::default(),
+            claude_settings: None,
         };
         let mut roles = RoleCatalog::builtin();
         roles
