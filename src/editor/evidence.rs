@@ -1588,25 +1588,61 @@ fn engine_steps() -> Vec<Step> {
     ]
 }
 
-/// Desktop capture of the harness window: unlike the GL screenshot it
-/// includes native children such as the WebView2 preview.
-fn os_capture(ctx: &egui::Context, path: &Path) {
-    let Some(rect) = ctx.input(|i| i.viewport().outer_rect) else {
-        return;
-    };
-    let ppp = ctx.pixels_per_point();
-    let (x, y) = ((rect.left() * ppp) as i32, (rect.top() * ppp) as i32);
-    let (w, h) = ((rect.width() * ppp) as i32, (rect.height() * ppp) as i32);
+/// Title of the tour window; the capture below looks the window up by it.
+const TOUR_TITLE: &str = "Covalos alpha tour capture";
+
+/// Captures only the tour window's own pixels with `PrintWindow`
+/// (PW_RENDERFULLCONTENT, which includes the WebView2 preview). Unlike a
+/// screen-region copy, other windows on top can never end up in the image.
+fn os_capture(_ctx: &egui::Context, path: &Path) {
+    const SCRIPT: &str = r#"
+Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+using System;
+using System.Drawing;
+using System.Runtime.InteropServices;
+public static class WindowShot {
+    [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L, T, R, B; }
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindow(string c, string t);
+    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out Rect r);
+    [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
+    public static string Save(string title, string path) {
+        IntPtr h = FindWindow(null, title);
+        if (h == IntPtr.Zero) return "window not found";
+        Rect r; GetWindowRect(h, out r);
+        using (var b = new Bitmap(r.R - r.L, r.B - r.T)) {
+            using (var g = Graphics.FromImage(b)) {
+                IntPtr dc = g.GetHdc();
+                bool ok = PrintWindow(h, dc, 2);
+                g.ReleaseHdc(dc);
+                if (!ok) return "PrintWindow failed";
+            }
+            b.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+        }
+        return "ok";
+    }
+}
+'@
+[WindowShot]::Save($args[0], $args[1])
+"#;
     let _ = std::fs::create_dir_all(path.parent().unwrap_or(path));
-    let script = format!(
-        "Add-Type -AssemblyName System.Drawing; $b = New-Object System.Drawing.Bitmap({w}, {h}); \
-         $g = [System.Drawing.Graphics]::FromImage($b); $g.CopyFromScreen({x}, {y}, 0, 0, $b.Size); \
-         $b.Save('{}', [System.Drawing.Imaging.ImageFormat]::Png)",
-        path.display()
-    );
+    let script = std::env::temp_dir().join("covalos-window-shot.ps1");
+    if std::fs::write(&script, SCRIPT).is_err() {
+        return;
+    }
+    // Not awaited: PrintWindow asks this window's own UI thread to paint,
+    // so the harness must keep running frames while the script captures.
     let _ = std::process::Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-        .output();
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+        ])
+        .arg(&script)
+        .arg(TOUR_TITLE)
+        .arg(path)
+        .spawn();
 }
 
 fn app_tsx(e: &Editor) -> Option<usize> {
@@ -1709,6 +1745,9 @@ fn tour_steps() -> Vec<Step> {
         ),
         Act(|e, _, root| {
             use covalos_agents::{AccountId, permission::Preset};
+            if std::env::var_os("COVALOS_TOUR_SKIP_AGENT").is_some() {
+                return;
+            }
             let r = agents(e);
             let index = r
                 .create_session(crate::agents_runtime::NewSession {
@@ -1767,6 +1806,7 @@ fn tour_steps() -> Vec<Step> {
                 .unwrap();
             os_capture(c, &out.join("promo").join("04-terminal-preview.png"));
         }),
+        Wait(6.0),
         Shot("promo/04-terminal-preview-gl"),
         Act(|e, _, _| {
             e.preview.open = false;
@@ -1800,7 +1840,7 @@ fn capture_alpha_tour() -> Result<(), Box<dyn std::error::Error>> {
             .with_inner_size([1440.0, 860.0])
             .with_position([40.0, 40.0])
             .with_decorations(false)
-            .with_title("Covalos"),
+            .with_title(TOUR_TITLE),
         event_loop_builder: Some(Box::new(|b| {
             b.with_any_thread(true);
         })),
