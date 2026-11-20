@@ -6,8 +6,8 @@
 use eframe::egui::IconData;
 use std::sync::Arc;
 
-pub const NAME: &str = "COVALOS";
-pub const TITLE: &str = "COVALOS";
+pub const NAME: &str = "Covalos";
+pub const TITLE: &str = "Covalos";
 pub const DESCRIPTION: &str = "Native Rust IDE with multi-agent orchestration";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const USER_AGENT: &str = "COVALOS-Library-Studio";

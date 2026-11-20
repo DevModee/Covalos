@@ -1,0 +1,75 @@
+{
+  "captures": [
+    {
+      "file": "welcome/01-no-project-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 1838,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "Covalos Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "welcome/02-agents-from-welcome-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 951,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "Covalos Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "welcome/03-explorer-on-demand-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 747,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "Covalos Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "welcome/04-project-open-explorer-restored-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 1158,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "Covalos Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    }
+  ],
+  "input": "eframe raw_input_hook in a native window (not OS-level SendInput)",
+  "ui_build_cpu_ms": {
+    "max": 10.4235,
+    "p50": 0.9154,
+    "p95": 1.2886,
+    "samples": 913
+  }
+}

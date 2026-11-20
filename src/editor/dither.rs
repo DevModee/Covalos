@@ -180,7 +180,7 @@ fn draw(info: egui::PaintCallbackInfo, gl: &Arc<glow::Context>, frame: &Frame) {
             match unsafe { compile(gl) } {
                 Ok(gpu) => *slot = Some(gpu),
                 Err(error) => {
-                    eprintln!("COVALOS Dither Field unavailable: {error}");
+                    eprintln!("Covalos Dither Field unavailable: {error}");
                     UNAVAILABLE.store(true, Ordering::Relaxed);
                     return;
                 }

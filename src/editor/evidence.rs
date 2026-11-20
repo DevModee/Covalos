@@ -626,14 +626,14 @@ fn capture_visual_review() -> Result<(), Box<dyn std::error::Error>> {
             .with_inner_size([width, height])
             .with_decorations(false)
             .with_icon(crate::brand::window_icon())
-            .with_title("COVALOS visual evidence"),
+            .with_title("Covalos visual evidence"),
         event_loop_builder: Some(Box::new(|b| {
             b.with_any_thread(true);
         })),
         ..Default::default()
     };
     eframe::run_native(
-        "COVALOS visual evidence",
+        "Covalos visual evidence",
         options,
         Box::new(move |cc| {
             cc.egui_ctx.set_pixels_per_point(scale);
@@ -782,14 +782,14 @@ fn capture_library_review() -> Result<(), Box<dyn std::error::Error>> {
             .with_inner_size([width, height])
             .with_decorations(false)
             .with_icon(crate::brand::window_icon())
-            .with_title("COVALOS Library Studio evidence"),
+            .with_title("Covalos Library Studio evidence"),
         event_loop_builder: Some(Box::new(|b| {
             b.with_any_thread(true);
         })),
         ..Default::default()
     };
     eframe::run_native(
-        "COVALOS Library Studio evidence",
+        "Covalos Library Studio evidence",
         options,
         Box::new(move |cc| {
             let mut preferences = Preferences::default();
@@ -849,7 +849,7 @@ fn write_fixture(root: &Path) -> std::io::Result<()> {
         ),
         (
             "README.md",
-            "# Orbit Ledger\n\nA small ledger used to review COVALOS.\n",
+            "# Orbit Ledger\n\nA small ledger used to review Covalos.\n",
         ),
         (".gitignore", "/target\nnode_modules/\n"),
         ("Dockerfile", "FROM rust:1.89\nWORKDIR /app\nCOPY . .\n"),
@@ -874,7 +874,7 @@ fn write_fixture(root: &Path) -> std::io::Result<()> {
                 "-c",
                 "core.autocrlf=false",
                 "-c",
-                "user.name=COVALOS Fixture",
+                "user.name=Covalos Fixture",
             ])
             .args([
                 "-c",
@@ -917,7 +917,7 @@ fn write_fixture(root: &Path) -> std::io::Result<()> {
         root.join("README.md"),
         "# Orbit Ledger
 
-A small ledger used to review COVALOS.
+A small ledger used to review Covalos.
 Now with largest balance.
 ",
     )?;
@@ -1217,7 +1217,7 @@ fn agent_steps() -> Vec<Step> {
                 C,
                 false,
                 Preset::ReadOnly,
-                "Using only the shared COVALOS context above, say in one sentence what the \
+                "Using only the shared Covalos context above, say in one sentence what the \
                  other agents reported. Do not read or change files.",
             );
         }),
@@ -1422,14 +1422,14 @@ fn capture_agent_hub_review() -> Result<(), Box<dyn std::error::Error>> {
             .with_inner_size([1366.0, 768.0])
             .with_decorations(false)
             .with_icon(crate::brand::window_icon())
-            .with_title("COVALOS Agent Hub evidence"),
+            .with_title("Covalos Agent Hub evidence"),
         event_loop_builder: Some(Box::new(|b| {
             b.with_any_thread(true);
         })),
         ..Default::default()
     };
     eframe::run_native(
-        "COVALOS Agent Hub evidence",
+        "Covalos Agent Hub evidence",
         options,
         Box::new(move |cc| {
             let mut preferences = Preferences::default();
@@ -1591,14 +1591,14 @@ fn capture_agent_hub_replay() -> Result<(), Box<dyn std::error::Error>> {
         viewport: ViewportBuilder::default()
             .with_inner_size([width, height])
             .with_decorations(false)
-            .with_title("COVALOS Agent Hub replay"),
+            .with_title("Covalos Agent Hub replay"),
         event_loop_builder: Some(Box::new(|b| {
             b.with_any_thread(true);
         })),
         ..Default::default()
     };
     eframe::run_native(
-        "COVALOS Agent Hub replay",
+        "Covalos Agent Hub replay",
         options,
         Box::new(move |cc| {
             cc.egui_ctx.set_pixels_per_point(scale);
@@ -1628,5 +1628,83 @@ fn capture_agent_hub_replay() -> Result<(), Box<dyn std::error::Error>> {
             }))
         }),
     )?;
+    Ok(())
+}
+
+fn welcome_steps() -> Vec<Step> {
+    vec![
+        Wait(1.0),
+        Shot("welcome/01-no-project"),
+        Click("Home Agents"),
+        Wait(0.8),
+        Shot("welcome/02-agents-from-welcome"),
+        Act(|e, _, _| {
+            e.hub_open = false;
+            e.sidebar = Sidebar::Files;
+            e.sidebar_requested = true;
+        }),
+        Wait(0.6),
+        Shot("welcome/03-explorer-on-demand"),
+        Act(|e, _, root| {
+            e.sidebar_requested = false;
+            e.open_workspace(root.to_path_buf());
+        }),
+        Wait(1.0),
+        Shot("welcome/04-project-open-explorer-restored"),
+    ]
+}
+
+/// Welcome screen without a project, quick actions and Explorer restore.
+#[test]
+#[ignore = "opens a native window and writes welcome evidence"]
+fn capture_welcome_review() -> Result<(), Box<dyn std::error::Error>> {
+    use winit::platform::windows::EventLoopBuilderExtWindows;
+    let output =
+        PathBuf::from(std::env::var_os("COVALOS_EVIDENCE_DIR").ok_or("set COVALOS_EVIDENCE_DIR")?);
+    std::fs::create_dir_all(output.join("reports"))?;
+    let fixture = tempfile::tempdir()?;
+    let config = fixture.path().join("config");
+    std::fs::create_dir_all(&config)?;
+    // SAFETY: set before any thread of this test reads the environment.
+    unsafe { std::env::set_var("COVALOS_CONFIG_DIR", &config) };
+    let root = fixture.path().join("orbit-ledger");
+    write_fixture(&root)?;
+    let options = eframe::NativeOptions {
+        viewport: ViewportBuilder::default()
+            .with_inner_size([1366.0, 768.0])
+            .with_decorations(false)
+            .with_title("Covalos welcome evidence"),
+        event_loop_builder: Some(Box::new(|b| {
+            b.with_any_thread(true);
+        })),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "Covalos welcome evidence",
+        options,
+        Box::new(move |cc| {
+            let mut preferences = Preferences::default();
+            preferences.language = super::i18n::Language::English;
+            let editor = Editor::new(&cc.egui_ctx, None, preferences);
+            Ok(Box::new(Harness {
+                editor,
+                root,
+                steps: welcome_steps(),
+                stage: 0,
+                at: Instant::now(),
+                delay: 0.8,
+                queued: Vec::new(),
+                requested: false,
+                output,
+                suffix: "-1366x768@100".into(),
+                scale: 1.0,
+                deadline: Instant::now() + Duration::from_secs(120),
+                manifest: Vec::new(),
+                last_action: Instant::now(),
+                render_ms: Vec::new(),
+            }))
+        }),
+    )?;
+    drop(fixture);
     Ok(())
 }

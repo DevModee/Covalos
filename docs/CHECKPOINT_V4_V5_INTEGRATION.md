@@ -102,7 +102,18 @@ cargo test --release --target-dir E:\workspace\covalos-integration-build capture
   - `artifacts/agent-hub-run1/` y `artifacts/agent-hub-run2/`: corridas con los bugs encontrados.
 - Resultado del test de tokens: no se encontraron secretos en la evidencia. Los `CODEX_HOME` capturados se ignoran en `.gitignore`.
 
-## 7. Próximas tres prioridades
+## 7. Ajuste final de bienvenida (verificado)
+
+- **Explorador contextual:** sin proyecto abierto, el panel lateral se oculta y la bienvenida queda centrada en el área de trabajo. La barra de actividad sigue visible. Al abrir una carpeta, el Explorador vuelve solo. Sin proyecto, la barra de actividad lo abre y cierra a pedido (`sidebar_requested`). No había ni hay una preferencia para cerrar el Explorador a mano, así que no hay nada más que respetar. Tampoco existe una acción de "cerrar proyecto", por lo que ese caso no se pudo probar. No cambian el layout del asistente ni el zoom.
+- **Marca visible:** `Covalos` en la bienvenida, el título de la ventana, About, los temas (`Covalos Nocturne`…), Discord, Library Studio, Agent Hub y el gate. Sin cambios en identificadores técnicos: paquete `covalos`, variables `COVALOS_*`, user agent `COVALOS-Library-Studio`, salida CLI de `library.rs`, rutas y metadatos PE. Los temas se guardan por variante serde, así que las preferencias siguen siendo compatibles.
+- **Accesos rápidos:** sin cambios de diseño (iconos Lucide, hover existente).
+  - Abrir carpeta y Abrir archivo muestran sus atajos (Ctrl O / Ctrl Shift O).
+  - Crear proyecto y Agentes no tienen atajo en COVALOS. No se inventó uno, por la regla de no agregar funciones.
+  - Probado con el harness: un clic real en Agentes abre el Agent Hub. Abrir carpeta, Abrir archivo y Crear proyecto abren diálogos nativos, que el harness no puede manejar.
+- **Evidencia:** `artifacts/welcome-review/welcome/` (sin proyecto, Agentes desde la bienvenida, Explorador a pedido, proyecto abierto). El exe Release reconstruido abre con el título `Covalos` y responde.
+- Una instancia de COVALOS (PID 14824) ya estaba corriendo desde esta carpeta de build y no se cerró.
+
+## 8. Próximas tres prioridades
 
 1. **Arreglar el bug 1** (reanudar tras un kill). Antes de reanudar, esperar a que salga el proceso anterior y aplicar un timeout de primer evento con un reintento. Verificarlo con un solo turno.
 2. **Verificar Claude Code real:** el usuario tiene que correr `claude auth login` (o "Sign in (official)" en Accounts). Después, una sesión con preset Supervised que pida un comando sensible, para validar el gate y las aprobaciones de punta a punta.

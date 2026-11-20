@@ -203,13 +203,13 @@ pub(crate) fn evaluate(policy: &GatePolicy, tool: &str, action: &Action) -> Verd
 pub(crate) fn hook_entry(args: &[String]) -> io::Result<()> {
     let (allow, reason) = match decide_from_stdin(args) {
         Ok(result) => result,
-        Err(error) => (false, format!("COVALOS gate error: {error}")),
+        Err(error) => (false, format!("Covalos gate error: {error}")),
     };
     let out = json!({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": if allow { "allow" } else { "deny" },
-            "permissionDecisionReason": format!("COVALOS: {reason}"),
+            "permissionDecisionReason": format!("Covalos: {reason}"),
         }
     });
     let mut stdout = io::stdout();
@@ -254,7 +254,7 @@ fn ask(
     if !ui_alive(gate_dir) {
         return Ok((
             false,
-            format!("{reason}; COVALOS is not open to approve it"),
+            format!("{reason}; Covalos is not open to approve it"),
         ));
     }
     let created_ms = now_ms();
@@ -293,7 +293,7 @@ fn ask(
             break (false, format!("{reason}; approval expired"));
         }
         if !ui_alive(gate_dir) {
-            break (false, format!("{reason}; COVALOS closed before deciding"));
+            break (false, format!("{reason}; Covalos closed before deciding"));
         }
         thread::sleep(Duration::from_millis(100));
     };

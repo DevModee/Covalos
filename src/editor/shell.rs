@@ -81,7 +81,7 @@ const ACTIONS: &[(Action, &str)] = &[
     (Action::Detach, "Detach to floating editor"),
     (Action::DockAll, "Dock all"),
     (Action::Library, "Open Library Studio"),
-    (Action::About, "About COVALOS"),
+    (Action::About, "About Covalos"),
 ];
 
 enum Selection {
@@ -173,7 +173,7 @@ impl Editor {
                         .root
                         .as_deref()
                         .map(workspace::filename)
-                        .unwrap_or_else(|| tr("Welcome to COVALOS").to_owned());
+                        .unwrap_or_else(|| tr("Welcome to Covalos").to_owned());
                     ui.horizontal(|ui| {
                         let text_width = width;
                         ui.allocate_ui_with_layout(
@@ -376,7 +376,7 @@ impl Editor {
                 let status = self.discord.status();
                 egui::CollapsingHeader::new(tr("Discord Rich Presence")).default_open(self.preferences.discord.enabled).show(ui, |ui| {
                     let d = &mut self.preferences.discord;
-                    checkbox(ui, &mut d.enabled, tr("Show COVALOS activity in Discord"));
+                    checkbox(ui, &mut d.enabled, tr("Show Covalos activity in Discord"));
                     ui.horizontal(|ui| {
                         ui.label(secondary(tr("Application ID")));
                         ui.add(egui::TextEdit::singleline(&mut d.application_id).desired_width(180.0).hint_text("Discord Developer Portal"));
@@ -451,7 +451,7 @@ impl Editor {
         if !self.about_open {
             return;
         }
-        egui::Window::new(tr("About COVALOS"))
+        egui::Window::new(tr("About Covalos"))
             .open(&mut self.about_open)
             .collapsible(false)
             .resizable(false)

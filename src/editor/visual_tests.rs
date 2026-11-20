@@ -231,14 +231,14 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
         viewport: ViewportBuilder::default()
             .with_inner_size([width, height])
             .with_decorations(false)
-            .with_title("COVALOS visual review"),
+            .with_title("Covalos visual review"),
         event_loop_builder: Some(Box::new(|builder| {
             builder.with_any_thread(true);
         })),
         ..Default::default()
     };
     eframe::run_native(
-        "COVALOS visual review",
+        "Covalos visual review",
         options,
         Box::new(move |cc| {
             let requested_theme = std::env::var("COVALOS_REVIEW_THEME")
@@ -307,7 +307,7 @@ fn main() -> eframe::Result {
     };
 
     eframe::run_native(
-        "COVALOS",
+        "Covalos",
         options,
         Box::new(move |cc| {
             let editor = Editor::new(&cc.egui_ctx, root);
@@ -389,14 +389,14 @@ fn capture_recovered_conversation() -> Result<(), Box<dyn std::error::Error>> {
         viewport: ViewportBuilder::default()
             .with_inner_size([1366.0, 768.0])
             .with_decorations(false)
-            .with_title("COVALOS recovery verification"),
+            .with_title("Covalos recovery verification"),
         event_loop_builder: Some(Box::new(|b| {
             b.with_any_thread(true);
         })),
         ..Default::default()
     };
     eframe::run_native(
-        "COVALOS recovery verification",
+        "Covalos recovery verification",
         options,
         Box::new(move |cc| {
             let mut original =
@@ -487,7 +487,7 @@ fn capture_precision_interactions() -> Result<(), Box<dyn std::error::Error>> {
         Capture("companion"),
         DismissFixtureCompanion,
         Click("Settings"),
-        Click("Theme COVALOS Light"),
+        Click("Theme Covalos Light"),
         Check(7),
         Capture("light-settings"),
         Click("Settings"),
@@ -747,14 +747,14 @@ fn capture_precision_interactions() -> Result<(), Box<dyn std::error::Error>> {
         viewport: ViewportBuilder::default()
             .with_inner_size([1366.0, 768.0])
             .with_decorations(false)
-            .with_title("COVALOS Precision Interaction Review"),
+            .with_title("Covalos Precision Interaction Review"),
         event_loop_builder: Some(Box::new(|b| {
             b.with_any_thread(true);
         })),
         ..Default::default()
     };
     eframe::run_native(
-        "COVALOS Precision Interaction Review",
+        "Covalos Precision Interaction Review",
         options,
         Box::new(move |cc| {
             let mut editor = Editor::new(&cc.egui_ctx, Some(root), Preferences::default());

@@ -212,7 +212,7 @@ impl Editor {
                                 self.request(Pending::CloseTab(index), ctx);
                             }
                             ui.separator();
-                            if ui.button(tr("About COVALOS")).clicked() {
+                            if ui.button(tr("About Covalos")).clicked() {
                                 ui.close();
                                 self.about_open = true;
                             }
@@ -427,7 +427,12 @@ impl Editor {
                         (Sidebar::Search, Icon::Search, "Search"),
                         (Sidebar::Git, Icon::Git, "Source control"),
                     ] {
-                        if icon_button(ui, icon, label, self.sidebar == tab).clicked() {
+                        let shown = self.sidebar_visible() && self.sidebar == tab;
+                        if icon_button(ui, icon, label, shown).clicked() {
+                            if self.root.is_none() {
+                                // No project: the rail toggles the panel on demand.
+                                self.sidebar_requested = !shown;
+                            }
                             self.sidebar = tab;
                             if tab == Sidebar::Search {
                                 self.search_focus = true;
@@ -498,6 +503,10 @@ impl Editor {
                     });
                 });
             });
+    }
+
+    pub(super) fn sidebar_visible(&self) -> bool {
+        self.root.is_some() || self.sidebar_requested
     }
 
     pub(super) fn sidebar(&mut self, ctx: &Context) {

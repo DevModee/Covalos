@@ -47,11 +47,11 @@ impl Theme {
     ];
     pub(super) fn name(self) -> &'static str {
         match self {
-            Self::Nocturne => "COVALOS Nocturne",
-            Self::Dark => "COVALOS Graphite",
-            Self::Midnight => "COVALOS Midnight",
-            Self::Violet => "COVALOS Violet",
-            Self::Light => "COVALOS Light",
+            Self::Nocturne => "Covalos Nocturne",
+            Self::Dark => "Covalos Graphite",
+            Self::Midnight => "Covalos Midnight",
+            Self::Violet => "Covalos Violet",
+            Self::Light => "Covalos Light",
             Self::HighContrast => "High Contrast",
         }
     }

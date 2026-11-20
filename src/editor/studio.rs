@@ -288,7 +288,7 @@ fn compat_color(c: &Compatibility) -> Color32 {
 
 fn compat_label(c: &Compatibility) -> &'static str {
     match c {
-        Compatibility::Bundled => "Included in COVALOS",
+        Compatibility::Bundled => "Included in Covalos",
         Compatibility::Ready => "Ready to install",
         Compatibility::NeedsSetup(_) => "Needs setup",
         Compatibility::Incompatible(_) => "Not compatible",
@@ -718,7 +718,7 @@ impl Editor {
                     empty_state(
                         ui,
                         if self.studio.catalog.sync.is_empty() {
-                            "Only COVALOS resources are available offline. Sync the catalog to add the official registries."
+                            "Only Covalos resources are available offline. Sync the catalog to add the official registries."
                         } else {
                             "No results. Try a broader term or turn off a filter."
                         },
@@ -751,7 +751,7 @@ impl Editor {
             .show(ui, |ui| {
                 section_title(
                     ui,
-                    "Native to COVALOS",
+                    "Native to Covalos",
                     "Rendered by the editor itself, available offline.",
                 );
                 let native: Vec<usize> = (0..self.studio.catalog.entries.len())
@@ -807,7 +807,7 @@ impl Editor {
                 section_title(
                     ui,
                     "Sources",
-                    "Official registries, licenses and what COVALOS may store.",
+                    "Official registries, licenses and what Covalos may store.",
                 );
                 self.source_cards(ui);
             });
@@ -1387,7 +1387,7 @@ impl Editor {
         let terms = entry.source().terms;
         if entry.native.is_some() {
             ui.label(muted(
-                "Native COVALOS resource. Its implementation lives in the COVALOS source tree:",
+                "Native Covalos resource. Its implementation lives in the Covalos source tree:",
             ));
             ui.add_space(6.0);
             let snippet = native_snippet(entry.native);
@@ -1428,7 +1428,7 @@ impl Editor {
                     egui::Label::new(muted(if terms == Terms::Open {
                         "Loads the component source from its official registry and caches it locally (permissive license)."
                     } else {
-                        "Loads the component source from its official registry for viewing. COVALOS does not store it: the license forbids redistribution."
+                        "Loads the component source from its official registry for viewing. Covalos does not store it: the license forbids redistribution."
                     }))
                     .wrap(),
                 );
@@ -1455,7 +1455,7 @@ impl Editor {
                         if terms == Terms::Open {
                             tr("Cached locally.")
                         } else {
-                            tr("Not stored by COVALOS.")
+                            tr("Not stored by Covalos.")
                         }
                     )))
                     .wrap(),
@@ -1556,7 +1556,7 @@ impl Editor {
             None => {
                 empty_state(
                     ui,
-                    "Web components run in a browser runtime. COVALOS keeps its renderer native, so a sandboxed web preview is not part of this build. Open the official demo, or install the component and run your project's dev server.",
+                    "Web components run in a browser runtime. Covalos keeps its renderer native, so a sandboxed web preview is not part of this build. Open the official demo, or install the component and run your project's dev server.",
                 );
                 let docs = entry.docs_url();
                 if !docs.is_empty() && ui.button(tr("Open live demo")).clicked() {
@@ -1590,7 +1590,7 @@ impl Editor {
             (Some(Compatibility::Bundled), _) => {
                 empty_state(
                     ui,
-                    "Already part of COVALOS. Use the Playground tab to tune and apply it.",
+                    "Already part of Covalos. Use the Playground tab to tune and apply it.",
                 );
             }
             (Some(Compatibility::Incompatible(reason) | Compatibility::External(reason)), _) => {

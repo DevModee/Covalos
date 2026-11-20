@@ -129,6 +129,8 @@ pub struct Editor {
     clean: clean::Clean,
     studio: studio::Studio,
     studio_open: bool,
+    /// Side panel opened from the activity bar while no project is open.
+    sidebar_requested: bool,
     discord: discord::Presence,
     session_started: u64,
     explorer_rect: Option<egui::Rect>,
@@ -212,6 +214,7 @@ impl Editor {
             clean: clean::Clean::default(),
             studio: studio::Studio::default(),
             studio_open: false,
+            sidebar_requested: false,
             discord: discord::Presence::default(),
             session_started: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -788,7 +791,11 @@ impl Editor {
             }
             self.activity_rail(ctx);
             if !focus {
-                self.sidebar(ctx);
+                // Without a project the welcome view takes the whole work area;
+                // the panel returns when a folder opens or the user asks for it.
+                if self.sidebar_visible() {
+                    self.sidebar(ctx);
+                }
                 self.assistant_panel(ctx);
             }
             egui::CentralPanel::default()
