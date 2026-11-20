@@ -1,59 +1,58 @@
-# AEROS — Checkpoint (2026-11-19)
+# COVALOS — Checkpoint (2026-11-20)
 
-## Dónde está todo
+## Estado y ubicaciones
 
 | Dato | Valor |
 | --- | --- |
-| Worktree | `E:/workspace/aeros-excellence` |
-| Rama | `design/system-rebuild` (sobre `recovery/visual-excellence`, que sigue intacta) |
-| Último commit de código | `a875add` (Library Studio); evidencias en el commit siguiente |
-| Ejecutable Release | `E:\workspace\aeros-rebuild-build\release\aeros-editor.exe` |
-| Directorio de build | `E:\workspace\aeros-rebuild-build` (el antiguo `aeros-excellence-build\release` estaba bloqueado por una instancia abierta) |
-| Evidencias | `artifacts/visual-review/design-system/` y `artifacts/library-studio-review/` (copiadas también a `E:\Dev\AEROS\Editor\artifacts\`) |
-| Referencias y licencias | `docs/DESIGN_SYSTEM.md`, `assets/brands/PROVENANCE.md`, `assets/icons/ui/LICENSE` |
+| Worktree activo | `E:/workspace/covalos-release` |
+| Rama | `feat/covalos-rebrand` (sobre `design/system-rebuild` `f390e31`, que queda intacta) |
+| Identidad Git local | `DevModee <caelien2.0@gmail.com>` |
+| Paquete / versión | `covalos` `0.4.0` |
+| Ejecutable Release | `E:\workspace\covalos-build\release\covalos.exe` |
+| Directorio de build | `E:\workspace\covalos-build` |
+| Evidencias de verificación | `artifacts/covalos-verification/design-system/`, `artifacts/covalos-verification/library-studio/`, `artifacts/covalos-verification/library-e2e-report.json`, `artifacts/covalos-verification/dither-benchmark.json` |
+| Identidad visual (provisional) | `assets/brand/` (`covalos-mark.svg`, `covalos-icon.ico`, `covalos-app-256.png`, `covalos-mark-256.png`, `covalos-mark-mono-64.png`, `PROVENANCE.md`) |
 
-Reconstruir y verificar (PowerShell, desde el worktree):
+Reconstruir y verificar (PowerShell, desde `E:\workspace\covalos-release`):
 
 ```powershell
-cargo build --release --target-dir E:\workspace\aeros-rebuild-build
-cargo test --target-dir E:\workspace\aeros-excellence-build
-$env:AEROS_EVIDENCE_DIR = "artifacts/visual-review/design-system"; cargo test --release --target-dir E:\workspace\aeros-rebuild-build capture_visual_review -- --ignored
-$env:AEROS_EVIDENCE_DIR = "artifacts/library-studio-review"; cargo test --release --target-dir E:\workspace\aeros-rebuild-build capture_library_review -- --ignored
+cargo fmt --check
+cargo clippy --all-targets --target-dir E:\workspace\covalos-build -- -D warnings
+cargo test --target-dir E:\workspace\covalos-build
+cargo build --release --target-dir E:\workspace\covalos-build
+$env:COVALOS_EVIDENCE_DIR = "artifacts/covalos-verification/design-system"; $env:COVALOS_EVIDENCE_SET = "matrix"; cargo test --release --target-dir E:\workspace\covalos-build capture_visual_review -- --ignored
+$env:COVALOS_EVIDENCE_DIR = "artifacts/covalos-verification/library-studio"; cargo test --release --target-dir E:\workspace\covalos-build capture_library_review -- --ignored
 ```
 
-Estado al cierre: 42 pruebas aprobadas (11 ignoradas: arneses nativos), `cargo clippy --all-targets -- -D warnings` sin avisos, `cargo fmt` aplicado.
+## Completado en esta entrega
 
-## Terminado
+1. **Rebranding integral AEROS → COVALOS:**
+   - Paquete `covalos` (`covalos.exe`), título de ventana `COVALOS`, temas `COVALOS Nocturne / Graphite / Midnight / Violet / Light`, pantalla de inicio, modal **About COVALOS** (`Archivo → Acerca de COVALOS` y Quick Access `> About COVALOS`), Library Studio (`covalos/*`), CLI (`covalos.exe --library ...`), traducciones EN/ES y documentación.
+   - Metadatos PE de Windows (`ProductName = COVALOS`, `FileDescription = COVALOS IDE`, `OriginalFilename = covalos.exe`, `FileVersion = 0.4.0.0`) e ícono multicapa `.ico` (16/24/32/48/64/256 px) embebidos nativamente desde `build.rs` sin dependencias externas ni `rc.exe`.
+2. **Migración segura de configuración (`src/paths.rs`):**
+   - Directorio unificado (`%LOCALAPPDATA%\Covalos`, `COVALOS_CONFIG_DIR` con fallback retrocompatible a `AEROS_CONFIG_DIR`).
+   - Migración automática única y no destructiva desde `AerosEditor` (`editor.json`, `conversations/`, `library/`, `agent-bridge/`) con marcador `.migrated-from-aeros`: nunca sobrescribe datos existentes en `Covalos`, nunca borra `AerosEditor`, no sigue symlinks y normaliza IDs `aeros/*` → `covalos/*` en `library::State` y `Catalog::get`.
+   - Variables de override de proveedores actualizadas a `COVALOS_*_BIN` con fallback a `AEROS_*_BIN`.
+3. **Identidad visual centralizada (provisional):**
+   - Módulo único `src/brand.rs` + recursos en `assets/brand/` y script reproducible `tools/generate_brand_assets.py`.
+   - Isotipo provisional basado en el refinamiento *Bond Prism* (Variante 03 — *Precision Facet C*: superelipse sin hexágono Web3, corte diagonal limpio y núcleo facetado contenido). Reemplazar el SVG maestro y correr el script actualiza todas las superficies y el `.ico`.
+4. **Library Studio — prueba real de punta a punta y correcciones:**
+   - Corregido el bloque de comandos en la vista de revisión de instalación (`command_block` en `src/editor/studio.rs` con texto monoespaciado seleccionable envuelto y botón Copiar, eliminando el subrayado de sintaxis inválida).
+   - `library::backup` y `library::revert` endurecidos para respaldar también archivos conflictivos antes de sobrescribir, recrear directorios padre al restaurar y podar carpetas vacías creadas durante la instalación.
+   - Ejecutada instalación real con `npm` + `covalos.exe --library sync shadcn` + `plan` + `npx shadcn@latest add` en un proyecto Vite+React+Tailwind temporal: creó `src/components/ui/button.tsx`, instaló `cn` y `radix-ui`, y la reversión restauró `package.json`, `package-lock.json` y el árbol de archivos bit a bit.
+5. **Dither Field — optimización y benchmark real:**
+   - `src/editor/dither.rs`: ubicaciones de los 17 uniforms OpenGL cacheadas al compilar shaders y buffers `trail`/`ripples` pasados a arrays en stack sin asignaciones heap por cuadro.
+   - `src/editor/identity.rs`: guardia adicional de tamaño de viewport para pausar animación en ventanas colapsadas.
+   - Benchmark reproducible (`tools/bench_process.py`) en AMD Ryzen 5 5600G + Radeon integrada (`1920×1080`, ventana `1390×860`):
+     - `Dither Field` (24 FPS en estado estacionario): **24,97 %** de 1 núcleo (~2,1 % del CPU de 12 hilos), pico **34,35 %** (vs **43,74 %** en el build anterior y **136–151 %** en la primera versión de 1 pasada), GPU **6,09 %**, RAM **102,45 MiB**.
+     - `Dither Field` con barrido continuo del mouse: **24,69 %** de 1 núcleo, pico **36,65 %**.
+     - `Background Off` / `Reduced Motion`: **0,00 %** CPU, **0,00 %** GPU, **92,6–96,6 MiB**.
+6. **Arneses heredados aislados:** `capture_design_review` y `capture_precision_interactions` ahora aíslan `COVALOS_CONFIG_DIR` en un perfil temporal.
 
-Design System (commits `331bc21`, `aa108eb`, `397aca6`):
-- Tema base AEROS Nocturne y paleta de sintaxis propia; sintaxis configurable aparte del tema (Nocturne, Graphite, Daylight, High Contrast). Ajustes de densidad, tamaño de fuente e intensidad del movimiento, con vista previa en vivo en Settings.
-- Iconos de interfaz Lucide (ISC, 86 iconos); chevron del Explorador rotado; Material Icon Theme para archivos.
-- Fondo Dither Field (por defecto) y Dither Bloom: shader GLSL en dos pasadas, estela del cursor y ondas de clic verificadas contra los videos de referencia.
-- Paneles como islas redondeadas, pestañas con indicador animado por resorte, motor de springs (`motion.rs`).
-- Git agrupado por estado, diffs en el área del editor.
-- Clean Code: editores flotantes sobre el mismo buffer, varios a la vez, modo enfoque y acople animado.
-- Logo oficial de OpenAI (Blossom) para Codex, en monocromo.
+## Pendiente para próximas fases
 
-Library Studio (commit `a875add`):
-- Fuentes: `src/library.rs` (`SOURCES`). Se sincronizan 10 registros oficiales (2.056 entradas reales en 3–4 s, ETag incremental). Hay 5 fuentes de solo enlace y 7 recursos nativos de AEROS.
-- Almacenamiento según la licencia: React Bits, Animate UI y Aceternity guardan solo metadatos; los de pago y los no verificados solo enlace.
-- Búsqueda indexada con sinónimos, filtros, favoritos, recientes y estado persistente en `<config>/library/state.json`.
-- Detección del proyecto y compatibilidad honesta; un proyecto Rust o Vue no ofrece instalar React.
-- Plan de instalación revisable antes de ejecutar: comandos del CLI oficial de shadcn, archivos, conflictos y dependencias. Incluye copia de seguridad, ejecución en streaming, archivos creados y modificados, y reversión.
-- API para agentes: `aeros-editor.exe --library search|show|compat|plan|installed|sources|sync` (JSON; los textos de terceros se marcan como datos no confiables; la instalación siempre la aprueba el usuario en la interfaz).
-- Accesos: barra de actividad, menú File, paleta de comandos, Agent Hub y atajo configurable (`Ctrl+Shift+L`).
-
-## Pendiente (en orden)
-
-1. **Instalación real de punta a punta.** El plan se generó con datos reales (ver `10-install-review`), pero en esta sesión no se ejecutó `npx shadcn add` en un proyecto temporal con `npm install` completo. Probar con un proyecto Vite+React temporal y capturar los estados Done y Revert.
-2. **Benchmark válido del Dither Field en dos pasadas.**
-   - La primera medición (una pasada) dio 136–151 % de un núcleo con la GPU AMD integrada. Eso motivó el cambio a dos pasadas.
-   - La medición posterior se invalidó porque las ventanas no tuvieron el foco.
-   - Para repetirla: `python -I tools/bench_process.py <exe anterior> <exe nuevo> <salida.json>`, sin otra actividad en el escritorio. Script: `tools/bench_process.py`.
-3. **Vista previa web aislada** para componentes React (WebView2 en proceso separado). Hoy las tarjetas web muestran un esquema honesto y "Open live demo".
-4. **Integración de agentes.** La API JSON existe, pero falta inyectar la guía de uso en el contexto de Codex/Claude desde Agent Hub.
-5. **Detalles menores:**
-   - El comando del plan se muestra subrayado (el resaltador lo trata como texto inválido): usar una etiqueta sin resaltado.
-   - El mensaje del commit `a875add` perdió la línea del comando CLI por las comillas invertidas.
-6. **Arneses heredados:** `capture_design_review` y `capture_precision_interactions` todavía no aíslan `AEROS_CONFIG_DIR`.
-7. **No disponible en esta sesión:** la captura del editor minimalista que pidió el usuario como referencia de la paleta; Nocturne se calibró con la especificación escrita.
+1. **Aprobación definitiva del isotipo:** elegir entre las 3 variantes refinadas de *Bond Prism* (o ajustes finales) y regenerar `assets/brand/` con `python tools/generate_brand_assets.py`.
+2. **Pausa inmediata al minimizar ventana borderless en Windows:** cuando no existe otra ventana en primer plano (`GetForegroundWindow() == 0`), `ShowWindow(SW_MINIMIZE)` sobre ventana sin decoraciones en `winit` todavía dejó ~7,8 % CPU residual en `Dither Field`; investigar consulta nativa `IsIconic` en Windows o evento de minimizado de `winit`.
+3. **Orquestador multiagente completo:** adaptadores headless reales de Gemini CLI y Antigravity (`agy`), más inyección de guía de CLI de Library Studio en contexto de agentes desde Agent Hub.
+4. **Vista previa web aislada (WebView2)** para componentes React en Library Studio.
+5. **Capacidades de IDE avanzado:** LSP, depuración (DAP), terminal con PTY real y soporte de extensiones.

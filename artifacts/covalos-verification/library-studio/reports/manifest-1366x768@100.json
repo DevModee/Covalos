@@ -1,0 +1,219 @@
+{
+  "captures": [
+    {
+      "file": "01-offline-before-sync-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 830,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "COVALOS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "02-discover-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 4192,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "COVALOS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "03-search-animated-button-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 726,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "COVALOS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "04-search-react-chart-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 633,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "COVALOS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "05-category-backgrounds-free-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 732,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "COVALOS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "06-native-dither-playground-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 1035,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "COVALOS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "07-native-spring-playground-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 720,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "COVALOS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "08-shadcn-button-overview-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 735,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "COVALOS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "09-shadcn-button-source-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 980,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "COVALOS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "10-install-review-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 769,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "COVALOS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "11-commons-clause-entry-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 754,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "COVALOS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "12-sources-licenses-1366x768@100.png",
+      "language": "English",
+      "ms_since_last_action": 741,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "COVALOS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    },
+    {
+      "file": "13-discover-es-1366x768@100.png",
+      "language": "Español",
+      "ms_since_last_action": 731,
+      "pixels": [
+        1366,
+        768
+      ],
+      "pixels_per_point": 1.0,
+      "theme": "COVALOS Nocturne",
+      "upscaled_crop": false,
+      "window_points": [
+        1366.0,
+        768.0
+      ]
+    }
+  ],
+  "input": "eframe raw_input_hook in a native window (not OS-level SendInput)",
+  "ui_build_cpu_ms": {
+    "max": 70.2443,
+    "p50": 1.5273,
+    "p95": 2.2567,
+    "samples": 442
+  }
+}

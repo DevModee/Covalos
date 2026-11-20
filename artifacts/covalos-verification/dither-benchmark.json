@@ -1,0 +1,311 @@
+{
+  "hardware": {
+    "os": "Windows-11-10.0.26200-SP0",
+    "logical_cores": 12,
+    "screen_resolution": "1920x1080",
+    "cpu": "AMD Ryzen 5 5600G with Radeon Graphics",
+    "gpu": [
+      "AMD Radeon(TM) Graphics"
+    ]
+  },
+  "method": "2 launches per case in isolated temp profile & empty project; window forced to foreground and focus verified; Window A = 4.0 s foreground idle, Window B = 3.0 s continuous mouse sweep, Window C = 3.0 s minimized background. CPU is % of one logical core.",
+  "summary": {
+    "previous-dither-field": {
+      "focused_trials": "0/2",
+      "cpu_idle_pct": 22.79,
+      "cpu_idle_peak_pct": 43.74,
+      "cpu_mouse_pct": 24.16,
+      "cpu_mouse_peak_pct": 36.89,
+      "cpu_background_pct": 9.11,
+      "gpu_idle_pct": 5.51,
+      "working_set_mib": 107.1,
+      "private_mib": 95.95
+    },
+    "current-dither-field": {
+      "focused_trials": "0/2",
+      "cpu_idle_pct": 24.97,
+      "cpu_idle_peak_pct": 34.35,
+      "cpu_mouse_pct": 24.69,
+      "cpu_mouse_peak_pct": 36.65,
+      "cpu_background_pct": 7.8,
+      "gpu_idle_pct": 6.09,
+      "working_set_mib": 102.45,
+      "private_mib": 95.35
+    },
+    "current-dither-bloom": {
+      "focused_trials": "0/2",
+      "cpu_idle_pct": 24.0,
+      "cpu_idle_peak_pct": 34.35,
+      "cpu_mouse_pct": 25.64,
+      "cpu_mouse_peak_pct": 33.8,
+      "cpu_background_pct": 9.37,
+      "gpu_idle_pct": 5.84,
+      "working_set_mib": 102.4,
+      "private_mib": 95.25
+    },
+    "current-background-off": {
+      "focused_trials": "0/2",
+      "cpu_idle_pct": 0.0,
+      "cpu_idle_peak_pct": 0.0,
+      "cpu_mouse_pct": 0.0,
+      "cpu_mouse_peak_pct": 0.0,
+      "cpu_background_pct": 0.0,
+      "gpu_idle_pct": 0.0,
+      "working_set_mib": 96.6,
+      "private_mib": 93.3
+    },
+    "current-off-reduced-motion": {
+      "focused_trials": "0/2",
+      "cpu_idle_pct": 0.0,
+      "cpu_idle_peak_pct": 0.0,
+      "cpu_mouse_pct": 0.0,
+      "cpu_mouse_peak_pct": 0.0,
+      "cpu_background_pct": 0.0,
+      "gpu_idle_pct": 0.0,
+      "working_set_mib": 92.6,
+      "private_mib": 93.05
+    }
+  },
+  "samples": [
+    {
+      "case": "previous-dither-field",
+      "trial": 1,
+      "window": {
+        "left": 234,
+        "top": 234,
+        "width": 1390,
+        "height": 860
+      },
+      "focus_idle_before": false,
+      "focus_idle_after": false,
+      "focus_mouse_after": false,
+      "cpu_idle_pct": 22.15,
+      "cpu_idle_peak_pct": 34.31,
+      "cpu_mouse_pct": 21.72,
+      "cpu_mouse_peak_pct": 27.29,
+      "cpu_background_pct": 8.85,
+      "cpu_background_peak_pct": 15.62,
+      "gpu_idle_pct": 5.29,
+      "working_set_mib": 111.1,
+      "private_mib": 95.9,
+      "wait_for_input_idle_ms": 418.0,
+      "input_idle_result": 0
+    },
+    {
+      "case": "previous-dither-field",
+      "trial": 2,
+      "window": {
+        "left": 52,
+        "top": 52,
+        "width": 1390,
+        "height": 860
+      },
+      "focus_idle_before": false,
+      "focus_idle_after": false,
+      "focus_mouse_after": false,
+      "cpu_idle_pct": 23.42,
+      "cpu_idle_peak_pct": 43.74,
+      "cpu_mouse_pct": 26.59,
+      "cpu_mouse_peak_pct": 36.89,
+      "cpu_background_pct": 9.36,
+      "cpu_background_peak_pct": 18.74,
+      "gpu_idle_pct": 5.73,
+      "working_set_mib": 103.1,
+      "private_mib": 96.0,
+      "wait_for_input_idle_ms": 411.8,
+      "input_idle_result": 0
+    },
+    {
+      "case": "current-dither-field",
+      "trial": 1,
+      "window": {
+        "left": 78,
+        "top": 78,
+        "width": 1390,
+        "height": 860
+      },
+      "focus_idle_before": false,
+      "focus_idle_after": false,
+      "focus_mouse_after": false,
+      "cpu_idle_pct": 26.15,
+      "cpu_idle_peak_pct": 31.24,
+      "cpu_mouse_pct": 25.03,
+      "cpu_mouse_peak_pct": 36.65,
+      "cpu_background_pct": 6.24,
+      "cpu_background_peak_pct": 9.37,
+      "gpu_idle_pct": 5.97,
+      "working_set_mib": 102.5,
+      "private_mib": 95.3,
+      "wait_for_input_idle_ms": 479.4,
+      "input_idle_result": 0
+    },
+    {
+      "case": "current-dither-field",
+      "trial": 2,
+      "window": {
+        "left": 104,
+        "top": 104,
+        "width": 1390,
+        "height": 860
+      },
+      "focus_idle_before": false,
+      "focus_idle_after": false,
+      "focus_mouse_after": false,
+      "cpu_idle_pct": 23.79,
+      "cpu_idle_peak_pct": 34.35,
+      "cpu_mouse_pct": 24.35,
+      "cpu_mouse_peak_pct": 33.59,
+      "cpu_background_pct": 9.37,
+      "cpu_background_peak_pct": 12.49,
+      "gpu_idle_pct": 6.21,
+      "working_set_mib": 102.4,
+      "private_mib": 95.4,
+      "wait_for_input_idle_ms": 566.3,
+      "input_idle_result": 0
+    },
+    {
+      "case": "current-dither-bloom",
+      "trial": 1,
+      "window": {
+        "left": 130,
+        "top": 130,
+        "width": 1390,
+        "height": 860
+      },
+      "focus_idle_before": false,
+      "focus_idle_after": false,
+      "focus_mouse_after": false,
+      "cpu_idle_pct": 26.93,
+      "cpu_idle_peak_pct": 34.35,
+      "cpu_mouse_pct": 26.72,
+      "cpu_mouse_peak_pct": 33.25,
+      "cpu_background_pct": 9.89,
+      "cpu_background_peak_pct": 18.74,
+      "gpu_idle_pct": 6.27,
+      "working_set_mib": 102.4,
+      "private_mib": 95.3,
+      "wait_for_input_idle_ms": 602.4,
+      "input_idle_result": 0
+    },
+    {
+      "case": "current-dither-bloom",
+      "trial": 2,
+      "window": {
+        "left": 156,
+        "top": 156,
+        "width": 1390,
+        "height": 860
+      },
+      "focus_idle_before": false,
+      "focus_idle_after": false,
+      "focus_mouse_after": false,
+      "cpu_idle_pct": 21.07,
+      "cpu_idle_peak_pct": 34.34,
+      "cpu_mouse_pct": 24.56,
+      "cpu_mouse_peak_pct": 33.8,
+      "cpu_background_pct": 8.85,
+      "cpu_background_peak_pct": 18.74,
+      "gpu_idle_pct": 5.42,
+      "working_set_mib": 102.4,
+      "private_mib": 95.2,
+      "wait_for_input_idle_ms": 457.9,
+      "input_idle_result": 0
+    },
+    {
+      "case": "current-background-off",
+      "trial": 1,
+      "window": {
+        "left": 182,
+        "top": 182,
+        "width": 1390,
+        "height": 860
+      },
+      "focus_idle_before": false,
+      "focus_idle_after": false,
+      "focus_mouse_after": false,
+      "cpu_idle_pct": 0.0,
+      "cpu_idle_peak_pct": 0.0,
+      "cpu_mouse_pct": 0.0,
+      "cpu_mouse_peak_pct": 0.0,
+      "cpu_background_pct": 0.0,
+      "cpu_background_peak_pct": 0.0,
+      "gpu_idle_pct": 0.0,
+      "working_set_mib": 96.6,
+      "private_mib": 93.2,
+      "wait_for_input_idle_ms": 392.3,
+      "input_idle_result": 0
+    },
+    {
+      "case": "current-background-off",
+      "trial": 2,
+      "window": {
+        "left": 208,
+        "top": 208,
+        "width": 1390,
+        "height": 860
+      },
+      "focus_idle_before": false,
+      "focus_idle_after": false,
+      "focus_mouse_after": false,
+      "cpu_idle_pct": 0.0,
+      "cpu_idle_peak_pct": 0.0,
+      "cpu_mouse_pct": 0.0,
+      "cpu_mouse_peak_pct": 0.0,
+      "cpu_background_pct": 0.0,
+      "cpu_background_peak_pct": 0.0,
+      "gpu_idle_pct": 0.0,
+      "working_set_mib": 96.6,
+      "private_mib": 93.4,
+      "wait_for_input_idle_ms": 461.0,
+      "input_idle_result": 0
+    },
+    {
+      "case": "current-off-reduced-motion",
+      "trial": 1,
+      "window": {
+        "left": 234,
+        "top": 234,
+        "width": 1390,
+        "height": 860
+      },
+      "focus_idle_before": false,
+      "focus_idle_after": false,
+      "focus_mouse_after": false,
+      "cpu_idle_pct": 0.0,
+      "cpu_idle_peak_pct": 0.0,
+      "cpu_mouse_pct": 0.0,
+      "cpu_mouse_peak_pct": 0.0,
+      "cpu_background_pct": 0.0,
+      "cpu_background_peak_pct": 0.0,
+      "gpu_idle_pct": 0.0,
+      "working_set_mib": 92.6,
+      "private_mib": 93.1,
+      "wait_for_input_idle_ms": 435.7,
+      "input_idle_result": 0
+    },
+    {
+      "case": "current-off-reduced-motion",
+      "trial": 2,
+      "window": {
+        "left": 26,
+        "top": 26,
+        "width": 1390,
+        "height": 860
+      },
+      "focus_idle_before": false,
+      "focus_idle_after": false,
+      "focus_mouse_after": false,
+      "cpu_idle_pct": 0.0,
+      "cpu_idle_peak_pct": 0.0,
+      "cpu_mouse_pct": 0.0,
+      "cpu_mouse_peak_pct": 0.0,
+      "cpu_background_pct": 0.0,
+      "cpu_background_peak_pct": 0.0,
+      "gpu_idle_pct": 0.0,
+      "working_set_mib": 92.6,
+      "private_mib": 93.0,
+      "wait_for_input_idle_ms": 433.6,
+      "input_idle_result": 0
+    }
+  ]
+}
