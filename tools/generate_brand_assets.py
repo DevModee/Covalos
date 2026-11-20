@@ -1,0 +1,135 @@
+"""Generate COVALOS raster and Windows ICO brand assets from the single source SVG.
+
+Re-run this script after updating `assets/brand/covalos-mark.svg` to regenerate every
+derived asset consistently across the application, window chrome, and Windows executable.
+"""
+import io
+import struct
+import subprocess
+import tempfile
+from pathlib import Path
+from PIL import Image
+
+ROOT = Path(__file__).resolve().parent.parent
+BRAND = ROOT / "assets" / "brand"
+CHROME = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+
+MARK_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <defs>
+    <linearGradient id="covalos_crown" x1="46" y1="158" x2="196" y2="46" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6D28D9"/>
+      <stop offset="56%" stop-color="#8B5CF6"/>
+      <stop offset="100%" stop-color="#C4B5FD"/>
+    </linearGradient>
+    <linearGradient id="covalos_base" x1="60" y1="176" x2="200" y2="206" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7C3AED"/>
+      <stop offset="55%" stop-color="#6366F1"/>
+      <stop offset="100%" stop-color="#60A5FA"/>
+    </linearGradient>
+    <linearGradient id="covalos_core" x1="118" y1="108" x2="156" y2="148" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#C4B5FD"/>
+      <stop offset="55%" stop-color="#818CF8"/>
+      <stop offset="100%" stop-color="#60A5FA"/>
+    </linearGradient>
+  </defs>
+  <path d="M 196.5 68 C 200.2 71.5, 200 77.2, 196.2 80.8 L 185.2 91.2 C 182 94.2, 177 94, 173.6 91 C 162.8 81.4, 148 76, 130 76 C 94.5 76, 75 93.5, 75 128 C 75 133.5, 75.5 138.5, 76.5 143 C 77.5 147.5, 75 151.8, 70.6 153.2 L 52.8 159 C 48.2 160.5, 43.8 157.8, 42.8 153 C 41.6 145.5, 41 137, 41 128 C 41 76.5, 75.5 44, 130 44 C 157.5 44, 180.2 52.5, 196.5 68 Z" fill="url(#covalos_crown)"/>
+  <path d="M 57.5 180.5 C 55 176.2, 57 171, 61.6 169.5 L 79.4 163.7 C 83.8 162.2, 88.5 164.2, 91.2 167.8 C 100.2 175.8, 113.5 180, 130 180 C 148 180, 162.8 174.6, 173.6 165 C 177 162, 182 161.8, 185.2 164.8 L 196.2 175.2 C 200 178.8, 200.2 184.5, 196.5 188 C 180.2 203.5, 157.5 212, 130 212 C 97.5 212, 71.2 200.5, 57.5 180.5 Z" fill="url(#covalos_base)"/>
+  <path d="M 131.5 106.5 C 134 105.2, 137 105.6, 139.2 107.6 L 156.5 123.6 C 159.4 126.2, 159.4 129.8, 156.5 132.4 L 139.2 148.4 C 137 150.4, 134 150.8, 131.5 149.5 L 117.5 141.8 C 114.2 140, 114.2 116, 117.5 114.2 Z" fill="url(#covalos_core)"/>
+</svg>
+"""
+
+
+def mono_svg(color: str) -> str:
+    return (
+        MARK_SVG.replace("url(#covalos_crown)", color)
+        .replace("url(#covalos_base)", color)
+        .replace("url(#covalos_core)", color)
+    )
+
+
+def render_html_rgba(html: str, size: int, out_png: Path) -> Image.Image:
+    with tempfile.TemporaryDirectory(prefix="covalos-brand-") as tmp:
+        html_path = Path(tmp) / "render.html"
+        raw_png = Path(tmp) / "raw.png"
+        html_path.write_text(html, encoding="utf-8")
+        subprocess.run(
+            [
+                CHROME,
+                "--headless=new",
+                "--disable-gpu",
+                "--hide-scrollbars",
+                "--default-background-color=00000000",
+                "--force-device-scale-factor=1",
+                f"--window-size={size},{size}",
+                f"--screenshot={raw_png}",
+                html_path.as_uri(),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        img = Image.open(raw_png).convert("RGBA")
+        if img.size != (size, size):
+            img = img.resize((size, size), Image.Resampling.LANCZOS)
+        img.save(out_png, format="PNG", optimize=True)
+        return img
+
+
+def write_ico(images: list[Image.Image], path: Path) -> None:
+    """Write a standard multi-resolution Windows ICO using PNG-encoded frames."""
+    frames = []
+    for img in images:
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        frames.append((img.width, img.height, buf.getvalue()))
+    header = struct.pack("<HHH", 0, 1, len(frames))
+    offset = 6 + 16 * len(frames)
+    entries = []
+    for w, h, data in frames:
+        bw = 0 if w >= 256 else w
+        bh = 0 if h >= 256 else h
+        entries.append(struct.pack("<BBBBHHII", bw, bh, 0, 0, 1, 32, len(data), offset))
+        offset += len(data)
+    path.write_bytes(header + b"".join(entries) + b"".join(d for _, _, d in frames))
+
+
+def main() -> None:
+    BRAND.mkdir(parents=True, exist_ok=True)
+    mark_path = BRAND / "covalos-mark.svg"
+    if not mark_path.exists():
+        mark_path.write_text(MARK_SVG, encoding="utf-8")
+    svg_color = mark_path.read_text(encoding="utf-8")
+    (BRAND / "covalos-mark-mono-light.svg").write_text(mono_svg("#FFFFFF"), encoding="utf-8")
+    (BRAND / "covalos-mark-mono-dark.svg").write_text(mono_svg("#0B0D13"), encoding="utf-8")
+
+    # 1. Color standalone mark (256x256 RGBA8)
+    mark_html = f"""<!doctype html><html><body style="margin:0;background:transparent;width:256px;height:256px;display:flex;align-items:center;justify-content:center;">
+      <div style="width:240px;height:240px;">{svg_color}</div>
+    </body></html>"""
+    render_html_rgba(mark_html, 256, BRAND / "covalos-mark-256.png")
+
+    # 2. Pure white monochrome mask (64x64 RGBA8) for mipmapped UI tinting
+    mono_html = f"""<!doctype html><html><body style="margin:0;background:transparent;width:64px;height:64px;display:flex;align-items:center;justify-content:center;">
+      <div style="width:60px;height:60px;">{mono_svg('#FFFFFF')}</div>
+    </body></html>"""
+    render_html_rgba(mono_html, 64, BRAND / "covalos-mark-mono-64.png")
+
+    # 3. Nocturne squircle app icon (256x256 RGBA8 with transparent outer corners)
+    app_html = f"""<!doctype html><html><body style="margin:0;background:transparent;width:256px;height:256px;display:flex;align-items:center;justify-content:center;">
+      <div style="width:240px;height:240px;border-radius:56px;background:linear-gradient(160deg,#1B1828 0%,#0E0C15 100%);border:2px solid rgba(201,164,255,0.22);box-sizing:border-box;display:flex;align-items:center;justify-content:center;">
+        <div style="width:168px;height:168px;">{svg_color}</div>
+      </div>
+    </body></html>"""
+    app_256 = render_html_rgba(app_html, 256, BRAND / "covalos-app-256.png")
+
+    # 4. Multi-resolution Windows ICO (16, 24, 32, 48, 64, 256 px)
+    ico_sizes = [16, 24, 32, 48, 64, 256]
+    ico_frames = [
+        app_256 if s == 256 else app_256.resize((s, s), Image.Resampling.LANCZOS)
+        for s in ico_sizes
+    ]
+    write_ico(ico_frames, BRAND / "covalos-icon.ico")
+    print("Generated COVALOS brand assets in", BRAND)
+
+
+if __name__ == "__main__":
+    main()
