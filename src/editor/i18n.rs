@@ -77,6 +77,33 @@ pub(super) fn trf(template: &'static str, values: &[(&str, String)]) -> String {
 }
 
 const SPANISH: &[(&str, &str)] = &[
+    ("Copy path", "Copiar ruta"),
+    ("No repository", "Sin repositorio"),
+    ("Show diff", "Ver diferencias"),
+    ("Tracking", "Siguiendo"),
+    ("Working tree clean", "Árbol de trabajo limpio"),
+    ("Merge conflicts", "Conflictos de fusión"),
+    ("Staged changes", "Cambios preparados"),
+    ("Untracked files", "Archivos sin seguimiento"),
+    ("Refresh changes", "Actualizar cambios"),
+    ("Back to changes", "Volver a los cambios"),
+    (
+        "This folder is not a Git repository.",
+        "Esta carpeta no es un repositorio Git.",
+    ),
+    ("No differences.", "Sin diferencias."),
+    ("Working tree", "Árbol de trabajo"),
+    ("Follow theme", "Seguir el tema"),
+    ("Code colors", "Colores del código"),
+    ("Editor density", "Densidad del editor"),
+    ("Compact", "Compacta"),
+    ("Comfortable", "Cómoda"),
+    ("Detach to floating editor", "Desprender a editor flotante"),
+    ("Dock back into tabs", "Acoplar de nuevo en pestañas"),
+    ("Floating editors", "Editores flotantes"),
+    ("Dock all", "Acoplar todos"),
+    ("Focus mode", "Modo enfoque"),
+    ("Changes", "Cambios"),
     // Chrome, navigation and Home
     ("File", "Archivo"),
     ("Search files and commands", "Buscar archivos y comandos"),

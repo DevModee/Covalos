@@ -29,6 +29,7 @@ pub(super) const COMPACT_CODE_LINE_HEIGHT: f32 = 1.25;
 #[serde(rename_all = "snake_case")]
 pub(super) enum Theme {
     #[default]
+    Nocturne,
     Dark,
     Midnight,
     Violet,
@@ -36,7 +37,8 @@ pub(super) enum Theme {
     HighContrast,
 }
 impl Theme {
-    pub(super) const ALL: [Self; 5] = [
+    pub(super) const ALL: [Self; 6] = [
+        Self::Nocturne,
         Self::Dark,
         Self::Midnight,
         Self::Violet,
@@ -45,7 +47,8 @@ impl Theme {
     ];
     pub(super) fn name(self) -> &'static str {
         match self {
-            Self::Dark => "AEROS Dark",
+            Self::Nocturne => "AEROS Nocturne",
+            Self::Dark => "AEROS Graphite",
             Self::Midnight => "AEROS Midnight",
             Self::Violet => "AEROS Violet",
             Self::Light => "AEROS Light",
@@ -78,10 +81,38 @@ pub(super) struct Palette {
     pub(super) syntax_string: Color32,
     #[cfg_attr(not(test), allow(dead_code))]
     pub(super) syntax_number: Color32,
+    /// Text caret and the selection tint used by every text field and the code editor.
+    pub(super) caret: Color32,
+    pub(super) selection: Color32,
 }
 impl Theme {
     pub(super) fn colors(self) -> Palette {
         match self {
+            // Deep violet-black base: surfaces separated by value, hairline borders, a lilac
+            // accent and a luminous pink caret. Neutrals carry a slight violet cast.
+            Self::Nocturne => Palette {
+                canvas: Color32::from_rgb(9, 8, 13),
+                surface: Color32::from_rgb(17, 15, 23),
+                inset: Color32::from_rgb(13, 11, 19),
+                elevated: Color32::from_rgb(26, 23, 35),
+                hover: Color32::from_rgb(33, 29, 44),
+                border: Color32::from_rgb(35, 31, 46),
+                control_border: Color32::from_rgb(60, 54, 76),
+                text: Color32::from_rgb(232, 228, 240),
+                secondary: Color32::from_rgb(170, 164, 186),
+                muted: Color32::from_rgb(140, 133, 158),
+                disabled: Color32::from_rgb(98, 92, 112),
+                accent: Color32::from_rgb(201, 164, 255),
+                accent_hover: Color32::from_rgb(222, 197, 255),
+                accent_bg: Color32::from_rgb(40, 31, 60),
+                success: Color32::from_rgb(126, 220, 190),
+                error: Color32::from_rgb(255, 138, 158),
+                warning: Color32::from_rgb(245, 199, 126),
+                syntax_string: Color32::from_rgb(134, 225, 193),
+                syntax_number: Color32::from_rgb(247, 168, 124),
+                caret: Color32::from_rgb(255, 122, 198),
+                selection: Color32::from_rgba_unmultiplied(150, 104, 255, 72),
+            },
             Self::Dark => Palette {
                 canvas: Color32::from_rgb(16, 19, 24),
                 surface: Color32::from_rgb(21, 24, 30),
@@ -102,6 +133,8 @@ impl Theme {
                 warning: Color32::from_rgb(224, 187, 128),
                 syntax_string: Color32::from_rgb(173, 204, 164),
                 syntax_number: Color32::from_rgb(224, 183, 144),
+                caret: Color32::from_rgb(199, 183, 255),
+                selection: Color32::from_rgba_unmultiplied(176, 154, 250, 60),
             },
             Self::Midnight => Palette {
                 canvas: Color32::from_rgb(10, 15, 24),
@@ -123,6 +156,8 @@ impl Theme {
                 warning: Color32::from_rgb(224, 187, 128),
                 syntax_string: Color32::from_rgb(173, 204, 164),
                 syntax_number: Color32::from_rgb(224, 183, 144),
+                caret: Color32::from_rgb(181, 208, 255),
+                selection: Color32::from_rgba_unmultiplied(120, 170, 255, 60),
             },
             Self::Violet => Palette {
                 canvas: Color32::from_rgb(20, 16, 27),
@@ -144,6 +179,8 @@ impl Theme {
                 warning: Color32::from_rgb(224, 187, 128),
                 syntax_string: Color32::from_rgb(173, 204, 164),
                 syntax_number: Color32::from_rgb(224, 183, 144),
+                caret: Color32::from_rgb(232, 170, 255),
+                selection: Color32::from_rgba_unmultiplied(195, 167, 253, 64),
             },
             Self::Light => Palette {
                 canvas: Color32::from_rgb(247, 248, 250),
@@ -165,6 +202,8 @@ impl Theme {
                 warning: Color32::from_rgb(135, 88, 13),
                 syntax_string: Color32::from_rgb(44, 103, 60),
                 syntax_number: Color32::from_rgb(145, 76, 25),
+                caret: Color32::from_rgb(160, 40, 130),
+                selection: Color32::from_rgba_unmultiplied(98, 66, 166, 52),
             },
             Self::HighContrast => Palette {
                 canvas: Color32::from_rgb(0, 0, 0),
@@ -186,13 +225,15 @@ impl Theme {
                 warning: Color32::from_rgb(255, 224, 135),
                 syntax_string: Color32::from_rgb(183, 240, 169),
                 syntax_number: Color32::from_rgb(255, 208, 152),
+                caret: Color32::from_rgb(255, 255, 255),
+                selection: Color32::from_rgba_unmultiplied(218, 202, 255, 96),
             },
         }
     }
 }
 thread_local! {
     // egui renders on its UI thread. Each test and viewport installs its palette before drawing.
-    static ACTIVE_THEME: std::cell::Cell<Theme> = const { std::cell::Cell::new(Theme::Dark) };
+    static ACTIVE_THEME: std::cell::Cell<Theme> = const { std::cell::Cell::new(Theme::Nocturne) };
 }
 pub(super) fn active() -> Theme {
     ACTIVE_THEME.with(|theme| theme.get())
@@ -284,10 +325,10 @@ pub(super) fn install(ctx: &Context, font_size: f32, high_contrast: bool, theme:
     visuals.menu_corner_radius = CONTROL_RADIUS.into();
     visuals.extreme_bg_color = colors().inset;
     visuals.faint_bg_color = colors().surface;
-    visuals.selection.bg_fill = colors().accent_bg;
-    visuals.selection.stroke = Stroke::new(1.0_f32, colors().accent);
+    visuals.selection.bg_fill = colors().selection;
+    visuals.selection.stroke = Stroke::new(1.0_f32, colors().accent_hover);
     visuals.hyperlink_color = colors().accent_hover;
-    visuals.text_cursor.stroke = Stroke::new(2.0_f32, colors().accent_hover);
+    visuals.text_cursor.stroke = Stroke::new(2.0_f32, colors().caret);
     visuals.indent_has_left_vline = true;
     visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, border);
     visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, colors().text);
@@ -321,8 +362,24 @@ pub(super) fn install(ctx: &Context, font_size: f32, high_contrast: bool, theme:
     ctx.set_style(style);
 }
 
+/// Corner radius and spacing of the panel "islands": every tool window is a rounded
+/// surface floating on the darker canvas, separated by a 6 pt gutter (IntelliJ-style).
+pub(super) const ISLAND_RADIUS: u8 = 10;
+pub(super) const ISLAND_GAP: i8 = 3;
+
+/// Window chrome (title bar, activity rail, status bar): flat, on the canvas.
 pub(super) fn panel_frame(margin: Margin) -> Frame {
-    Frame::new().fill(colors().surface).inner_margin(margin)
+    Frame::new().fill(colors().canvas).inner_margin(margin)
+}
+
+/// A rounded tool-window surface with a hairline edge.
+pub(super) fn island(margin: Margin) -> Frame {
+    Frame::new()
+        .fill(colors().surface)
+        .inner_margin(margin)
+        .outer_margin(Margin::same(ISLAND_GAP))
+        .corner_radius(ISLAND_RADIUS)
+        .stroke(Stroke::new(1.0_f32, colors().border))
 }
 
 pub(super) fn muted(text: impl Into<String>) -> RichText {
@@ -468,7 +525,9 @@ pub(super) fn row(ui: &mut egui::Ui, label: &str, detail: &str, selected: bool) 
     response
 }
 
-#[derive(Clone, Copy)]
+/// Interface icons. Everything except the AEROS mark is a Lucide icon (ISC) rasterized to a
+/// mipmapped mask, so every surface shares one stroke weight, grid and corner language.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Icon {
     Brand,
     Explorer,
@@ -484,7 +543,105 @@ pub(super) enum Icon {
     Restore,
     Code,
     Terminal,
+    Folder,
+    FolderOpen,
+    ChevronRight,
+    ChevronDown,
+    Play,
+    Pause,
+    Save,
+    Bell,
+    PanelLeft,
+    PanelBottom,
+    Detach,
+    Dock,
+    More,
+    Check,
+    Alert,
+    Send,
+    Stop,
+    History,
+    Commit,
+    Diff,
+    Sparkles,
+    Collapse,
+    FilePlus,
+    Focus,
+    Palette,
+    Languages,
+    Sliders,
+    Undo,
+    Trash,
+    ExternalLink,
+    Copy,
+    Compare,
+    Grip,
+    Layers,
+    Back,
+    ChevronUp,
+    ArrowDown,
 }
+
+impl Icon {
+    pub(super) fn asset(self) -> Option<&'static str> {
+        Some(match self {
+            Self::Brand => return None,
+            Self::Explorer => "lucide-files",
+            Self::Search => "lucide-search",
+            Self::Git => "lucide-git-branch",
+            Self::Hub => "lucide-bot",
+            Self::Settings => "lucide-settings",
+            Self::Close => "lucide-x",
+            Self::Add => "lucide-plus",
+            Self::Refresh => "lucide-refresh-cw",
+            Self::Minimize => "lucide-minus",
+            Self::Maximize => "lucide-square",
+            Self::Restore => "lucide-copy",
+            Self::Code => "lucide-code",
+            Self::Terminal => "lucide-square-terminal",
+            Self::Folder => "lucide-folder",
+            Self::FolderOpen => "lucide-folder-open",
+            Self::ChevronRight => "lucide-chevron-right",
+            Self::ChevronDown => "lucide-chevron-down",
+            Self::Play => "lucide-play",
+            Self::Pause => "lucide-pause",
+            Self::Save => "lucide-save",
+            Self::Bell => "lucide-bell",
+            Self::PanelLeft => "lucide-panel-left",
+            Self::PanelBottom => "lucide-panel-bottom",
+            Self::Detach => "lucide-picture-in-picture-2",
+            Self::Dock => "lucide-arrow-down-to-line",
+            Self::More => "lucide-ellipsis",
+            Self::Check => "lucide-check",
+            Self::Alert => "lucide-circle-alert",
+            Self::Send => "lucide-arrow-up",
+            Self::Stop => "lucide-circle-stop",
+            Self::History => "lucide-history",
+            Self::Commit => "lucide-git-commit-horizontal",
+            Self::Diff => "lucide-file-diff",
+            Self::Sparkles => "lucide-sparkles",
+            Self::Collapse => "lucide-chevrons-down-up",
+            Self::FilePlus => "lucide-file-plus",
+            Self::Focus => "lucide-focus",
+            Self::Palette => "lucide-palette",
+            Self::Languages => "lucide-languages",
+            Self::Sliders => "lucide-sliders-horizontal",
+            Self::Undo => "lucide-undo-2",
+            Self::Trash => "lucide-trash-2",
+            Self::ExternalLink => "lucide-external-link",
+            Self::Copy => "lucide-copy",
+            Self::Compare => "lucide-git-compare",
+            Self::Grip => "lucide-grip-vertical",
+            Self::Layers => "lucide-layers",
+            Self::Back => "lucide-chevron-left",
+            Self::ChevronUp => "lucide-chevron-up",
+            Self::ArrowDown => "lucide-chevron-down",
+        })
+    }
+}
+
+/// Standard interface icon size in points (Lucide's 24 px grid drawn at 16 pt).
+pub(super) const ICON_SIZE: f32 = 16.0;
 
 pub(super) fn icon_button(
     ui: &mut egui::Ui,
@@ -557,114 +714,42 @@ pub(super) fn icon_button(
 }
 
 pub(super) fn draw_icon(painter: &egui::Painter, center: egui::Pos2, icon: Icon, color: Color32) {
-    let stroke = Stroke::new(1.4_f32, color);
-    let p = |x, y| center + egui::vec2(x, y);
-    let line = |a, b| {
-        painter.line_segment([a, b], stroke);
-    };
-    let outline = |points: &[(f32, f32)]| {
-        painter.add(egui::Shape::closed_line(
-            points.iter().map(|&(x, y)| p(x, y)).collect(),
-            stroke,
-        ));
-    };
-    match icon {
-        Icon::Brand => {
-            outline(&[(-7.0, 5.0), (0.0, -8.0), (7.0, 5.0)]);
-            line(p(-3.0, 0.5), p(3.0, 0.5));
-            painter.add(egui::Shape::line(
-                (0..25)
-                    .map(|i| {
-                        let a = i as f32 / 24.0 * std::f32::consts::PI * 1.55;
-                        p(a.cos() * 10.0, a.sin() * 4.5 + 1.0)
-                    })
-                    .collect(),
-                Stroke::new(1.1_f32, color),
-            ));
-        }
-        Icon::Explorer => outline(&[
-            (-8.0, -5.0),
-            (-2.0, -5.0),
-            (0.0, -2.5),
-            (8.0, -2.5),
-            (8.0, 6.5),
-            (-8.0, 6.5),
-        ]),
-        Icon::Search => {
-            painter.circle_stroke(p(-2.0, -2.0), 5.0, stroke);
-            line(p(2.0, 2.0), p(7.0, 7.0));
-        }
-        Icon::Git => {
-            line(p(-4.5, -4.0), p(-4.5, 4.0));
-            painter.add(egui::Shape::line(
-                vec![p(-4.5, 2.0), p(3.8, 2.0), p(5.0, 0.0), p(5.0, -2.0)],
-                stroke,
-            ));
-            for (x, y) in [(-4.5, -6.0), (-4.5, 6.0), (5.0, -4.0)] {
-                painter.circle_stroke(p(x, y), 2.0, stroke);
-            }
-        }
-        Icon::Hub => {
-            outline(&[
-                (0.0, -8.0),
-                (7.0, -4.0),
-                (7.0, 4.0),
-                (0.0, 8.0),
-                (-7.0, 4.0),
-                (-7.0, -4.0),
-            ]);
-            painter.circle_filled(center, 2.0, color);
-        }
-        Icon::Settings => {
-            painter.circle_stroke(center, 5.8, stroke);
-            painter.circle_stroke(center, 2.4, stroke);
-            for i in 0..8 {
-                let a = i as f32 * std::f32::consts::TAU / 8.0;
-                let v = egui::vec2(a.cos(), a.sin());
-                line(center + v * 5.9, center + v * 8.1);
-            }
-        }
-        Icon::Close => {
-            line(p(-4.0, -4.0), p(4.0, 4.0));
-            line(p(-4.0, 4.0), p(4.0, -4.0));
-        }
-        Icon::Add => {
-            line(p(-5.0, 0.0), p(5.0, 0.0));
-            line(p(0.0, -5.0), p(0.0, 5.0));
-        }
-        Icon::Refresh => {
-            painter.add(egui::Shape::line(
-                (0..22)
-                    .map(|i| {
-                        let a = i as f32 / 21.0 * 5.0;
-                        p(a.cos() * 6.0, a.sin() * 6.0)
-                    })
-                    .collect(),
-                stroke,
-            ));
-            line(p(6.0, 0.0), p(6.0, -5.0));
-            line(p(6.0, 0.0), p(1.0, 0.0));
-        }
-        Icon::Minimize => line(p(-5.0, 2.0), p(5.0, 2.0)),
-        Icon::Maximize => outline(&[(-4.5, -4.5), (4.5, -4.5), (4.5, 4.5), (-4.5, 4.5)]),
-        Icon::Restore => {
-            outline(&[(-5.0, -2.0), (2.0, -2.0), (2.0, 5.0), (-5.0, 5.0)]);
-            line(p(-2.0, -5.0), p(5.0, -5.0));
-            line(p(5.0, -5.0), p(5.0, 2.0));
-        }
-        Icon::Code => {
-            line(p(-3.0, -4.0), p(-7.0, 0.0));
-            line(p(-7.0, 0.0), p(-3.0, 4.0));
-            line(p(3.0, -4.0), p(7.0, 0.0));
-            line(p(7.0, 0.0), p(3.0, 4.0));
-        }
-        Icon::Terminal => {
-            outline(&[(-8.0, -6.0), (8.0, -6.0), (8.0, 6.0), (-8.0, 6.0)]);
-            line(p(-4.0, -2.0), p(-1.0, 0.0));
-            line(p(-1.0, 0.0), p(-4.0, 2.0));
-            line(p(1.0, 3.0), p(5.0, 3.0));
-        }
+    draw_icon_sized(painter, center, icon, color, ICON_SIZE);
+}
+
+pub(super) fn draw_icon_sized(
+    painter: &egui::Painter,
+    center: egui::Pos2,
+    icon: Icon,
+    color: Color32,
+    size: f32,
+) {
+    if let Some(name) = icon.asset() {
+        super::assets::tinted(
+            painter,
+            egui::Rect::from_center_size(center, egui::Vec2::splat(size)),
+            name,
+            color,
+        );
+        return;
     }
+    // The AEROS mark is original identity art: a delta under an open orbit.
+    let stroke = Stroke::new(1.4_f32, color);
+    let p = |x: f32, y: f32| center + egui::vec2(x, y) * (size / ICON_SIZE);
+    painter.add(egui::Shape::closed_line(
+        vec![p(-7.0, 5.0), p(0.0, -8.0), p(7.0, 5.0)],
+        stroke,
+    ));
+    painter.line_segment([p(-3.0, 0.5), p(3.0, 0.5)], stroke);
+    painter.add(egui::Shape::line(
+        (0..25)
+            .map(|i| {
+                let a = i as f32 / 24.0 * std::f32::consts::PI * 1.55;
+                p(a.cos() * 10.0, a.sin() * 4.5 + 1.0)
+            })
+            .collect(),
+        Stroke::new(1.1_f32, color),
+    ));
 }
 
 pub(super) fn modal_frame() -> Frame {

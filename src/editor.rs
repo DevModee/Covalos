@@ -6,6 +6,7 @@ mod visual_tests;
 mod assets;
 mod brands;
 mod companion;
+mod dither;
 mod files;
 mod hub;
 mod i18n;
@@ -21,6 +22,7 @@ mod skills;
 mod syntax;
 mod theme;
 mod tools;
+mod ui_icons;
 
 use i18n::tr;
 use preferences::Preferences;
@@ -670,6 +672,12 @@ impl Editor {
 
     fn render(&mut self, ctx: &egui::Context) {
         i18n::set(self.preferences.language);
+        syntax::set_style(self.preferences.syntax);
+        motion::set_intensity(if self.preferences.reduce_motion {
+            0.0
+        } else {
+            self.preferences.motion
+        });
         let focused = ctx.input(|input| input.focused);
         ctx.style_mut(|style| {
             style.animation_time = if focused && !self.preferences.reduce_motion {
@@ -717,7 +725,9 @@ impl Editor {
         self.top_bar(ctx);
         self.status_bar(ctx);
         if self.hub_open {
-            egui::CentralPanel::default().show(ctx, |ui| self.agent_hub(ui));
+            egui::CentralPanel::default()
+                .frame(theme::island(egui::Margin::same(0)).fill(theme::colors().canvas))
+                .show(ctx, |ui| self.agent_hub(ui));
         } else {
             if self.preferences.tools_open {
                 self.tools_panel(ctx);
@@ -726,7 +736,7 @@ impl Editor {
             self.sidebar(ctx);
             self.assistant_panel(ctx);
             egui::CentralPanel::default()
-                .frame(egui::Frame::new().fill(theme::colors().canvas))
+                .frame(theme::island(egui::Margin::same(0)).fill(theme::colors().inset))
                 .show(ctx, |ui| self.editor_panel(ui));
         }
         self.settings_window(ctx);

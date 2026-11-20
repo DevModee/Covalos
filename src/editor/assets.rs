@@ -173,6 +173,11 @@ fn bytes(name: &str) -> &'static [u8] {
         "brand_claudecode" => include_bytes!("../../assets/brands/claudecode.png"),
         "brand_gemini" => include_bytes!("../../assets/brands/googlegemini.png"),
         "brand_antigravity" => include_bytes!("../../assets/brands/antigravity.png"),
+        lucide if lucide.starts_with("lucide-") => super::ui_icons::LUCIDE
+            .iter()
+            .find(|(n, _)| *n == lucide)
+            .map(|(_, b)| *b)
+            .unwrap_or_else(|| panic!("{lucide} is not bundled")),
         _ => super::icons::MATERIAL
             .iter()
             .find(|(n, _)| *n == name)

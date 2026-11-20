@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 pub(super) enum Background {
     Off,
     #[default]
+    Dither,
+    Bloom,
     Orbital,
     Neural,
     Void,
@@ -15,8 +17,10 @@ pub(super) enum Background {
     Minimal,
 }
 impl Background {
-    pub(super) const ALL: [Self; 6] = [
+    pub(super) const ALL: [Self; 8] = [
         Self::Off,
+        Self::Dither,
+        Self::Bloom,
         Self::Orbital,
         Self::Neural,
         Self::Void,
@@ -26,6 +30,8 @@ impl Background {
     pub(super) fn name(self) -> &'static str {
         match self {
             Self::Off => "Off",
+            Self::Dither => "Dither Field",
+            Self::Bloom => "Dither Bloom",
             Self::Orbital => "Orbital",
             Self::Neural => "Neural",
             Self::Void => "Void",
@@ -90,10 +96,10 @@ pub(super) struct IdentityPreferences {
 impl Default for IdentityPreferences {
     fn default() -> Self {
         Self {
-            background: Background::Orbital,
+            background: Background::Dither,
             pattern: Pattern::Waves,
             animated: true,
-            fps: 20,
+            fps: 24,
             speed: 0.6,
             density: 0.45,
             intensity: 0.16,
@@ -153,6 +159,7 @@ pub(super) struct Identity {
     mascot_click: f64,
     mood: (Mood, f64),
     awake_until: f64,
+    dither: super::dither::Input,
 }
 struct OrbitalCache {
     key: [u32; 4],
@@ -247,7 +254,16 @@ impl Identity {
         }
         self.scene_active = visible && prefs.interactive && !reduce && prefs.animated;
         self.influence = if self.scene_active { pointer } else { None };
-        if click && visible && prefs.interactive && !reduce && prefs.animated {
+        let dithered = matches!(prefs.background, Background::Dither | Background::Bloom);
+        if dithered && self.scene_active && background_visible {
+            self.dither.record(now, pointer, click);
+            if click {
+                self.until = self.until.max(now + super::dither::RIPPLE_SECONDS);
+            }
+        } else {
+            self.dither.clear();
+        }
+        if click && !dithered && visible && prefs.interactive && !reduce && prefs.animated {
             self.ripple = pointer.map(|p| (p, now));
         }
         if self.ripple.is_some_and(|(_, start)| now - start > 1.1) {
@@ -285,6 +301,7 @@ impl Identity {
         self.mascot_clock.advance(now, mascot_active, 1.0);
         if background_active || mascot_active {
             let interacting = now < self.until
+                || (background_active && self.dither.busy())
                 || now - self.mascot_click < 0.6
                 || now - self.mood.1 < 1.6
                 || hovering;
@@ -339,7 +356,46 @@ impl Identity {
             };
         let radius = rect.width().min(rect.height()) * 0.38;
         let count = (90.0 * prefs.density) as usize;
-        match prefs.background {
+        let background = match prefs.background {
+            Background::Dither | Background::Bloom if !super::dither::available() => {
+                Background::Minimal
+            }
+            other => other,
+        };
+        match background {
+            Background::Dither | Background::Bloom => {
+                // Neutral ink for the field; the accent appears only where the user acts.
+                let gamma = |c: Color32| {
+                    egui::Rgba::from_rgba_premultiplied(
+                        f32::from(c.r()) / 255.0,
+                        f32::from(c.g()) / 255.0,
+                        f32::from(c.b()) / 255.0,
+                        1.0,
+                    )
+                };
+                let mut frame = super::dither::Frame {
+                    variant: if background == Background::Bloom {
+                        super::dither::Variant::Bloom
+                    } else {
+                        super::dither::Variant::Field
+                    },
+                    time: t * 4.0,
+                    ink: gamma(if background == Background::Bloom {
+                        tint
+                    } else {
+                        palette.text
+                    }),
+                    accent: gamma(tint),
+                    strength: (prefs.intensity / 0.16).clamp(0.25, 2.4),
+                    density: prefs.density,
+                    pixel: 4.0,
+                    light: !theme::active().is_dark(),
+                    trail: [[0.0, 0.0, 1.0]; super::dither::TRAIL],
+                    ripples: [[0.0, 0.0, -1.0]; super::dither::RIPPLES],
+                };
+                self.dither.fill(&mut frame, rect, self.now);
+                super::dither::paint(&p, rect, frame);
+            }
             Background::Orbital => {
                 halo(
                     &p,
