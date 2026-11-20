@@ -22,8 +22,20 @@ pub(super) const LUCIDE: &[(&str, &[u8])] = &[
         include_bytes!("../../assets/icons/ui/bell.png"),
     ),
     (
+        "lucide-blocks",
+        include_bytes!("../../assets/icons/ui/blocks.png"),
+    ),
+    (
+        "lucide-book-open",
+        include_bytes!("../../assets/icons/ui/book-open.png"),
+    ),
+    (
         "lucide-bot",
         include_bytes!("../../assets/icons/ui/bot.png"),
+    ),
+    (
+        "lucide-chart-column",
+        include_bytes!("../../assets/icons/ui/chart-column.png"),
     ),
     (
         "lucide-check",
@@ -66,6 +78,10 @@ pub(super) const LUCIDE: &[(&str, &[u8])] = &[
         include_bytes!("../../assets/icons/ui/circle-stop.png"),
     ),
     (
+        "lucide-clipboard-copy",
+        include_bytes!("../../assets/icons/ui/clipboard-copy.png"),
+    ),
+    (
         "lucide-code",
         include_bytes!("../../assets/icons/ui/code.png"),
     ),
@@ -76,6 +92,10 @@ pub(super) const LUCIDE: &[(&str, &[u8])] = &[
     (
         "lucide-copy",
         include_bytes!("../../assets/icons/ui/copy.png"),
+    ),
+    (
+        "lucide-download",
+        include_bytes!("../../assets/icons/ui/download.png"),
     ),
     (
         "lucide-ellipsis",
@@ -134,8 +154,16 @@ pub(super) const LUCIDE: &[(&str, &[u8])] = &[
         include_bytes!("../../assets/icons/ui/git-pull-request-arrow.png"),
     ),
     (
+        "lucide-globe",
+        include_bytes!("../../assets/icons/ui/globe.png"),
+    ),
+    (
         "lucide-grip-vertical",
         include_bytes!("../../assets/icons/ui/grip-vertical.png"),
+    ),
+    (
+        "lucide-heart",
+        include_bytes!("../../assets/icons/ui/heart.png"),
     ),
     (
         "lucide-history",
@@ -146,12 +174,24 @@ pub(super) const LUCIDE: &[(&str, &[u8])] = &[
         include_bytes!("../../assets/icons/ui/house.png"),
     ),
     (
+        "lucide-image",
+        include_bytes!("../../assets/icons/ui/image.png"),
+    ),
+    (
         "lucide-languages",
         include_bytes!("../../assets/icons/ui/languages.png"),
     ),
     (
         "lucide-layers",
         include_bytes!("../../assets/icons/ui/layers.png"),
+    ),
+    (
+        "lucide-layout-template",
+        include_bytes!("../../assets/icons/ui/layout-template.png"),
+    ),
+    (
+        "lucide-library-big",
+        include_bytes!("../../assets/icons/ui/library-big.png"),
     ),
     (
         "lucide-list-checks",
@@ -176,6 +216,10 @@ pub(super) const LUCIDE: &[(&str, &[u8])] = &[
     (
         "lucide-move-diagonal-2",
         include_bytes!("../../assets/icons/ui/move-diagonal-2.png"),
+    ),
+    (
+        "lucide-package",
+        include_bytes!("../../assets/icons/ui/package.png"),
     ),
     (
         "lucide-palette",
@@ -266,6 +310,10 @@ pub(super) const LUCIDE: &[(&str, &[u8])] = &[
         include_bytes!("../../assets/icons/ui/square.png"),
     ),
     (
+        "lucide-star",
+        include_bytes!("../../assets/icons/ui/star.png"),
+    ),
+    (
         "lucide-trash-2",
         include_bytes!("../../assets/icons/ui/trash-2.png"),
     ),
@@ -274,8 +322,20 @@ pub(super) const LUCIDE: &[(&str, &[u8])] = &[
         include_bytes!("../../assets/icons/ui/triangle-alert.png"),
     ),
     (
+        "lucide-type",
+        include_bytes!("../../assets/icons/ui/type.png"),
+    ),
+    (
         "lucide-undo-2",
         include_bytes!("../../assets/icons/ui/undo-2.png"),
+    ),
+    (
+        "lucide-wand-sparkles",
+        include_bytes!("../../assets/icons/ui/wand-sparkles.png"),
+    ),
+    (
+        "lucide-wifi-off",
+        include_bytes!("../../assets/icons/ui/wifi-off.png"),
     ),
     ("lucide-x", include_bytes!("../../assets/icons/ui/x.png")),
     (

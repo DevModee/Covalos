@@ -3,6 +3,7 @@
 mod agent_bridge;
 mod assistant;
 mod editor;
+mod library;
 mod process;
 mod workspace;
 
@@ -14,6 +15,11 @@ fn main() -> eframe::Result {
             eprintln!("AEROS hook: {error}");
         }
         return Ok(());
+    }
+    if std::env::args().nth(1).as_deref() == Some("--library") {
+        // Structured Library Studio tools for agents; prints JSON and exits.
+        let args: Vec<String> = std::env::args().skip(2).collect();
+        std::process::exit(library::tool_main(&args));
     }
     let root = std::env::args_os().nth(1).map(std::path::PathBuf::from);
     let options = eframe::NativeOptions {
