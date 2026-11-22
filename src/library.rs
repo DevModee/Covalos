@@ -14,8 +14,6 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
 };
-
-// ---------------------------------------------------------------------------------------
 // Sources
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -309,8 +307,6 @@ pub const SOURCES: &[Source] = &[
         notes: "Animated Lottie icons installed as the react-useanimations npm package.",
     },
 ];
-
-// ---------------------------------------------------------------------------------------
 // Entries
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -842,8 +838,6 @@ fn titleize(name: &str) -> String {
     }
     out
 }
-
-// ---------------------------------------------------------------------------------------
 // Local store
 
 /// Per-source synchronization record.
@@ -1217,8 +1211,6 @@ impl Query {
             && (!self.offline || entry.framework == Framework::Native)
     }
 }
-
-// ---------------------------------------------------------------------------------------
 // Sync
 
 fn curl() -> Command {
@@ -1370,8 +1362,6 @@ pub struct RegistryFile {
     #[serde(default)]
     pub target: Option<String>,
 }
-
-// ---------------------------------------------------------------------------------------
 // Projects
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -1588,8 +1578,6 @@ pub fn compatibility(entry: &Entry, project: &Project) -> Compatibility {
         Compatibility::NeedsSetup(steps)
     }
 }
-
-// ---------------------------------------------------------------------------------------
 // Installation plans
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -1835,8 +1823,6 @@ fn restore_tree(base: &Path, current: &Path, root: &Path) -> io::Result<()> {
     }
     Ok(())
 }
-
-// ---------------------------------------------------------------------------------------
 // Tool API for agents: `covalos --library <command> …` prints JSON.
 
 pub fn tool_main(args: &[String]) -> i32 {

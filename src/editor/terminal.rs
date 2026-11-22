@@ -203,8 +203,6 @@ fn spawn(mut command: Command, ctx: egui::Context) -> Job {
     Job { events, stop }
 }
 
-// ------------------------------------------------------------------ ports
-
 /// Listening TCP sockets with their owning process (Windows IP Helper API).
 #[cfg(windows)]
 fn listeners() -> Vec<(u16, String, u32)> {

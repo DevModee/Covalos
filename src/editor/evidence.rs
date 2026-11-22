@@ -1040,8 +1040,6 @@ if __name__ == "__main__":
     print(summarize([Sample(**item) for item in data]))
 "#;
 
-// ---------------------------------------------------------------- Agent Hub (V4/V5)
-
 fn agents(editor: &mut Editor) -> &mut crate::agents_runtime::Runtime {
     editor
         .hub
