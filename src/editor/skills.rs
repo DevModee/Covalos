@@ -45,6 +45,32 @@ impl Skills {
             skill.name, skill.source, skill.instructions
         )
     }
+
+    pub(super) fn auto_select_for_prompt(&mut self, installed: &[Skill], prompt: &str) {
+        let lower = prompt.to_ascii_lowercase();
+        if let Some(skill) = installed.iter().find(|s| {
+            s.enabled
+                && (lower.contains(&s.name.to_ascii_lowercase())
+                    || lower.contains("front")
+                    || lower.contains("ui")
+                    || lower.contains("design"))
+        }) {
+            self.selected = Some(skill.id.clone());
+        }
+    }
+
+    pub(super) fn start_import_url(&mut self, url: &str, ctx: &egui::Context) {
+        self.source = url.to_owned();
+        self.error = None;
+        let url = self.source.clone();
+        let ctx = ctx.clone();
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let _ = sender.send(fetch(&url));
+            ctx.request_repaint();
+        });
+        self.download = Some(receiver);
+    }
 }
 
 struct Source<'a> {

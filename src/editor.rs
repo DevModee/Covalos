@@ -300,6 +300,8 @@ impl Editor {
         self.documents.clear();
         self.active = None;
         self.sidebar = Sidebar::Files;
+        self.sidebar_open = true;
+        self.explorer_filter.clear();
         self.workspace_query.clear();
         self.search_hits.clear();
         self.search_job = None;

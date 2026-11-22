@@ -199,29 +199,45 @@ impl Editor {
             .as_deref()
             .map(workspace::filename)
             .unwrap_or_else(|| tr("Projects").to_owned());
-        ui.menu_button(RichText::new(label).color(colors().muted), |ui| {
-            if ui.button(tr("Open folder…")).clicked() {
-                ui.close();
-                self.pick_workspace(ui.ctx());
-            }
-            if ui.button(tr("Create project…")).clicked() {
-                ui.close();
-                self.pick_new_project(ui.ctx());
-            }
-            if !self.preferences.recent.is_empty() {
-                ui.separator();
-                for root in self.preferences.recent.clone() {
-                    if ui
-                        .button(workspace::filename(&root))
-                        .on_hover_text(root.display().to_string())
-                        .clicked()
-                    {
-                        ui.close();
-                        self.request(Pending::OpenWorkspace(root), ui.ctx());
+        ui.menu_button(
+            RichText::new(format!("{label}  ▾"))
+                .size(BODY)
+                .color(if self.root.is_some() {
+                    colors().text
+                } else {
+                    colors().secondary
+                }),
+            |ui| {
+                if !self.preferences.recent.is_empty() {
+                    for root in self.preferences.recent.clone() {
+                        let is_active = self.root.as_ref() == Some(&root);
+                        let name = workspace::filename(&root);
+                        let text = if is_active {
+                            format!("✓  {name}")
+                        } else {
+                            format!("    {name}")
+                        };
+                        if ui
+                            .button(text)
+                            .on_hover_text(root.display().to_string())
+                            .clicked()
+                        {
+                            ui.close();
+                            self.request(Pending::OpenWorkspace(root), ui.ctx());
+                        }
                     }
+                    ui.separator();
                 }
-            }
-        });
+                if ui.button(tr("Open folder…")).clicked() {
+                    ui.close();
+                    self.pick_workspace(ui.ctx());
+                }
+                if ui.button(tr("Create project…")).clicked() {
+                    ui.close();
+                    self.pick_new_project(ui.ctx());
+                }
+            },
+        );
     }
 
     pub(super) fn welcome(&mut self, ui: &mut Ui) {
@@ -234,6 +250,10 @@ impl Editor {
         let mood = self.agent_mood(ui.input(|i| i.focused));
         self.identity
             .paint(ui, area, &self.preferences.identity, mood);
+        if self.root.is_some() {
+            self.project_session_home(ui, area);
+            return;
+        }
         // One centred column inside the available content area (not the window), with a
         // readable maximum width. Its vertical position comes from content known up
         // front, so loading recents never shifts the layout.
@@ -386,6 +406,216 @@ impl Editor {
         });
     }
 
+    /// Minimalist project home shown once a workspace is open and no file tab is active.
+    fn project_session_home(&mut self, ui: &mut Ui, area: egui::Rect) {
+        let width = (area.width() - 72.0).clamp(300.0, 560.0).min(area.width());
+        let left = area.center().x - width * 0.5;
+        let top = ((area.height() - 360.0) * 0.36).clamp(36.0, 180.0);
+        let rect = egui::Rect::from_min_size(
+            egui::pos2(left, area.top() + top),
+            egui::vec2(width, (area.height() - top).max(1.0)),
+        );
+        // Soft reading scrim keeps ASCII / Dither background visible around the edges.
+        super::mascot::soft_ellipse(
+            ui.painter(),
+            egui::pos2(rect.center().x, area.top() + top + 140.0),
+            egui::vec2(width * 0.85, 240.0),
+            colors().inset.gamma_multiply(0.85),
+        );
+        let auto_skill_id = Id::new("home-auto-skill");
+        let mut auto_skill: bool = ui
+            .ctx()
+            .data(|d| d.get_temp(auto_skill_id))
+            .unwrap_or(true);
+        let mut send_prompt_now = false;
+        let mut open_add_ai = false;
+        let mut quick_action: Option<&str> = None;
+
+        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+            ui.set_width(width);
+            ui.vertical_centered(|ui| {
+                ui.label(
+                    RichText::new(tr("Where should we begin?"))
+                        .size(HEADING + 2.0)
+                        .strong()
+                        .color(colors().text),
+                );
+            });
+            ui.add_space(16.0);
+            // Floating rounded prompt composer.
+            egui::Frame::new()
+                .fill(colors().surface.gamma_multiply(0.95))
+                .corner_radius(12)
+                .stroke(egui::Stroke::new(1.0_f32, colors().border))
+                .inner_margin(egui::Margin::symmetric(14, 12))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    let response = ui.add(
+                        TextEdit::multiline(&mut self.chat.prompt)
+                            .hint_text(tr("Ask anything, @ to add context"))
+                            .frame(false)
+                            .desired_rows(2)
+                            .desired_width(f32::INFINITY)
+                            .char_limit(12_000),
+                    );
+                    let enter = response.has_focus()
+                        && ui.input(|i| i.key_pressed(Key::Enter) && !i.modifiers.shift);
+                    if enter && !self.chat.prompt.trim().is_empty() {
+                        send_prompt_now = true;
+                    }
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        if icon_button(ui, Icon::Add, "Open file", false).clicked() {
+                            self.pick_file();
+                        }
+                        let provider_label = if let Some(rt) = &self.hub.agents.runtime
+                            && let Some(profile) = rt.profiles.accounts().first()
+                        {
+                            profile.label.clone()
+                        } else {
+                            tr("+ Add AI").to_owned()
+                        };
+                        let pill = egui::Button::new(
+                            RichText::new(provider_label)
+                                .size(SMALL)
+                                .color(colors().secondary),
+                        )
+                        .fill(colors().elevated)
+                        .stroke(egui::Stroke::new(1.0_f32, colors().border))
+                        .corner_radius(8);
+                        if ui.add(pill).clicked() {
+                            open_add_ai = true;
+                        }
+                        let skill_pill = egui::Button::new(
+                            RichText::new(if auto_skill {
+                                tr("Auto skills")
+                            } else {
+                                tr("Manual skills")
+                            })
+                            .size(SMALL)
+                            .color(if auto_skill {
+                                colors().accent
+                            } else {
+                                colors().muted
+                            }),
+                        )
+                        .fill(if auto_skill {
+                            colors().accent_bg
+                        } else {
+                            egui::Color32::TRANSPARENT
+                        })
+                        .stroke(egui::Stroke::new(1.0_f32, colors().border))
+                        .corner_radius(8);
+                        if ui
+                            .add(skill_pill)
+                            .on_hover_text(tr(
+                                "Automatically attach matching enabled skills without asking.",
+                            ))
+                            .clicked()
+                        {
+                            auto_skill = !auto_skill;
+                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let can_send = !self.chat.prompt.trim().is_empty();
+                            let send_btn = egui::Button::new(
+                                RichText::new("↑").strong().color(if can_send {
+                                    colors().canvas
+                                } else {
+                                    colors().muted
+                                }),
+                            )
+                            .fill(if can_send {
+                                colors().accent
+                            } else {
+                                colors().elevated
+                            })
+                            .stroke(egui::Stroke::NONE)
+                            .corner_radius(14)
+                            .min_size(egui::vec2(28.0, 28.0));
+                            if ui.add_enabled(can_send, send_btn).clicked() {
+                                send_prompt_now = true;
+                            }
+                        });
+                    });
+                });
+            ui.add_space(14.0);
+            // Minimalist quick-start rows.
+            for (icon, color, label) in [
+                (Icon::Compare, colors().accent, "Review my changes"),
+                (Icon::Search, colors().success, "Plan an implementation"),
+                (Icon::Terminal, colors().warning, "Find and fix a bug"),
+                (Icon::Book, colors().error, "Write tests for a change"),
+            ] {
+                let (row_rect, resp) = ui.allocate_exact_size(
+                    egui::vec2(width, 30.0),
+                    egui::Sense::click(),
+                );
+                if resp.hovered() {
+                    ui.painter().rect_filled(row_rect, 7, colors().hover);
+                }
+                draw_icon_sized(
+                    ui.painter(),
+                    row_rect.left_center() + egui::vec2(14.0, 0.0),
+                    icon,
+                    color,
+                    14.0,
+                );
+                ui.painter().text(
+                    row_rect.left_center() + egui::vec2(32.0, 0.0),
+                    egui::Align2::LEFT_CENTER,
+                    tr(label),
+                    egui::FontId::proportional(BODY),
+                    if resp.hovered() {
+                        colors().text
+                    } else {
+                        colors().secondary
+                    },
+                );
+                if resp.clicked() {
+                    quick_action = Some(label);
+                }
+            }
+        });
+        ui.ctx().data_mut(|d| d.insert_temp(auto_skill_id, auto_skill));
+        if open_add_ai {
+            self.hub.agents.chat.add_ai = Some(Default::default());
+        }
+        if let Some(action) = quick_action {
+            match action {
+                "Review my changes" => {
+                    self.sidebar = super::Sidebar::Git;
+                    self.sidebar_open = true;
+                    self.git_refresh(ui.ctx(), None);
+                }
+                other => {
+                    self.chat.prompt = format!("{}: ", tr(other));
+                    self.preferences.assistant_open = true;
+                }
+            }
+        }
+        if send_prompt_now {
+            let trimmed = self.chat.prompt.trim().to_owned();
+            // If user pasted a GitHub SKILL.md URL, import it directly through the safe skill importer.
+            if let Some(url) = trimmed
+                .split_whitespace()
+                .find(|w| w.starts_with("https://github.com/") && w.ends_with("/SKILL.md"))
+            {
+                self.skills.start_import_url(url, ui.ctx());
+                self.chat.prompt.clear();
+                self.notice = Some((false, tr("Importing skill from GitHub…").to_owned()));
+                return;
+            }
+            if auto_skill {
+                self.skills
+                    .auto_select_for_prompt(&self.preferences.skills, &trimmed);
+            }
+            self.preferences.assistant_open = true;
+            self.hub_open = false;
+            self.send_prompt(ui.ctx());
+        }
+    }
+
     fn initial_setup_card(&mut self, ui: &mut Ui) {
         let old = (
             self.preferences.theme,
@@ -517,13 +747,39 @@ impl Editor {
         let mut search: String = ctx.data(|d| d.get_temp(query_id)).unwrap_or_default();
 
         let mut open = self.settings_open;
-        egui::Window::new(tr("Settings"))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .fixed_size(egui::vec2(width, height))
-            .constrain_to(ctx.content_rect().shrink(16.0))
+        let mut open_add_ai_from_settings = false;
+        let area = egui::Modal::default_area(Id::new("settings-modal")).anchor(
+            egui::Align2::CENTER_CENTER,
+            egui::vec2(0.0, 0.0),
+        );
+        let modal = egui::Modal::new(Id::new("settings-modal"))
+            .backdrop_color(egui::Color32::from_black_alpha(150))
+            .frame(
+                egui::Frame::new()
+                    .fill(colors().surface)
+                    .corner_radius(MODAL_RADIUS)
+                    .stroke(egui::Stroke::new(1.0_f32, colors().control_border))
+                    .shadow(egui::Shadow {
+                        offset: [0, 12],
+                        blur: 32,
+                        spread: 0,
+                        color: egui::Color32::from_black_alpha(140),
+                    })
+                    .inner_margin(egui::Margin::same(14)),
+            )
+            .area(area)
             .show(ctx, |ui| {
+                ui.set_width(width);
+                ui.set_height(height);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(tr("Settings")).size(LEAD).strong());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if icon_button(ui, Icon::Close, "Close", false).clicked() {
+                            open = false;
+                        }
+                    });
+                });
+                ui.add_space(6.0);
                 let old = (
                     self.preferences.theme,
                     self.preferences.font_size,
@@ -531,7 +787,7 @@ impl Editor {
                     self.preferences.brightness.to_bits(),
                 );
                 let nav_w = 176.0;
-                let content_h = (ui.available_height() - 4.0).max(200.0);
+                let content_h = (height - 46.0).max(220.0);
                 ui.horizontal_top(|ui| {
                     // Left navigation column with search and clean sections.
                     ui.allocate_ui_with_layout(
@@ -1082,6 +1338,16 @@ impl Editor {
                                 SettingsSection::Agents => {
                                     setting_row(
                                         ui,
+                                        "Connected accounts & CLIs",
+                                        "Use your Claude, Codex, or Gemini subscription via official CLI or connect an API key.",
+                                        |ui| {
+                                            if ui.add(primary(tr("+ Add AI"))).clicked() {
+                                                open_add_ai_from_settings = true;
+                                            }
+                                        },
+                                    );
+                                    setting_row(
+                                        ui,
                                         "Allow Auto buffer edits",
                                         "Auto applies an eligible replacement to the active buffer. Use Save to write the file.",
                                         |ui| {
@@ -1147,7 +1413,14 @@ impl Editor {
                     );
                 }
             });
+        if modal.should_close() {
+            open = false;
+        }
         self.settings_open = open;
+        if open_add_ai_from_settings {
+            self.settings_open = false;
+            self.hub.agents.chat.add_ai = Some(Default::default());
+        }
         ctx.data_mut(|d| {
             d.insert_temp(tab_id, active_tab);
             d.insert_temp(query_id, search);
