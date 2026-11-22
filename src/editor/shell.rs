@@ -1064,6 +1064,19 @@ impl Editor {
 
         let mut open = self.settings_open;
         let mut open_add_ai_from_settings = false;
+        let mut open_rules_file: Option<PathBuf> = None;
+        let rules_id = Id::new("settings-agent-rules-draft");
+        let rules_loaded_id = Id::new("settings-agent-rules-loaded");
+        let mut rules_draft: String = if ctx.data(|d| d.get_temp::<bool>(rules_loaded_id)).unwrap_or(false) {
+            ctx.data(|d| d.get_temp(rules_id)).unwrap_or_default()
+        } else {
+            let loaded = super::preferences::Preferences::load_agent_rules();
+            ctx.data_mut(|d| {
+                d.insert_temp(rules_loaded_id, true);
+                d.insert_temp(rules_id, loaded.clone());
+            });
+            loaded
+        };
         let area = egui::Modal::default_area(Id::new("settings-modal")).anchor(
             egui::Align2::CENTER_CENTER,
             egui::vec2(0.0, 0.0),
@@ -1674,6 +1687,60 @@ impl Editor {
                                             );
                                         },
                                     );
+                                    ui.add_space(4.0);
+                                    ui.label(
+                                        RichText::new(tr("Global agent rules (local)"))
+                                            .size(BODY)
+                                            .strong(),
+                                    );
+                                    ui.add(
+                                        egui::Label::new(muted(
+                                            "Saved locally on this PC (agent-rules.md). Applied to models, Agent Hub, and Luma.",
+                                        ))
+                                        .wrap(),
+                                    );
+                                    ui.add_space(6.0);
+                                    ui.add(
+                                        TextEdit::multiline(&mut rules_draft)
+                                            .hint_text(tr("Write strict rules for all AI models, Agent Hub, and Luma…"))
+                                            .desired_rows(5)
+                                            .desired_width(f32::INFINITY)
+                                            .char_limit(24_000),
+                                    );
+                                    ui.add_space(6.0);
+                                    ui.horizontal(|ui| {
+                                        if ui.add(primary(tr("Save rules"))).clicked() {
+                                            match super::preferences::Preferences::save_agent_rules(
+                                                &rules_draft,
+                                            ) {
+                                                Ok(_) => {
+                                                    self.notice = Some((
+                                                        false,
+                                                        tr("Saved local agent rules.").to_owned(),
+                                                    ));
+                                                }
+                                                Err(err) => {
+                                                    self.error(format!(
+                                                        "Could not save agent rules. {err}"
+                                                    ));
+                                                }
+                                            }
+                                        }
+                                        if ui.button(tr("Open file")).clicked() {
+                                            match super::preferences::Preferences::save_agent_rules(
+                                                &rules_draft,
+                                            ) {
+                                                Ok(path) => {
+                                                    open_rules_file = Some(path);
+                                                }
+                                                Err(err) => {
+                                                    self.error(format!(
+                                                        "Could not open agent rules. {err}"
+                                                    ));
+                                                }
+                                            }
+                                        }
+                                    });
                                 }
                                 SettingsSection::Integrations => {
                                     let status = self.discord.status();
@@ -1737,9 +1804,14 @@ impl Editor {
             self.settings_open = false;
             self.hub.agents.chat.add_ai = Some(Default::default());
         }
+        if let Some(path) = open_rules_file {
+            self.settings_open = false;
+            self.open_file(path);
+        }
         ctx.data_mut(|d| {
             d.insert_temp(tab_id, active_tab);
             d.insert_temp(query_id, search);
+            d.insert_temp(rules_id, rules_draft);
         });
     }
 

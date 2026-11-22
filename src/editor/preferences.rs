@@ -132,6 +132,45 @@ impl Preferences {
         crate::paths::preferences_path()
     }
 
+    pub(super) fn agent_rules_path() -> Option<PathBuf> {
+        Self::path()?.parent().map(|dir| dir.join("agent-rules.md"))
+    }
+
+    pub(super) fn load_agent_rules() -> String {
+        const MAX_RULES_BYTES: usize = 24 * 1024;
+        let Some(path) = Self::agent_rules_path() else {
+            return String::new();
+        };
+        let Ok(raw) = fs::read_to_string(path) else {
+            return String::new();
+        };
+        if raw.len() <= MAX_RULES_BYTES {
+            raw
+        } else {
+            raw[..raw.floor_char_boundary(MAX_RULES_BYTES)].to_owned()
+        }
+    }
+
+    pub(super) fn save_agent_rules(content: &str) -> io::Result<PathBuf> {
+        const MAX_RULES_BYTES: usize = 24 * 1024;
+        let path = Self::agent_rules_path()
+            .ok_or_else(|| io::Error::other("Missing settings folder."))?;
+        let parent = path
+            .parent()
+            .ok_or_else(|| io::Error::other("Missing settings folder."))?;
+        fs::create_dir_all(parent)?;
+        let bounded = if content.len() <= MAX_RULES_BYTES {
+            content
+        } else {
+            &content[..content.floor_char_boundary(MAX_RULES_BYTES)]
+        };
+        let mut file = tempfile::NamedTempFile::new_in(parent)?;
+        io::Write::write_all(file.as_file_mut(), bounded.as_bytes())?;
+        file.as_file().sync_all()?;
+        file.persist(&path)?;
+        Ok(path)
+    }
+
     pub(super) fn load(path: &Path) -> io::Result<Self> {
         let mut prefs: Self = match fs::read(path) {
             Ok(bytes) => serde_json::from_slice(&bytes)?,

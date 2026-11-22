@@ -430,6 +430,17 @@ const SPANISH: &[(&str, &str)] = &[
     ("Accounts", "Cuentas"),
     ("Detecting…", "Detectando…"),
     ("Sessions", "Sesiones"),
+    ("Global agent rules (local)", "Reglas globales de agentes (local)"),
+    (
+        "Saved locally on this PC (agent-rules.md). Applied to models, Agent Hub, and Luma.",
+        "Guardado localmente en esta PC (agent-rules.md). Se aplica a los modelos, Agent Hub y Luma.",
+    ),
+    (
+        "Write strict rules for all AI models, Agent Hub, and Luma…",
+        "Escribí reglas estrictas para todos los modelos de IA, Agent Hub y Luma…",
+    ),
+    ("Save rules", "Guardar reglas"),
+    ("Saved local agent rules.", "Reglas locales de agentes guardadas."),
     ("Interface scale", "Escala de la interfaz"),
     ("Reset editor zoom", "Restablecer zoom del editor"),
     ("Reset Explorer zoom", "Restablecer zoom del Explorador"),
