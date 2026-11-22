@@ -441,6 +441,8 @@ const SPANISH: &[(&str, &str)] = &[
     ),
     ("Save rules", "Guardar reglas"),
     ("Saved local agent rules.", "Reglas locales de agentes guardadas."),
+    ("Thinking effort", "Esfuerzo de razonamiento"),
+    ("Extra High", "Extra alto"),
     ("Interface scale", "Escala de la interfaz"),
     ("Reset editor zoom", "Restablecer zoom del editor"),
     ("Reset Explorer zoom", "Restablecer zoom del Explorador"),

@@ -167,6 +167,14 @@ fn frame(op: u32, payload: &serde_json::Value) -> Vec<u8> {
 pub(super) const BETA_URL: &str = "https://www.matiasgs.com/work/covalos";
 
 fn activity_payload(activity: Option<&Activity>, nonce: u64) -> serde_json::Value {
+    activity_payload_with_buttons(activity, nonce, true)
+}
+
+fn activity_payload_with_buttons(
+    activity: Option<&Activity>,
+    nonce: u64,
+    include_buttons: bool,
+) -> serde_json::Value {
     let activity = activity.map(|a| {
         let assets = match (&a.language_asset, &a.language_text) {
             (Some(lang_key), Some(lang_text)) => serde_json::json!({
@@ -183,10 +191,12 @@ fn activity_payload(activity: Option<&Activity>, nonce: u64) -> serde_json::Valu
         let mut value = serde_json::json!({
             "details": a.details,
             "assets": assets,
-            "buttons": [
-                { "label": "View Covalos Beta", "url": BETA_URL }
-            ],
         });
+        if include_buttons {
+            value["buttons"] = serde_json::json!([
+                { "label": "View Covalos Beta", "url": BETA_URL }
+            ]);
+        }
         if let Some(state) = &a.state {
             value["state"] = serde_json::json!(state);
         }
@@ -257,7 +267,16 @@ mod ipc {
             self.write(1, &super::activity_payload(activity, self.nonce))?;
             let reply = self.read()?;
             if reply.get("evt").and_then(|e| e.as_str()) == Some("ERROR") {
-                return Err(std::io::Error::other(reply.to_string()));
+                // Retry once without buttons in case the local Discord client rejects custom buttons.
+                self.nonce += 1;
+                self.write(
+                    1,
+                    &super::activity_payload_with_buttons(activity, self.nonce, false),
+                )?;
+                let retry = self.read()?;
+                if retry.get("evt").and_then(|e| e.as_str()) == Some("ERROR") {
+                    return Err(std::io::Error::other(retry.to_string()));
+                }
             }
             Ok(())
         }

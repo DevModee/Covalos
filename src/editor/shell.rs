@@ -608,8 +608,8 @@ impl Editor {
                                     .size(SMALL)
                                     .color(colors().secondary),
                                 |ui| {
-                                    ui.label(muted(tr("Effort")));
-                                    for level in ["Low", "Medium", "High"] {
+                                    ui.label(muted(tr("Thinking effort")));
+                                    for level in ["Low", "Medium", "High", "Extra High"] {
                                         let active = self.hub.agents.chat.effort == level;
                                         if ui.selectable_label(active, tr(level)).clicked() {
                                             self.hub.agents.chat.effort = level.to_owned();
@@ -618,7 +618,7 @@ impl Editor {
                                     }
                                 },
                             );
-                            // Full Model picker showing all providers (Claude, Codex, Gemini).
+                            // Full Model picker with official provider marks and per-model Thinking effort submenu.
                             let model_text = self
                                 .hub
                                 .agents
@@ -631,58 +631,99 @@ impl Editor {
                                     .size(SMALL)
                                     .color(colors().text),
                                 |ui| {
-                                    ui.set_min_width(240.0);
-                                    for (kind, dot) in [
+                                    ui.set_min_width(250.0);
+                                    for (kind, brand_provider, title) in [
                                         (
                                             covalos_agents::ProviderKind::ClaudeCode,
-                                            egui::Color32::from_rgb(217, 119, 87),
-                                        ),
-                                        (
-                                            covalos_agents::ProviderKind::Codex,
-                                            egui::Color32::from_rgb(52, 211, 153),
+                                            crate::assistant::Provider::Claude,
+                                            "Claude",
                                         ),
                                         (
                                             covalos_agents::ProviderKind::Gemini,
-                                            egui::Color32::from_rgb(96, 165, 250),
+                                            crate::assistant::Provider::Gemini,
+                                            "Gemini",
+                                        ),
+                                        (
+                                            covalos_agents::ProviderKind::Codex,
+                                            crate::assistant::Provider::Codex,
+                                            "ChatGPT",
                                         ),
                                     ] {
                                         ui.horizontal(|ui| {
-                                            let (drect, _) = ui.allocate_exact_size(
-                                                egui::vec2(8.0, 14.0),
+                                            let (mrect, _) = ui.allocate_exact_size(
+                                                egui::vec2(15.0, 15.0),
                                                 egui::Sense::hover(),
                                             );
-                                            ui.painter().circle_filled(drect.center(), 3.2, dot);
+                                            super::brands::mark(
+                                                ui.painter(),
+                                                mrect,
+                                                brand_provider,
+                                            );
                                             ui.label(
-                                                RichText::new(super::agent_chat::provider_name(
-                                                    &kind,
-                                                ))
-                                                .size(SMALL)
-                                                .color(colors().muted),
+                                                RichText::new(title)
+                                                    .size(SMALL)
+                                                    .strong()
+                                                    .color(colors().secondary),
                                             );
                                         });
                                         for (id, display) in
                                             super::agent_chat::curated_cli_models(&kind)
                                         {
-                                            let active = self.hub.agents.chat.model.as_deref()
+                                            let is_selected = self
+                                                .hub
+                                                .agents
+                                                .chat
+                                                .model
+                                                .as_deref()
                                                 == Some(*id);
-                                            let text = if active {
-                                                format!("•  {display}")
+                                            let row_label = if is_selected {
+                                                format!(
+                                                    "•  {display}   {}",
+                                                    tr(&self.hub.agents.chat.effort)
+                                                )
                                             } else {
                                                 format!("   {display}")
                                             };
-                                            if ui
-                                                .button(RichText::new(text).color(if active {
+                                            ui.menu_button(
+                                                RichText::new(row_label).color(if is_selected {
                                                     colors().accent
                                                 } else {
                                                     colors().text
-                                                }))
-                                                .clicked()
-                                            {
-                                                self.hub.agents.chat.model = Some((*id).to_owned());
-                                                ui.close();
-                                            }
+                                                }),
+                                                |ui| {
+                                                    ui.set_min_width(140.0);
+                                                    ui.label(muted(tr("Thinking effort")));
+                                                    for level in
+                                                        ["Low", "Medium", "High", "Extra High"]
+                                                    {
+                                                        let active = is_selected
+                                                            && self.hub.agents.chat.effort == level;
+                                                        let text = if active {
+                                                            format!("•  {}", tr(level))
+                                                        } else {
+                                                            format!("   {}", tr(level))
+                                                        };
+                                                        if ui
+                                                            .button(RichText::new(text).color(
+                                                                if active {
+                                                                    colors().accent
+                                                                } else {
+                                                                    colors().text
+                                                                },
+                                                            ))
+                                                            .clicked()
+                                                        {
+                                                            self.hub.agents.chat.model =
+                                                                Some((*id).to_owned());
+                                                            self.hub.agents.chat.effort =
+                                                                level.to_owned();
+                                                            ui.close();
+                                                        }
+                                                    }
+                                                },
+                                            );
                                         }
-                                        ui.add_space(4.0);
+                                        ui.add_space(6.0);
                                     }
                                     if !accounts.is_empty() {
                                         ui.separator();
@@ -821,6 +862,7 @@ impl Editor {
                     "low" => Some("Low"),
                     "medium" => Some("Medium"),
                     "high" => Some("High"),
+                    "extra" | "extra high" | "extra_high" | "max" => Some("Extra High"),
                     _ => None,
                 };
                 if let Some(level) = normalized {
