@@ -208,25 +208,71 @@ impl Editor {
                     colors().secondary
                 }),
             |ui| {
-                ui.set_min_width(180.0);
+                ui.set_min_width(210.0);
                 if !self.preferences.recent.is_empty() {
                     for root in self.preferences.recent.clone() {
                         let is_active = self.root.as_ref() == Some(&root);
                         let name = workspace::filename(&root);
-                        let text = if is_active {
-                            format!("•  {name}")
-                        } else {
-                            format!("   {name}")
-                        };
-                        if ui
-                            .button(RichText::new(text).color(if is_active {
-                                colors().accent
-                            } else {
+                        let badge_color = project_badge_color(&name);
+                        let initial = name
+                            .chars()
+                            .next()
+                            .unwrap_or('P')
+                            .to_ascii_uppercase()
+                            .to_string();
+                        let (row_rect, resp) = ui.allocate_exact_size(
+                            egui::vec2(ui.available_width().max(190.0), 30.0),
+                            egui::Sense::click(),
+                        );
+                        if resp.hovered() || is_active {
+                            ui.painter().rect_filled(
+                                row_rect,
+                                6,
+                                if is_active {
+                                    colors().elevated
+                                } else {
+                                    colors().hover
+                                },
+                            );
+                        }
+                        let badge = egui::Rect::from_center_size(
+                            row_rect.left_center() + egui::vec2(14.0, 0.0),
+                            egui::vec2(18.0, 18.0),
+                        );
+                        ui.painter()
+                            .rect_filled(badge, 5, badge_color.gamma_multiply(0.24));
+                        ui.painter().rect_stroke(
+                            badge,
+                            5,
+                            egui::Stroke::new(1.0_f32, badge_color.gamma_multiply(0.75)),
+                            egui::StrokeKind::Inside,
+                        );
+                        ui.painter().text(
+                            badge.center(),
+                            egui::Align2::CENTER_CENTER,
+                            initial,
+                            egui::FontId::proportional(11.0),
+                            badge_color,
+                        );
+                        ui.painter().text(
+                            row_rect.left_center() + egui::vec2(30.0, 0.0),
+                            egui::Align2::LEFT_CENTER,
+                            &name,
+                            egui::FontId::proportional(BODY),
+                            if is_active {
                                 colors().text
-                            }))
-                            .on_hover_text(root.display().to_string())
-                            .clicked()
-                        {
+                            } else {
+                                colors().secondary
+                            },
+                        );
+                        if is_active {
+                            ui.painter().circle_filled(
+                                row_rect.right_center() - egui::vec2(10.0, 0.0),
+                                3.0,
+                                badge_color,
+                            );
+                        }
+                        if resp.on_hover_text(root.display().to_string()).clicked() {
                             ui.close();
                             self.request(Pending::OpenWorkspace(root), ui.ctx());
                         }
@@ -413,9 +459,9 @@ impl Editor {
 
     /// Minimalist project home shown once a workspace is open and no file tab is active.
     fn project_session_home(&mut self, ui: &mut Ui, area: egui::Rect) {
-        let width = (area.width() - 72.0).clamp(300.0, 560.0).min(area.width());
+        let width = (area.width() - 64.0).clamp(340.0, 680.0).min(area.width());
         let left = area.center().x - width * 0.5;
-        let top = ((area.height() - 360.0) * 0.36).clamp(36.0, 180.0);
+        let top = ((area.height() - 400.0) * 0.34).clamp(36.0, 170.0);
         let rect = egui::Rect::from_min_size(
             egui::pos2(left, area.top() + top),
             egui::vec2(width, (area.height() - top).max(1.0)),
@@ -473,25 +519,25 @@ impl Editor {
             ui.vertical_centered(|ui| {
                 ui.label(
                     RichText::new(tr("Where should we begin?"))
-                        .size(HEADING + 2.0)
+                        .size(26.0)
                         .strong()
                         .color(colors().text),
                 );
             });
-            ui.add_space(16.0);
+            ui.add_space(20.0);
             // Floating rounded prompt composer.
             egui::Frame::new()
                 .fill(colors().surface.gamma_multiply(0.95))
-                .corner_radius(12)
+                .corner_radius(14)
                 .stroke(egui::Stroke::new(1.0_f32, colors().border))
-                .inner_margin(egui::Margin::symmetric(14, 12))
+                .inner_margin(egui::Margin::symmetric(16, 14))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     let response = ui.add(
                         TextEdit::multiline(&mut self.chat.prompt)
                             .hint_text(tr("Ask anything. @ files, $ skills, / commands"))
                             .frame(false)
-                            .desired_rows(2)
+                            .desired_rows(3)
                             .desired_width(f32::INFINITY)
                             .char_limit(12_000),
                     );
@@ -555,62 +601,89 @@ impl Editor {
                             if ui.add_enabled(can_send, send_btn).clicked() {
                                 send_prompt_now = true;
                             }
-                            // Model + Effort + Account dropdown (subscription CLI models, no API needed).
-                            let active_provider = accounts
-                                .first()
-                                .map(|(_, _, p)| p.clone())
-                                .unwrap_or(covalos_agents::ProviderKind::ClaudeCode);
+                            // Separate Effort selector pill.
+                            let effort_label = tr(&self.hub.agents.chat.effort);
+                            ui.menu_button(
+                                RichText::new(effort_label)
+                                    .size(SMALL)
+                                    .color(colors().secondary),
+                                |ui| {
+                                    ui.label(muted(tr("Effort")));
+                                    for level in ["Low", "Medium", "High"] {
+                                        let active = self.hub.agents.chat.effort == level;
+                                        if ui.selectable_label(active, tr(level)).clicked() {
+                                            self.hub.agents.chat.effort = level.to_owned();
+                                            ui.close();
+                                        }
+                                    }
+                                },
+                            );
+                            // Full Model picker showing all providers (Claude, Codex, Gemini).
                             let model_text = self
                                 .hub
                                 .agents
                                 .chat
                                 .model
                                 .clone()
-                                .or_else(|| accounts.first().map(|(_, label, _)| label.clone()))
-                                .unwrap_or_else(|| tr("+ Add AI").to_owned());
-                            let pill_label = format!(
-                                "{}  {}",
-                                model_text, self.hub.agents.chat.effort
-                            );
+                                .unwrap_or_else(|| tr("Model").to_owned());
                             ui.menu_button(
-                                RichText::new(pill_label)
+                                RichText::new(model_text)
                                     .size(SMALL)
                                     .color(colors().text),
                                 |ui| {
-                                    ui.set_min_width(210.0);
-                                    ui.label(muted(tr("Model")));
-                                    for (id, display) in
-                                        super::agent_chat::curated_cli_models(&active_provider)
-                                    {
-                                        let active = self.hub.agents.chat.model.as_deref()
-                                            == Some(*id);
-                                        let text = if active {
-                                            format!("•  {display}")
-                                        } else {
-                                            format!("   {display}")
-                                        };
-                                        if ui
-                                            .button(RichText::new(text).color(if active {
-                                                colors().accent
-                                            } else {
-                                                colors().text
-                                            }))
-                                            .clicked()
+                                    ui.set_min_width(240.0);
+                                    for (kind, dot) in [
+                                        (
+                                            covalos_agents::ProviderKind::ClaudeCode,
+                                            egui::Color32::from_rgb(217, 119, 87),
+                                        ),
+                                        (
+                                            covalos_agents::ProviderKind::Codex,
+                                            egui::Color32::from_rgb(52, 211, 153),
+                                        ),
+                                        (
+                                            covalos_agents::ProviderKind::Gemini,
+                                            egui::Color32::from_rgb(96, 165, 250),
+                                        ),
+                                    ] {
+                                        ui.horizontal(|ui| {
+                                            let (drect, _) = ui.allocate_exact_size(
+                                                egui::vec2(8.0, 14.0),
+                                                egui::Sense::hover(),
+                                            );
+                                            ui.painter().circle_filled(drect.center(), 3.2, dot);
+                                            ui.label(
+                                                RichText::new(super::agent_chat::provider_name(
+                                                    &kind,
+                                                ))
+                                                .size(SMALL)
+                                                .color(colors().muted),
+                                            );
+                                        });
+                                        for (id, display) in
+                                            super::agent_chat::curated_cli_models(&kind)
                                         {
-                                            self.hub.agents.chat.model = Some((*id).to_owned());
-                                            ui.close();
-                                        }
-                                    }
-                                    ui.separator();
-                                    ui.label(muted(tr("Effort")));
-                                    ui.horizontal(|ui| {
-                                        for level in ["Low", "Medium", "High"] {
-                                            let active = self.hub.agents.chat.effort == level;
-                                            if ui.selectable_label(active, tr(level)).clicked() {
-                                                self.hub.agents.chat.effort = level.to_owned();
+                                            let active = self.hub.agents.chat.model.as_deref()
+                                                == Some(*id);
+                                            let text = if active {
+                                                format!("•  {display}")
+                                            } else {
+                                                format!("   {display}")
+                                            };
+                                            if ui
+                                                .button(RichText::new(text).color(if active {
+                                                    colors().accent
+                                                } else {
+                                                    colors().text
+                                                }))
+                                                .clicked()
+                                            {
+                                                self.hub.agents.chat.model = Some((*id).to_owned());
+                                                ui.close();
                                             }
                                         }
-                                    });
+                                        ui.add_space(4.0);
+                                    }
                                     if !accounts.is_empty() {
                                         ui.separator();
                                         ui.label(muted(tr("Accounts")));
@@ -2318,6 +2391,21 @@ impl SettingsSection {
         };
         keywords.contains(query) || self.label().to_ascii_lowercase().contains(query)
     }
+}
+
+fn project_badge_color(name: &str) -> egui::Color32 {
+    const PALETTE: [egui::Color32; 6] = [
+        egui::Color32::from_rgb(96, 165, 250),  // sky blue
+        egui::Color32::from_rgb(52, 211, 153),  // emerald
+        egui::Color32::from_rgb(251, 191, 36),  // amber
+        egui::Color32::from_rgb(244, 114, 182), // rose
+        egui::Color32::from_rgb(167, 139, 250), // violet
+        egui::Color32::from_rgb(56, 189, 248),  // cyan
+    ];
+    let hash = name
+        .bytes()
+        .fold(0usize, |acc, b| acc.wrapping_mul(31).wrapping_add(b as usize));
+    PALETTE[hash % PALETTE.len()]
 }
 
 fn format_tokens(n: u64) -> String {

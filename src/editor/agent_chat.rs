@@ -167,16 +167,18 @@ enum Action {
 pub(super) fn curated_cli_models(kind: &ProviderKind) -> &'static [(&'static str, &'static str)] {
     match kind {
         ProviderKind::ClaudeCode => &[
-            ("claude-sonnet-4-5", "Claude Sonnet 4.5"),
-            ("claude-opus-4-5", "Claude Opus 4.5"),
-            ("claude-haiku-4-5", "Claude Haiku 4.5"),
+            ("opus", "Claude Opus (Latest)"),
+            ("sonnet", "Claude Sonnet (Latest)"),
+            ("haiku", "Claude Haiku (Latest)"),
         ],
         ProviderKind::Codex => &[
+            ("gpt-5.4", "GPT-5.4"),
             ("gpt-5.3-codex", "GPT-5.3 Codex"),
             ("gpt-5.2-codex", "GPT-5.2 Codex"),
             ("o4-mini", "o4-mini"),
         ],
         ProviderKind::Gemini => &[
+            ("gemini-3-pro-preview", "Gemini 3 Pro"),
             ("gemini-2.5-pro", "Gemini 2.5 Pro"),
             ("gemini-2.5-flash", "Gemini 2.5 Flash"),
         ],
