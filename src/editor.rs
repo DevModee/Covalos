@@ -944,10 +944,16 @@ impl Editor {
             (Some(state), Some(root)) => Some(format!("{state} · {}", workspace::filename(root))),
             (state, _) => state,
         };
+        let (language_asset, language_text) = match language.filter(|_| prefs.show_language) {
+            Some(lang) => (Some(lang.to_ascii_lowercase().replace('#', "sharp").replace("++", "pp")), Some(lang.to_owned())),
+            None => (None, None),
+        };
         let activity = discord::Activity {
             details: "Covalos · In Beta".to_owned(),
             state,
             started: prefs.show_elapsed.then_some(self.session_started),
+            language_asset,
+            language_text,
         };
         self.discord.update(&prefs, activity);
     }

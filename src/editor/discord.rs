@@ -42,6 +42,8 @@ pub(super) struct Activity {
     pub(super) details: String,
     pub(super) state: Option<String>,
     pub(super) started: Option<u64>,
+    pub(super) language_asset: Option<String>,
+    pub(super) language_text: Option<String>,
 }
 
 enum Message {
@@ -162,13 +164,25 @@ fn frame(op: u32, payload: &serde_json::Value) -> Vec<u8> {
     out
 }
 
-pub(super) const BETA_URL: &str = "https://www.matiasgs.com/trabajo/covalos";
+pub(super) const BETA_URL: &str = "https://www.matiasgs.com/work/covalos";
 
 fn activity_payload(activity: Option<&Activity>, nonce: u64) -> serde_json::Value {
     let activity = activity.map(|a| {
+        let assets = match (&a.language_asset, &a.language_text) {
+            (Some(lang_key), Some(lang_text)) => serde_json::json!({
+                "large_image": lang_key,
+                "large_text": lang_text,
+                "small_image": "covalos",
+                "small_text": "Covalos (Beta)",
+            }),
+            _ => serde_json::json!({
+                "large_image": "covalos",
+                "large_text": "Covalos (Beta)",
+            }),
+        };
         let mut value = serde_json::json!({
             "details": a.details,
-            "assets": { "large_image": "covalos", "large_text": "Covalos (Beta)" },
+            "assets": assets,
             "buttons": [
                 { "label": "View Covalos Beta", "url": BETA_URL }
             ],
@@ -276,9 +290,11 @@ mod tests {
     fn frames_and_payloads_follow_the_ipc_format_and_stay_private() {
         let payload = activity_payload(
             Some(&Activity {
-                details: "Developing with Covalos".into(),
+                details: "Covalos · In Beta".into(),
                 state: Some("Editing Rust".into()),
                 started: Some(1_700_000_000),
+                language_asset: Some("rust".into()),
+                language_text: Some("Rust".into()),
             }),
             7,
         );
@@ -297,6 +313,8 @@ mod tests {
             details: "x".into(),
             state: None,
             started: None,
+            language_asset: None,
+            language_text: None,
         };
         presence.update(&DiscordPreferences::default(), activity.clone());
         assert_eq!(presence.status(), "Off");
