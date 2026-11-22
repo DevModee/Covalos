@@ -400,6 +400,19 @@ pub(super) fn panel_frame(margin: Margin) -> Frame {
     Frame::new().fill(colors().canvas).inner_margin(margin)
 }
 
+/// Recessed sidebar frame that sits flush on the outer chrome beside the floating center island.
+pub(super) fn sidebar_frame(margin: Margin) -> Frame {
+    Frame::new()
+        .fill(colors().canvas)
+        .inner_margin(margin)
+        .outer_margin(Margin {
+            left: 0,
+            right: 0,
+            top: ISLAND_GAP,
+            bottom: ISLAND_GAP,
+        })
+}
+
 /// A rounded tool-window surface with a hairline edge.
 pub(super) fn island(margin: Margin) -> Frame {
     Frame::new()

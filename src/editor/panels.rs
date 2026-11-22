@@ -70,6 +70,9 @@ impl Editor {
                 self.open_library();
             }
         }
+        if shortcut(Modifiers::COMMAND, Key::B) {
+            self.toggle_sidebar();
+        }
         if shortcut(Modifiers::COMMAND, Key::Backtick) {
             self.preferences.tools_open = !self.preferences.tools_open;
         }
@@ -118,8 +121,21 @@ impl Editor {
         }
     }
 
+    pub(super) fn toggle_sidebar(&mut self) {
+        if self.root.is_none() {
+            self.sidebar_requested = !self.sidebar_requested;
+            self.sidebar_open = self.sidebar_requested;
+        } else {
+            self.sidebar_open = !self.sidebar_open;
+        }
+    }
+
     pub(super) fn show_workspace_search(&mut self) {
         self.sidebar = Sidebar::Search;
+        self.sidebar_open = true;
+        if self.root.is_none() {
+            self.sidebar_requested = true;
+        }
         self.search_focus = true;
     }
 
@@ -421,30 +437,56 @@ impl Editor {
         SidePanel::left("activity")
             .exact_width(RAIL_WIDTH)
             .resizable(false)
-            .frame(panel_frame(Margin::symmetric(8, 12)))
+            .frame(panel_frame(Margin::symmetric(6, 10)))
             .show(ctx, |ui| {
+                ui.spacing_mut().item_spacing.y = 4.0;
+                // Top cluster: primary workspace navigation and agents.
                 ui.vertical_centered(|ui| {
                     for (tab, icon, label) in [
                         (Sidebar::Files, Icon::Explorer, "Explorer"),
                         (Sidebar::Search, Icon::Search, "Search"),
                         (Sidebar::Git, Icon::Git, "Source control"),
                     ] {
-                        let shown = self.sidebar_visible() && self.sidebar == tab;
+                        let shown =
+                            !self.studio_open && self.sidebar_visible() && self.sidebar == tab;
                         if icon_button(ui, icon, label, shown).clicked() {
-                            if self.root.is_none() {
-                                // No project: the rail toggles the panel on demand.
-                                self.sidebar_requested = !shown;
-                            }
-                            self.sidebar = tab;
-                            if tab == Sidebar::Search {
-                                self.search_focus = true;
-                            }
-                            if tab == Sidebar::Git {
-                                self.git_refresh(ctx, None);
+                            self.studio_open = false;
+                            if shown {
+                                self.toggle_sidebar();
+                            } else {
+                                self.sidebar = tab;
+                                self.sidebar_open = true;
+                                if self.root.is_none() {
+                                    self.sidebar_requested = true;
+                                }
+                                if tab == Sidebar::Search {
+                                    self.search_focus = true;
+                                }
+                                if tab == Sidebar::Git {
+                                    self.git_refresh(ctx, None);
+                                }
                             }
                         }
                     }
-                    ui.separator();
+                    if icon_button(
+                        ui,
+                        Icon::Hub,
+                        "Agents",
+                        self.hub_open || self.preferences.assistant_open,
+                    )
+                    .clicked()
+                    {
+                        self.hub_open = false;
+                        self.studio_open = false;
+                        self.preferences.assistant_open = !self.preferences.assistant_open;
+                    }
+                });
+                // Bottom cluster: terminal, library studio, and settings.
+                ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.y = 4.0;
+                    if icon_button(ui, Icon::Settings, "Settings", self.settings_open).clicked() {
+                        self.settings_open = !self.settings_open;
+                    }
                     if icon_button(ui, Icon::Library, "Library Studio", self.studio_open).clicked()
                     {
                         if self.studio_open {
@@ -453,8 +495,10 @@ impl Editor {
                             self.open_library();
                         }
                     }
-                    if icon_button(ui, Icon::Settings, "Settings", self.settings_open).clicked() {
-                        self.settings_open = !self.settings_open;
+                    if icon_button(ui, Icon::Terminal, "Terminal", self.preferences.tools_open)
+                        .clicked()
+                    {
+                        self.preferences.tools_open = !self.preferences.tools_open;
                     }
                 });
             });
@@ -508,7 +552,7 @@ impl Editor {
     }
 
     pub(super) fn sidebar_visible(&self) -> bool {
-        self.root.is_some() || self.sidebar_requested
+        self.sidebar_open && (self.root.is_some() || self.sidebar_requested)
     }
 
     pub(super) fn sidebar(&mut self, ctx: &Context) {
@@ -522,83 +566,132 @@ impl Editor {
         };
         let max = (ctx.content_rect().width() - RAIL_WIDTH - MIN_EDITOR_WIDTH - assistant)
             .clamp(180.0, 480.0);
-        let min = (150.0 * zoom).min(max);
+        let min = (160.0 * zoom).min(max);
+        let mut collapse_sidebar = false;
         let panel = SidePanel::left("workspace")
             .default_width(self.preferences.sidebar_width.clamp(min, max))
             .width_range(min..=max)
-            .frame(island(Margin::same(PANEL_PADDING)))
+            .show_separator_line(false)
+            .frame(sidebar_frame(Margin::symmetric(PANEL_PADDING, 8)))
             .show(ctx, |ui| {
                 self.luma_dock(ui);
+                let mut selected = None;
+                // Integrated compact header: collapse toggle, workspace pill, and view actions.
                 ui.horizontal(|ui| {
-                    let label = match self.sidebar {
-                        Sidebar::Files => "Explorer",
-                        Sidebar::Search => "Search",
-                        Sidebar::Git => "Git",
-                    };
-                    ui.allocate_ui_with_layout(
-                        egui::vec2((ui.available_width() - 40.0).max(40.0), 28.0),
-                        Layout::left_to_right(Align::Center),
-                        |ui| {
-                            ui.set_min_width(ui.available_width());
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(tr(label)).strong().color(colors().secondary),
-                                )
-                                .truncate(),
-                            );
-                        },
-                    );
-                    if self.sidebar == Sidebar::Files && self.root.is_some() {
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if icon_button(ui, Icon::Add, "New file", false).clicked() {
-                                self.show_new_file();
-                            }
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    if icon_button(ui, Icon::PanelLeft, "Toggle sidebar", false).clicked() {
+                        collapse_sidebar = true;
+                    }
+                    if let Some(root) = self.root.clone() {
+                        let actions_w = if self.sidebar == Sidebar::Files {
+                            68.0
+                        } else {
+                            0.0
+                        };
+                        let title_w = (ui.available_width() - actions_w).max(40.0);
+                        let root_label = ui
+                            .allocate_ui_with_layout(
+                                egui::vec2(title_w, 28.0),
+                                Layout::left_to_right(Align::Center),
+                                |ui| {
+                                    ui.set_min_width(ui.available_width());
+                                    let (_, icon_rect) =
+                                        ui.allocate_space(egui::vec2(16.0, 18.0));
+                                    draw_icon_sized(
+                                        ui.painter(),
+                                        icon_rect.center(),
+                                        Icon::Folder,
+                                        colors().muted,
+                                        14.0,
+                                    );
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(workspace::filename(&root))
+                                                .strong()
+                                                .color(colors().text),
+                                        )
+                                        .truncate(),
+                                    )
+                                },
+                            )
+                            .inner
+                            .on_hover_text(root.display().to_string());
+                        root_label.context_menu(|ui| {
+                            selected = super::files::tree_menu(ui, &root, &root, true);
                         });
+                        if self.sidebar == Sidebar::Files {
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                ui.spacing_mut().item_spacing.x = 2.0;
+                                if icon_button(ui, Icon::Refresh, "Refresh files", false).clicked()
+                                {
+                                    self.directories.clear();
+                                }
+                                if icon_button(ui, Icon::FilePlus, "New file", false).clicked() {
+                                    self.show_new_file();
+                                }
+                            });
+                        }
+                    } else {
+                        let label = match self.sidebar {
+                            Sidebar::Files => "Explorer",
+                            Sidebar::Search => "Search",
+                            Sidebar::Git => "Git",
+                        };
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(tr(label)).strong().color(colors().secondary),
+                            )
+                            .truncate(),
+                        );
                     }
                 });
-                ui.add_space(12.0);
+                ui.add_space(6.0);
                 let Some(root) = self.root.clone() else {
                     ui.label(muted(tr("Open a folder to browse files.")));
                     return;
                 };
                 match self.sidebar {
                     Sidebar::Files => {
-                        let mut selected = None;
+                        // Compact live filter for quickly narrowing visible files in the tree.
                         ui.horizontal(|ui| {
-                            let root_label = ui
-                                .allocate_ui_with_layout(
-                                    egui::vec2((ui.available_width() - 40.0).max(40.0), 28.0),
-                                    Layout::left_to_right(Align::Center),
-                                    |ui| {
-                                        ui.set_min_width(ui.available_width());
-                                        ui.add(
-                                            egui::Label::new(
-                                                RichText::new(workspace::filename(&root)).strong(),
-                                            )
-                                            .truncate(),
-                                        )
-                                    },
-                                )
-                                .inner
-                                .on_hover_text(root.display().to_string());
-                            root_label.context_menu(|ui| {
-                                selected = super::files::tree_menu(ui, &root, &root, true);
-                            });
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if icon_button(ui, Icon::Refresh, "Refresh files", false).clicked()
-                                {
-                                    self.directories.clear();
-                                }
-                            });
+                            let clear_w = if self.explorer_filter.is_empty() {
+                                0.0
+                            } else {
+                                24.0
+                            };
+                            ui.add(
+                                TextEdit::singleline(&mut self.explorer_filter)
+                                    .hint_text(tr("Filter files…"))
+                                    .margin(Margin::symmetric(8, 4))
+                                    .desired_width((ui.available_width() - clear_w).max(60.0))
+                                    .char_limit(120),
+                            );
+                            if !self.explorer_filter.is_empty()
+                                && ui
+                                    .small_button("×")
+                                    .on_hover_text(tr("Clear filter"))
+                                    .clicked()
+                            {
+                                self.explorer_filter.clear();
+                            }
                         });
-                        ui.add_space(4.0);
+                        ui.add_space(6.0);
+                        let filter = self.explorer_filter.trim().to_ascii_lowercase();
                         let active = self
                             .active
                             .map(|index| self.documents[index].path.as_path());
                         let from_tree = ScrollArea::vertical()
                             .id_salt("files")
                             .show(ui, |ui| {
-                                tree(ui, &root, &root, active, &mut self.directories, 0)
+                                tree(
+                                    ui,
+                                    &root,
+                                    &root,
+                                    active,
+                                    &filter,
+                                    &mut self.directories,
+                                    0,
+                                )
                             })
                             .inner;
                         if let Some(action) = selected.or(from_tree) {
@@ -609,13 +702,11 @@ impl Editor {
                     Sidebar::Git => self.git_panel(ui),
                 }
             });
+        if collapse_sidebar {
+            self.toggle_sidebar();
+        }
         self.preferences.sidebar_width = panel.response.rect.width();
         self.explorer_rect = Some(panel.response.rect);
-        ctx.layer_painter(egui::LayerId::background()).vline(
-            panel.response.rect.right(),
-            panel.response.rect.y_range(),
-            egui::Stroke::new(1.0_f32, colors().border),
-        );
     }
 
     fn search_panel(&mut self, ui: &mut Ui, root: &Path) {
@@ -1463,8 +1554,8 @@ fn matching_bracket(text: &str, cursor: usize) -> Option<(usize, usize)> {
     None
 }
 
-const TREE_INDENT: f32 = 14.0;
-const TREE_ROW: f32 = 26.0;
+const TREE_INDENT: f32 = 13.0;
+const TREE_ROW: f32 = 24.0;
 
 thread_local! {
     static EXPLORER_ZOOM: std::cell::Cell<f32> = const { std::cell::Cell::new(1.0) };
@@ -1606,6 +1697,7 @@ fn tree(
     root: &Path,
     path: &Path,
     active: Option<&Path>,
+    filter: &str,
     directories: &mut std::collections::HashMap<std::path::PathBuf, super::DirectoryLoad>,
     depth: usize,
 ) -> Option<super::files::TreeAction> {
@@ -1654,6 +1746,7 @@ fn tree(
         Ok(entries) => {
             for entry in entries {
                 let name = workspace::filename(&entry.path);
+                let matches = filter.is_empty() || name.to_ascii_lowercase().contains(filter);
                 if entry.directory {
                     let id = ui.make_persistent_id(("tree", &entry.path));
                     let mut state =
@@ -1690,13 +1783,25 @@ fn tree(
                         }
                     });
                     state.store(ui.ctx());
+                    let child_filter = if matches { "" } else { filter };
                     if let Some(inner) = state.show_body_unindented(ui, |ui| {
-                        tree(ui, root, &entry.path, active, directories, depth + 1)
+                        tree(
+                            ui,
+                            root,
+                            &entry.path,
+                            active,
+                            child_filter,
+                            directories,
+                            depth + 1,
+                        )
                     }) && let Some(action) = inner.inner
                     {
                         selected = Some(action);
                     }
                 } else {
+                    if !matches {
+                        continue;
+                    }
                     let response = tree_row(
                         ui,
                         depth,

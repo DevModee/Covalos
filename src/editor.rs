@@ -139,6 +139,10 @@ pub struct Editor {
     studio_open: bool,
     /// Side panel opened from the activity bar while no project is open.
     sidebar_requested: bool,
+    /// User toggle for collapsing or expanding the sidebar (Ctrl+B).
+    sidebar_open: bool,
+    /// Live filename filter for the Explorer tree.
+    explorer_filter: String,
     discord: discord::Presence,
     session_started: u64,
     explorer_rect: Option<egui::Rect>,
@@ -229,6 +233,8 @@ impl Editor {
             studio: studio::Studio::default(),
             studio_open: false,
             sidebar_requested: false,
+            sidebar_open: true,
+            explorer_filter: String::new(),
             discord: discord::Presence::default(),
             session_started: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
