@@ -336,6 +336,7 @@ const SPANISH: &[(&str, &str)] = &[
     ("Toggle sidebar", "Mostrar u ocultar barra lateral"),
     ("Filter files…", "Filtrar archivos…"),
     ("Clear filter", "Limpiar filtro"),
+    ("Focus mode", "Modo enfoque"),
     ("Interface scale", "Escala de la interfaz"),
     ("Reset editor zoom", "Restablecer zoom del editor"),
     ("Reset Explorer zoom", "Restablecer zoom del Explorador"),

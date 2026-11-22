@@ -838,38 +838,88 @@ impl Editor {
         }
         let Some(index) = self.active else { return };
         let mut detach_active = false;
+        let mut open_find = false;
+        let mut toggle_terminal = false;
         let doc = &self.documents[index];
         let breadcrumb = self
             .root
             .as_ref()
             .and_then(|root| doc.path.strip_prefix(root).ok())
             .unwrap_or(&doc.path);
-        let path_label = breadcrumb
+        let parts: Vec<String> = breadcrumb
             .components()
-            .map(|part| part.as_os_str().to_string_lossy())
-            .collect::<Vec<_>>()
-            .join("  ›  ");
+            .map(|part| part.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        let (parents, file_name) = match parts.split_last() {
+            Some((last, rest)) => (rest.join("  ›  "), last.as_str()),
+            None => (String::new(), ""),
+        };
+        let doc_path = doc.path.clone();
         egui::Frame::new()
-            .inner_margin(Margin::symmetric(16, 0))
+            .inner_margin(Margin::symmetric(12, 0))
             .show(ui, |ui| {
                 ui.allocate_ui_with_layout(
                     egui::vec2(ui.available_width(), BREADCRUMB_HEIGHT),
                     Layout::left_to_right(Align::Center),
                     |ui| {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.spacing_mut().item_spacing.x = 2.0;
                             if icon_button(ui, Icon::Detach, "Detach to floating editor", false)
                                 .clicked()
                             {
                                 detach_active = true;
                             }
+                            if icon_button(
+                                ui,
+                                Icon::PanelBottom,
+                                "Toggle terminal",
+                                self.preferences.tools_open,
+                            )
+                            .clicked()
+                            {
+                                toggle_terminal = true;
+                            }
+                            if icon_button(ui, Icon::Search, "Find in active file", self.find_open)
+                                .clicked()
+                            {
+                                open_find = true;
+                            }
                             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                                ui.add(egui::Label::new(muted(&path_label)).truncate())
-                                    .on_hover_text(doc.path.display().to_string());
+                                ui.spacing_mut().item_spacing.x = 4.0;
+                                let (_, icon_rect) = ui.allocate_space(egui::vec2(14.0, 16.0));
+                                super::assets::file(ui, icon_rect.center(), &doc_path);
+                                if !parents.is_empty() {
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(format!("{parents}  ›"))
+                                                .size(SMALL)
+                                                .color(colors().muted),
+                                        )
+                                        .truncate(),
+                                    )
+                                    .on_hover_text(doc_path.display().to_string());
+                                }
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(file_name)
+                                            .size(SMALL)
+                                            .color(colors().text)
+                                            .strong(),
+                                    )
+                                    .truncate(),
+                                )
+                                .on_hover_text(doc_path.display().to_string());
                             });
                         });
                     },
                 );
             });
+        if open_find {
+            self.show_find();
+        }
+        if toggle_terminal {
+            self.preferences.tools_open = !self.preferences.tools_open;
+        }
         if detach_active {
             self.detach(index);
             return;
@@ -1079,6 +1129,11 @@ impl Editor {
                         }
                     }
                     ui.painter().set(decorations, egui::Shape::Vec(shapes));
+                    ui.painter().vline(
+                        gutter.right() + 2.0,
+                        clip.y_range(),
+                        egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.5)),
+                    );
                     for (index, row) in rows.iter().enumerate().take(last).skip(first) {
                         ui.painter().text(
                             egui::pos2(gutter.right() - 5.0, origin.y + row.pos.y),
@@ -1100,179 +1155,225 @@ impl Editor {
         let mut active = None;
         let mut close = None;
         let mut detach = None;
+        let mut new_file = false;
+        let mut toggle_focus = false;
         let bar = egui::Frame::new()
             .inner_margin(Margin {
-                left: 6,
-                right: 6,
+                left: 8,
+                right: 8,
                 top: 5,
                 bottom: 0,
             })
             .show(ui, |ui| {
-                ScrollArea::horizontal()
-                    .id_salt("tabs")
-                    .auto_shrink([false, true])
-                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-                    .show(ui, |ui| {
+                let actions_w = if self.root.is_some() { 68.0 } else { 36.0 };
+                ui.horizontal(|ui| {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(
+                            (ui.available_width() - actions_w).max(80.0),
+                            TAB_HEIGHT - 6.0,
+                        ),
+                        Layout::left_to_right(Align::Center),
+                        |ui| {
+                            ScrollArea::horizontal()
+                                .id_salt("tabs")
+                                .auto_shrink([false, true])
+                                .scroll_bar_visibility(
+                                    egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
+                                )
+                                .show(ui, |ui| {
+                                    ui.spacing_mut().item_spacing.x = 3.0;
+                                    ui.horizontal(|ui| {
+                                        let mut indicator = None;
+                                        let tab_height = TAB_HEIGHT - 8.0;
+                                        // Reserved before the tabs so the pill paints underneath them.
+                                        let pill_slot = ui.painter().add(egui::Shape::Noop);
+                                        for (index, document) in self.documents.iter().enumerate() {
+                                            if self.clean.is_floating(&document.path) {
+                                                continue;
+                                            }
+                                            let selected = self.active == Some(index);
+                                            let name = workspace::filename(&document.path);
+                                            let label_width = ui.fonts_mut(|fonts| {
+                                                fonts
+                                                    .layout_no_wrap(
+                                                        name.clone(),
+                                                        egui::FontId::proportional(BODY),
+                                                        colors().text,
+                                                    )
+                                                    .size()
+                                                    .x
+                                            });
+                                            let width = (label_width + 62.0).clamp(96.0, 232.0);
+                                            let response = ui.add_sized(
+                                                [width, tab_height],
+                                                egui::Button::new("").frame(false),
+                                            );
+                                            #[cfg(test)]
+                                            super::motion::record(
+                                                ui,
+                                                format!("Tab {}", name),
+                                                response.rect,
+                                            );
+                                            let painter = ui.painter_at(response.rect.expand(2.0));
+                                            let hover = super::motion::spring(
+                                                ui.ctx(),
+                                                response.id.with("hover"),
+                                                if response.hovered() && !selected {
+                                                    1.0
+                                                } else {
+                                                    0.0
+                                                },
+                                                super::motion::Spring::SNAPPY,
+                                            );
+                                            if hover > 0.01 {
+                                                painter.rect_filled(
+                                                    response.rect,
+                                                    7,
+                                                    colors().hover.gamma_multiply(hover * 0.8),
+                                                );
+                                            }
+                                            if selected {
+                                                indicator = Some(response.rect);
+                                            }
+                                            super::assets::file(
+                                                ui,
+                                                response.rect.left_center()
+                                                    + egui::vec2(16.0, 0.0),
+                                                &document.path,
+                                            );
+                                            let text_rect = egui::Rect::from_min_max(
+                                                response.rect.left_top() + egui::vec2(30.0, 0.0),
+                                                response.rect.right_bottom()
+                                                    - egui::vec2(26.0, 0.0),
+                                            );
+                                            painter.with_clip_rect(text_rect).text(
+                                                text_rect.left_center(),
+                                                egui::Align2::LEFT_CENTER,
+                                                &name,
+                                                egui::FontId::proportional(BODY),
+                                                if selected {
+                                                    colors().text
+                                                } else {
+                                                    colors().secondary
+                                                },
+                                            );
+                                            let close_rect = egui::Rect::from_center_size(
+                                                response.rect.right_center()
+                                                    - egui::vec2(14.0, 0.0),
+                                                egui::vec2(20.0, 20.0),
+                                            );
+                                            let close_response = ui.interact(
+                                                close_rect,
+                                                Id::new(("tab-close", &document.path)),
+                                                egui::Sense::click(),
+                                            );
+                                            if close_response.hovered() {
+                                                painter.rect_filled(close_rect, 5, colors().hover);
+                                                draw_icon_sized(
+                                                    &painter,
+                                                    close_rect.center(),
+                                                    Icon::Close,
+                                                    colors().text,
+                                                    14.0,
+                                                );
+                                            } else if document.dirty {
+                                                painter.circle_filled(
+                                                    close_rect.center(),
+                                                    3.5,
+                                                    colors().accent,
+                                                );
+                                            } else if selected || response.hovered() {
+                                                draw_icon_sized(
+                                                    &painter,
+                                                    close_rect.center(),
+                                                    Icon::Close,
+                                                    colors().muted,
+                                                    14.0,
+                                                );
+                                            }
+                                            response.widget_info(|| {
+                                                egui::WidgetInfo::labeled(
+                                                    egui::WidgetType::SelectableLabel,
+                                                    true,
+                                                    &name,
+                                                )
+                                            });
+                                            if close_response.clicked() {
+                                                close = Some(index);
+                                            } else if response.clicked() {
+                                                active = Some(index);
+                                            }
+                                            if response.middle_clicked() {
+                                                close = Some(index);
+                                            }
+                                            response.context_menu(|ui| {
+                                                if ui
+                                                    .button(tr("Detach to floating editor"))
+                                                    .clicked()
+                                                {
+                                                    detach = Some(index);
+                                                    ui.close();
+                                                }
+                                                if ui.button(tr("Close tab")).clicked() {
+                                                    close = Some(index);
+                                                    ui.close();
+                                                }
+                                            });
+                                            response.on_hover_text(
+                                                document.path.display().to_string(),
+                                            );
+                                            close_response.on_hover_text(tr("Close tab"));
+                                        }
+                                        if let Some(rect) = indicator {
+                                            // The selected pill and its accent rule travel between tabs
+                                            // on a damped spring instead of jumping.
+                                            let pill = super::motion::spring_rect(
+                                                ui.ctx(),
+                                                Id::new("active-tab-pill"),
+                                                rect,
+                                                super::motion::Spring::SMOOTH,
+                                            );
+                                            ui.painter().set(
+                                                pill_slot,
+                                                egui::Shape::Vec(vec![
+                                                    egui::Shape::rect_filled(
+                                                        pill,
+                                                        7,
+                                                        colors().elevated,
+                                                    ),
+                                                    egui::Shape::rect_stroke(
+                                                        pill,
+                                                        7,
+                                                        egui::Stroke::new(
+                                                            1.0_f32,
+                                                            colors().border,
+                                                        ),
+                                                        egui::StrokeKind::Inside,
+                                                    ),
+                                                ]),
+                                            );
+                                            ui.painter().hline(
+                                                (pill.left() + 10.0)..=(pill.right() - 10.0),
+                                                pill.bottom() + 3.0,
+                                                egui::Stroke::new(2.0_f32, colors().accent),
+                                            );
+                                        }
+                                    });
+                                });
+                        },
+                    );
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 2.0;
-                        ui.horizontal(|ui| {
-                            let mut indicator = None;
-                            let tab_height = TAB_HEIGHT - 8.0;
-                            // Reserved before the tabs so the pill paints underneath them.
-                            let pill_slot = ui.painter().add(egui::Shape::Noop);
-                            for (index, document) in self.documents.iter().enumerate() {
-                                if self.clean.is_floating(&document.path) {
-                                    continue;
-                                }
-                                let selected = self.active == Some(index);
-                                let name = workspace::filename(&document.path);
-                                let label_width = ui.fonts_mut(|fonts| {
-                                    fonts
-                                        .layout_no_wrap(
-                                            name.clone(),
-                                            egui::FontId::proportional(BODY),
-                                            colors().text,
-                                        )
-                                        .size()
-                                        .x
-                                });
-                                let width = (label_width + 62.0).clamp(96.0, 232.0);
-                                let response = ui.add_sized(
-                                    [width, tab_height],
-                                    egui::Button::new("").frame(false),
-                                );
-                                #[cfg(test)]
-                                super::motion::record(ui, format!("Tab {}", name), response.rect);
-                                let painter = ui.painter_at(response.rect.expand(2.0));
-                                let hover = super::motion::spring(
-                                    ui.ctx(),
-                                    response.id.with("hover"),
-                                    if response.hovered() && !selected {
-                                        1.0
-                                    } else {
-                                        0.0
-                                    },
-                                    super::motion::Spring::SNAPPY,
-                                );
-                                if hover > 0.01 {
-                                    painter.rect_filled(
-                                        response.rect,
-                                        7,
-                                        colors().hover.gamma_multiply(hover * 0.8),
-                                    );
-                                }
-                                if selected {
-                                    indicator = Some(response.rect);
-                                }
-                                super::assets::file(
-                                    ui,
-                                    response.rect.left_center() + egui::vec2(16.0, 0.0),
-                                    &document.path,
-                                );
-                                let text_rect = egui::Rect::from_min_max(
-                                    response.rect.left_top() + egui::vec2(30.0, 0.0),
-                                    response.rect.right_bottom() - egui::vec2(26.0, 0.0),
-                                );
-                                painter.with_clip_rect(text_rect).text(
-                                    text_rect.left_center(),
-                                    egui::Align2::LEFT_CENTER,
-                                    &name,
-                                    egui::FontId::proportional(BODY),
-                                    if selected {
-                                        colors().text
-                                    } else {
-                                        colors().secondary
-                                    },
-                                );
-                                let close_rect = egui::Rect::from_center_size(
-                                    response.rect.right_center() - egui::vec2(14.0, 0.0),
-                                    egui::vec2(20.0, 20.0),
-                                );
-                                let close_response = ui.interact(
-                                    close_rect,
-                                    Id::new(("tab-close", &document.path)),
-                                    egui::Sense::click(),
-                                );
-                                if close_response.hovered() {
-                                    painter.rect_filled(close_rect, 5, colors().hover);
-                                    draw_icon_sized(
-                                        &painter,
-                                        close_rect.center(),
-                                        Icon::Close,
-                                        colors().text,
-                                        14.0,
-                                    );
-                                } else if document.dirty {
-                                    painter.circle_filled(
-                                        close_rect.center(),
-                                        3.5,
-                                        colors().accent,
-                                    );
-                                } else if selected || response.hovered() {
-                                    draw_icon_sized(
-                                        &painter,
-                                        close_rect.center(),
-                                        Icon::Close,
-                                        colors().muted,
-                                        14.0,
-                                    );
-                                }
-                                response.widget_info(|| {
-                                    egui::WidgetInfo::labeled(
-                                        egui::WidgetType::SelectableLabel,
-                                        true,
-                                        &name,
-                                    )
-                                });
-                                if close_response.clicked() {
-                                    close = Some(index);
-                                } else if response.clicked() {
-                                    active = Some(index);
-                                }
-                                if response.middle_clicked() {
-                                    close = Some(index);
-                                }
-                                response.context_menu(|ui| {
-                                    if ui.button(tr("Detach to floating editor")).clicked() {
-                                        detach = Some(index);
-                                        ui.close();
-                                    }
-                                    if ui.button(tr("Close tab")).clicked() {
-                                        close = Some(index);
-                                        ui.close();
-                                    }
-                                });
-                                response.on_hover_text(document.path.display().to_string());
-                                close_response.on_hover_text(tr("Close tab"));
-                            }
-                            if let Some(rect) = indicator {
-                                // The selected pill and its accent rule travel between tabs
-                                // on a damped spring instead of jumping.
-                                let pill = super::motion::spring_rect(
-                                    ui.ctx(),
-                                    Id::new("active-tab-pill"),
-                                    rect,
-                                    super::motion::Spring::SMOOTH,
-                                );
-                                ui.painter().set(
-                                    pill_slot,
-                                    egui::Shape::Vec(vec![
-                                        egui::Shape::rect_filled(pill, 7, colors().elevated),
-                                        egui::Shape::rect_stroke(
-                                            pill,
-                                            7,
-                                            egui::Stroke::new(1.0_f32, colors().border),
-                                            egui::StrokeKind::Inside,
-                                        ),
-                                    ]),
-                                );
-                                ui.painter().hline(
-                                    (pill.left() + 10.0)..=(pill.right() - 10.0),
-                                    pill.bottom() + 3.0,
-                                    egui::Stroke::new(2.0_f32, colors().accent),
-                                );
-                            }
-                        });
+                        if icon_button(ui, Icon::Focus, "Focus mode", self.clean.focus).clicked() {
+                            toggle_focus = true;
+                        }
+                        if self.root.is_some()
+                            && icon_button(ui, Icon::Add, "New file", false).clicked()
+                        {
+                            new_file = true;
+                        }
                     });
+                });
             });
         ui.painter().hline(
             bar.response.rect.x_range(),
@@ -1280,6 +1381,12 @@ impl Editor {
             egui::Stroke::new(1.0_f32, colors().border),
         );
         ui.add_space(4.0);
+        if toggle_focus {
+            self.clean.focus = !self.clean.focus;
+        }
+        if new_file {
+            self.show_new_file();
+        }
         if let Some(index) = detach {
             self.detach(index);
         }
