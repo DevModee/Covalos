@@ -581,6 +581,32 @@ impl Editor {
                         {
                             auto_skill = !auto_skill;
                         }
+                        let guided_armed = self.guided.armed;
+                        let guided_pill = egui::Button::new(
+                            RichText::new(tr("Guided Mode"))
+                                .size(SMALL)
+                                .color(if guided_armed {
+                                    colors().accent
+                                } else {
+                                    colors().muted
+                                }),
+                        )
+                        .fill(if guided_armed {
+                            colors().accent_bg
+                        } else {
+                            egui::Color32::TRANSPARENT
+                        })
+                        .stroke(egui::Stroke::new(1.0_f32, colors().border))
+                        .corner_radius(8);
+                        if ui
+                            .add(guided_pill)
+                            .on_hover_text(tr(
+                                "Ask the AI for a step-by-step lyric code-along with dependency-safe file order.",
+                            ))
+                            .clicked()
+                        {
+                            self.guided.armed = !self.guided.armed;
+                        }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let can_send = !self.chat.prompt.trim().is_empty();
                             let send_btn = egui::Button::new(
@@ -929,7 +955,15 @@ impl Editor {
                 self.skills
                     .auto_select_for_prompt(&self.preferences.skills, &trimmed);
             }
-            if self.start_chat_from_home(ui.ctx(), &trimmed) {
+            let outgoing = if self.guided.armed {
+                super::guided::build_guided_prompt(&trimmed, self.preferences.guided.flow_order)
+            } else {
+                trimmed
+            };
+            if let Some(session_id) = self.start_chat_from_home(ui.ctx(), &outgoing) {
+                if self.guided.armed {
+                    self.guided.watching_session = Some(session_id);
+                }
                 self.chat.prompt.clear();
             }
         }
@@ -1798,6 +1832,47 @@ impl Editor {
                                             "Ctrl + wheel or Ctrl +/− zooms the panel under the pointer; Ctrl+0 resets it.",
                                         ))
                                         .wrap(),
+                                    );
+                                    ui.add_space(12.0);
+                                    ui.separator();
+                                    ui.add_space(8.0);
+                                    ui.label(
+                                        RichText::new(tr("Guided Mode"))
+                                            .size(LEAD)
+                                            .strong()
+                                            .color(colors().text),
+                                    );
+                                    ui.add_space(4.0);
+                                    ui.horizontal(|ui| {
+                                        ui.label(secondary(tr("Step order")));
+                                        ui.selectable_value(
+                                            &mut self.preferences.guided.flow_order,
+                                            super::guided::FlowOrder::Natural,
+                                            tr("Natural (Just-in-Time)"),
+                                        );
+                                        ui.selectable_value(
+                                            &mut self.preferences.guided.flow_order,
+                                            super::guided::FlowOrder::BottomUp,
+                                            tr("Dependencies first"),
+                                        );
+                                    });
+                                    ui.horizontal(|ui| {
+                                        ui.label(secondary(tr("Line matching")));
+                                        ui.selectable_value(
+                                            &mut self.preferences.guided.match_mode,
+                                            super::guided::MatchMode::Flexible,
+                                            tr("Flexible"),
+                                        );
+                                        ui.selectable_value(
+                                            &mut self.preferences.guided.match_mode,
+                                            super::guided::MatchMode::Strict,
+                                            tr("Strict"),
+                                        );
+                                    });
+                                    checkbox(
+                                        ui,
+                                        &mut self.preferences.guided.show_why,
+                                        tr("Show step explanations"),
                                     );
                                 }
                                 SettingsSection::Notifications => {

@@ -159,6 +159,7 @@ enum Action {
     Select(Slot, Option<String>),
     Detach(String),
     Open(PathBuf),
+    OpenGuided(String),
     Objective(String),
     OpenOrchestrator,
     AddAi,
@@ -465,18 +466,18 @@ impl Editor {
 
     /// Start a real Agent Hub conversation from the Session Home composer and
     /// immediately select it in the right-hand dock so the user sees the reply.
-    pub(super) fn start_chat_from_home(&mut self, ctx: &egui::Context, text: &str) -> bool {
+    pub(super) fn start_chat_from_home(&mut self, ctx: &egui::Context, text: &str) -> Option<String> {
         let trimmed = text.trim();
         if trimmed.is_empty() {
-            return false;
+            return None;
         }
         if !self.ensure_runtime(ctx) {
             self.notice = Some((true, tr("Agents are unavailable.").to_owned()));
-            return false;
+            return None;
         }
         let Some(root) = self.root.clone() else {
             self.notice = Some((true, tr("Open a project folder").to_owned()));
-            return false;
+            return None;
         };
         let active = self.active_file();
         let (runtime, chat) = self.hub.agents.runtime_and_chat();
@@ -485,13 +486,13 @@ impl Editor {
             self.start_objective(&goal);
             self.preferences.assistant_open = true;
             self.hub_open = false;
-            return true;
+            return None;
         }
         let accounts = chat_accounts(runtime);
         if accounts.is_empty() {
             chat.add_ai = Some(AddAi::default());
             self.notice = Some((true, tr("Connect an AI to start").to_owned()));
-            return false;
+            return None;
         }
         let chosen = match &chat.target {
             Target::Account(id) => accounts.iter().find(|a| &a.id == id),
@@ -540,16 +541,16 @@ impl Editor {
                     runtime.notice = Some((false, e));
                 }
                 let id = runtime.sessions[index].meta.id.as_str().to_owned();
-                chat.dock = Some(id);
+                chat.dock = Some(id.clone());
                 self.preferences.assistant_open = true;
                 self.hub_open = false;
                 self.remember_chat_layout();
-                true
+                Some(id)
             }
             Err(e) => {
                 runtime.notice = Some((false, e.clone()));
                 self.notice = Some((true, e));
-                false
+                None
             }
         }
     }
@@ -608,6 +609,16 @@ impl Editor {
                     }
                 }
                 Action::Open(path) => self.open_file(path),
+                Action::OpenGuided(reply_text) => {
+                    let flow = self.preferences.guided.flow_order;
+                    if let Some(plan) = super::guided::extract_plan_from_text(&reply_text, flow) {
+                        let first = plan.steps.first().map(|s| s.path.clone());
+                        self.guided.load_plan(plan, self.root.as_deref());
+                        if let Some(path) = first {
+                            self.open_guided_file(&path);
+                        }
+                    }
+                }
                 Action::Objective(goal) => self.start_objective(&goal),
                 Action::OpenOrchestrator => {
                     self.hub_open = true;
@@ -817,7 +828,7 @@ fn session_body(
         .stick_to_bottom(true)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            timeline(ui, &runtime.sessions[index]);
+            timeline(ui, &runtime.sessions[index], actions);
             changes_block(ui, chat, &runtime.sessions[index], actions);
             technical_log(ui, &runtime.sessions[index], &audit);
         });
@@ -894,7 +905,7 @@ fn with_file(text: &str, file: Option<&str>) -> String {
 }
 
 /// Messages and a compact activity trail; raw events live in the technical log.
-fn timeline(ui: &mut Ui, session: &LiveSession) {
+fn timeline(ui: &mut Ui, session: &LiveSession, actions: &mut Vec<Action>) {
     let meta = &session.meta;
     let mut tools: Vec<&str> = Vec::new();
     let flush = |ui: &mut Ui, tools: &mut Vec<&str>| {
@@ -932,7 +943,25 @@ fn timeline(ui: &mut Ui, session: &LiveSession) {
         flush(ui, &mut tools);
         match line.kind.as_str() {
             "you" => user_message(ui, &line.text),
-            "agent" => agent_message(ui, provider_name(&meta.provider), &line.text),
+            "agent" => {
+                agent_message(ui, provider_name(&meta.provider), &line.text);
+                if line.text.contains("```covalos-guided")
+                    && ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new(tr("Open in Guided Mode"))
+                                    .size(SMALL)
+                                    .strong()
+                                    .color(colors().canvas),
+                            )
+                            .fill(colors().accent)
+                            .corner_radius(7),
+                        )
+                        .clicked()
+                {
+                    actions.push(Action::OpenGuided(line.text.clone()));
+                }
+            }
             "error" => {
                 Frame::new()
                     .fill(colors().error.gamma_multiply(0.12))

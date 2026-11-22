@@ -348,6 +348,13 @@ impl Editor {
                                 self.studio_open = false;
                             }
                         }
+                        if self.guided.session.is_some()
+                            && ui
+                                .selectable_label(self.guided.open, tr("Guided Mode"))
+                                .clicked()
+                        {
+                            self.guided.open = !self.guided.open;
+                        }
                     },
                 );
             });
