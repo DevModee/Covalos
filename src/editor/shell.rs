@@ -624,7 +624,12 @@ impl Editor {
                                 .agents
                                 .chat
                                 .model
-                                .clone()
+                                .as_deref()
+                                .map(|m| {
+                                    super::agent_chat::curated_model_label(m)
+                                        .unwrap_or(m)
+                                        .to_owned()
+                                })
                                 .unwrap_or_else(|| tr("Model").to_owned());
                             ui.menu_button(
                                 RichText::new(model_text)
@@ -649,6 +654,8 @@ impl Editor {
                                             "ChatGPT",
                                         ),
                                     ] {
+                                        let is_gemini =
+                                            kind == covalos_agents::ProviderKind::Gemini;
                                         ui.horizontal(|ui| {
                                             let (mrect, _) = ui.allocate_exact_size(
                                                 egui::vec2(15.0, 15.0),
@@ -665,17 +672,25 @@ impl Editor {
                                                     .strong()
                                                     .color(colors().secondary),
                                             );
+                                            if is_gemini {
+                                                ui.label(
+                                                    RichText::new(tr("Coming soon"))
+                                                        .size(10.5)
+                                                        .color(colors().muted),
+                                                );
+                                            }
                                         });
                                         for (id, display) in
                                             super::agent_chat::curated_cli_models(&kind)
                                         {
-                                            let is_selected = self
-                                                .hub
-                                                .agents
-                                                .chat
-                                                .model
-                                                .as_deref()
-                                                == Some(*id);
+                                            let is_selected = !is_gemini
+                                                && self
+                                                    .hub
+                                                    .agents
+                                                    .chat
+                                                    .model
+                                                    .as_deref()
+                                                    == Some(*id);
                                             let row_label = if is_selected {
                                                 format!(
                                                     "•  {display}   {}",
@@ -684,6 +699,25 @@ impl Editor {
                                             } else {
                                                 format!("   {display}")
                                             };
+                                            if is_gemini {
+                                                if ui
+                                                    .button(
+                                                        RichText::new(row_label)
+                                                            .color(colors().muted),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    self.notice = Some((
+                                                        true,
+                                                        tr(
+                                                            "Gemini CLI chat is coming soon. Use Codex or Claude Code for now.",
+                                                        )
+                                                        .to_owned(),
+                                                    ));
+                                                    ui.close();
+                                                }
+                                                continue;
+                                            }
                                             ui.menu_button(
                                                 RichText::new(row_label).color(if is_selected {
                                                     colors().accent
@@ -717,6 +751,15 @@ impl Editor {
                                                                 Some((*id).to_owned());
                                                             self.hub.agents.chat.effort =
                                                                 level.to_owned();
+                                                            if let Some((acc_id, _, _)) = accounts
+                                                                .iter()
+                                                                .find(|(_, _, p)| *p == kind)
+                                                            {
+                                                                self.hub.agents.chat.target =
+                                                                    super::agent_chat::Target::Account(
+                                                                        acc_id.clone(),
+                                                                    );
+                                                            }
                                                             ui.close();
                                                         }
                                                     }
@@ -886,9 +929,9 @@ impl Editor {
                 self.skills
                     .auto_select_for_prompt(&self.preferences.skills, &trimmed);
             }
-            self.preferences.assistant_open = true;
-            self.hub_open = false;
-            self.send_prompt(ui.ctx());
+            if self.start_chat_from_home(ui.ctx(), &trimmed) {
+                self.chat.prompt.clear();
+            }
         }
     }
 

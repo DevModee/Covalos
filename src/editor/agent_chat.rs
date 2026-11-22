@@ -187,6 +187,38 @@ pub(super) fn curated_cli_models(kind: &ProviderKind) -> &'static [(&'static str
     }
 }
 
+pub(super) fn curated_model_label(id: &str) -> Option<&'static str> {
+    [
+        ProviderKind::ClaudeCode,
+        ProviderKind::Gemini,
+        ProviderKind::Codex,
+    ]
+    .iter()
+    .flat_map(curated_cli_models)
+    .find(|(m_id, _)| *m_id == id)
+    .map(|(_, label)| *label)
+}
+
+pub(super) fn model_belongs_to_provider(model: &str, provider: &ProviderKind) -> bool {
+    let lower = model.trim().to_ascii_lowercase();
+    if lower.is_empty() {
+        return false;
+    }
+    match provider {
+        ProviderKind::ClaudeCode => {
+            !lower.starts_with("gemini")
+                && !lower.starts_with("gpt-")
+                && !lower.starts_with("o1")
+                && !lower.starts_with("o3")
+                && !lower.starts_with("o4")
+                && !lower.contains("codex")
+        }
+        ProviderKind::Codex => !lower.starts_with("claude") && !lower.starts_with("gemini"),
+        ProviderKind::Gemini => lower.starts_with("gemini"),
+        _ => true,
+    }
+}
+
 pub(super) fn provider_name(kind: &ProviderKind) -> &'static str {
     match kind {
         ProviderKind::ClaudeCode => "Claude Code",
@@ -429,6 +461,97 @@ impl Editor {
             }
         }
         self.remember_chat_layout();
+    }
+
+    /// Start a real Agent Hub conversation from the Session Home composer and
+    /// immediately select it in the right-hand dock so the user sees the reply.
+    pub(super) fn start_chat_from_home(&mut self, ctx: &egui::Context, text: &str) -> bool {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+        if !self.ensure_runtime(ctx) {
+            self.notice = Some((true, tr("Agents are unavailable.").to_owned()));
+            return false;
+        }
+        let Some(root) = self.root.clone() else {
+            self.notice = Some((true, tr("Open a project folder").to_owned()));
+            return false;
+        };
+        let active = self.active_file();
+        let (runtime, chat) = self.hub.agents.runtime_and_chat();
+        if chat.target == Target::Orchestrator {
+            let goal = trimmed.to_owned();
+            self.start_objective(&goal);
+            self.preferences.assistant_open = true;
+            self.hub_open = false;
+            return true;
+        }
+        let accounts = chat_accounts(runtime);
+        if accounts.is_empty() {
+            chat.add_ai = Some(AddAi::default());
+            self.notice = Some((true, tr("Connect an AI to start").to_owned()));
+            return false;
+        }
+        let chosen = match &chat.target {
+            Target::Account(id) => accounts.iter().find(|a| &a.id == id),
+            Target::Auto | Target::Orchestrator => None,
+        }
+        .or_else(|| {
+            accounts.iter().find(|a| {
+                matches!(
+                    runtime.connection.get(&a.id),
+                    Some(Connection::SignedIn(_) | Connection::Key(true))
+                )
+            })
+        })
+        .unwrap_or(&accounts[0])
+        .clone();
+        chat.target = Target::Account(chosen.id.clone());
+        let model = chat
+            .model
+            .clone()
+            .filter(|m| model_belongs_to_provider(m, &chosen.provider));
+        if chat.model.is_some() && model.is_none() {
+            chat.model = None;
+        }
+        let title: String = trimmed
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .chars()
+            .take(48)
+            .collect();
+        let created = runtime.create_session(NewSession {
+            title,
+            account: chosen.id.clone(),
+            model,
+            root,
+            worktree: chat.worktree,
+            preset: PRESETS[chat.preset].0,
+            allow_safe_commands: true,
+            share_context: true,
+        });
+        match created {
+            Ok(index) => {
+                let prompt = with_file(trimmed, chat.attach.then_some(active.as_deref()).flatten());
+                if let Err(e) = runtime.send(index, &prompt) {
+                    runtime.sessions[index].draft = trimmed.to_owned();
+                    runtime.notice = Some((false, e));
+                }
+                let id = runtime.sessions[index].meta.id.as_str().to_owned();
+                chat.dock = Some(id);
+                self.preferences.assistant_open = true;
+                self.hub_open = false;
+                self.remember_chat_layout();
+                true
+            }
+            Err(e) => {
+                runtime.notice = Some((false, e.clone()));
+                self.notice = Some((true, e));
+                false
+            }
+        }
     }
 
     fn conversation(&mut self, ui: &mut Ui, slot: Slot) {
@@ -1274,13 +1397,15 @@ fn new_conversation(
     }
     let label = match (&chat.target, &account) {
         (Target::Orchestrator, _) => tr("Covalos Orchestrator").to_owned(),
-        (_, Some(a)) => format!(
-            "{} · {}",
-            provider_name(&a.provider),
-            chat.model
-                .clone()
-                .unwrap_or_else(|| tr("default model").into())
-        ),
+        (_, Some(a)) => {
+            let model_display = chat
+                .model
+                .as_deref()
+                .filter(|m| model_belongs_to_provider(m, &a.provider))
+                .map(|m| curated_model_label(m).unwrap_or(m).to_owned())
+                .unwrap_or_else(|| tr("default model").into());
+            format!("{} · {}", provider_name(&a.provider), model_display)
+        }
         _ => String::new(),
     };
     let hint = if chat.target == Target::Orchestrator {
@@ -1314,10 +1439,14 @@ fn new_conversation(
         .chars()
         .take(48)
         .collect();
+    let model = chat
+        .model
+        .clone()
+        .filter(|m| model_belongs_to_provider(m, &account.provider));
     let created = runtime.create_session(NewSession {
         title,
         account: account.id.clone(),
-        model: chat.model.clone(),
+        model,
         root: root.clone().expect("checked"),
         worktree: chat.worktree,
         preset: PRESETS[chat.preset].0,
@@ -1350,11 +1479,6 @@ fn target_picker(
     accounts: &[Account],
     account: Option<&Account>,
 ) {
-    let gemini = runtime
-        .profiles
-        .accounts()
-        .iter()
-        .any(|a| a.provider == ProviderKind::Gemini);
     ui.label(meta_text(tr("Talk to")));
     for a in accounts {
         let (color, state) = connection_view(runtime, a);
@@ -1363,7 +1487,7 @@ fn target_picker(
             ui,
             selected,
             provider_name(&a.provider),
-            &format!("{} · {}", a.label, tr(method_name(a.method))),
+            tr(method_name(a.method)),
             Some((color, state)),
         );
         if response.clicked() {
@@ -1382,16 +1506,12 @@ fn target_picker(
     {
         chat.target = Target::Orchestrator;
     }
-    if gemini {
-        ui.label(meta_text(tr(
-            "Gemini accounts are saved, but chats need a verified Gemini CLI adapter.",
-        )));
-    }
     let Some(account) = account else { return };
     if chat.target == Target::Orchestrator {
         return;
     }
     if let Some(Connection::SignedOut(_)) = runtime.connection.get(&account.id) {
+        ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
             ui.label(
                 RichText::new(tr("This account is signed out."))
@@ -1411,54 +1531,46 @@ fn target_picker(
             }
         });
     }
-    ui.add_space(8.0);
-    ui.label(meta_text(tr("Model")));
-    let models = model_options(runtime, account);
-    ui.horizontal_wrapped(|ui| {
-        if ui
-            .selectable_label(chat.model.is_none(), tr("Default"))
-            .clicked()
-        {
-            chat.model = None;
-        }
-        for m in &models {
-            if ui
-                .selectable_label(chat.model.as_deref() == Some(m.as_str()), m)
-                .clicked()
-            {
-                chat.model = Some(m.clone());
-            }
-        }
-        let custom = ui.add(
-            TextEdit::singleline(&mut chat.custom_model)
-                .hint_text(tr("other model id"))
-                .desired_width(120.0),
-        );
-        if custom.lost_focus() && !chat.custom_model.trim().is_empty() {
-            chat.model = Some(chat.custom_model.trim().to_owned());
-        }
-    });
-    if account.provider == ProviderKind::ClaudeCode {
-        ui.label(meta_text(tr(
-            "sonnet, opus and haiku are Claude Code aliases; your plan decides which ones run.",
-        )));
-    }
-    ui.add_space(8.0);
-    ui.label(meta_text(tr("Permissions")));
-    ui.horizontal_wrapped(|ui| {
-        for (i, (_, label)) in PRESETS.iter().enumerate() {
-            ui.selectable_value(&mut chat.preset, i, tr(label));
-        }
-    });
-    checkbox(ui, &mut chat.worktree, tr("Work in its own git worktree"));
-    ui.label(meta_text(match account.provider {
-        ProviderKind::ClaudeCode => tr(
-            "Claude Code: every tool call passes the Covalos gate; sensitive commands ask you first.",
-        ),
-        _ => tr(
-            "Codex: its own sandbox is the limit (read-only or workspace-write); it has no approval hook.",
-        ),
-    }));
+    ui.add_space(6.0);
+    egui::CollapsingHeader::new(meta_text(tr("Options")))
+        .id_salt(("agent-new-options", &account.id))
+        .default_open(false)
+        .show(ui, |ui| {
+            ui.label(meta_text(tr("Model")));
+            let models = model_options(runtime, account);
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .selectable_label(chat.model.is_none(), tr("Default"))
+                    .clicked()
+                {
+                    chat.model = None;
+                }
+                for m in &models {
+                    if ui
+                        .selectable_label(chat.model.as_deref() == Some(m.as_str()), m)
+                        .clicked()
+                    {
+                        chat.model = Some(m.clone());
+                    }
+                }
+                let custom = ui.add(
+                    TextEdit::singleline(&mut chat.custom_model)
+                        .hint_text(tr("other model id"))
+                        .desired_width(120.0),
+                );
+                if custom.lost_focus() && !chat.custom_model.trim().is_empty() {
+                    chat.model = Some(chat.custom_model.trim().to_owned());
+                }
+            });
+            ui.add_space(6.0);
+            ui.label(meta_text(tr("Permissions")));
+            ui.horizontal_wrapped(|ui| {
+                for (i, (_, label)) in PRESETS.iter().enumerate() {
+                    ui.selectable_value(&mut chat.preset, i, tr(label));
+                }
+            });
+            checkbox(ui, &mut chat.worktree, tr("Work in its own git worktree"));
+        });
 }
 
 fn choice_row(

@@ -1156,6 +1156,12 @@ const SPANISH: &[(&str, &str)] = &[
     ("Idle", "Inactivo"),
     ("Failed", "Falló"),
     ("Disconnected", "Desconectado"),
+    ("Options", "Opciones"),
+    ("Coming soon", "Próximamente"),
+    (
+        "Gemini CLI chat is coming soon. Use Codex or Claude Code for now.",
+        "El chat con Gemini CLI llega pronto. Por ahora usá Codex o Claude Code.",
+    ),
     // Tools panel
     ("Reading Git…", "Leyendo Git…"),
     ("No changes to display.", "No hay cambios para mostrar."),
