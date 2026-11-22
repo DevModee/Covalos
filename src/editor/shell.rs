@@ -296,6 +296,10 @@ impl Editor {
                         Some(_) => self.hub_open = true,
                         None => {}
                     }
+                    if !self.preferences.setup_completed && self.root.is_none() {
+                        ui.add_space(20.0);
+                        self.initial_setup_card(ui);
+                    }
                     if !self.preferences.recent.is_empty() {
                         ui.add_space(28.0);
                         section(ui, tr("Recent projects"), "");
@@ -342,166 +346,724 @@ impl Editor {
         });
     }
 
+    fn initial_setup_card(&mut self, ui: &mut Ui) {
+        let old = (
+            self.preferences.theme,
+            self.preferences.font_size,
+            self.preferences.high_contrast,
+        );
+        egui::Frame::new()
+            .fill(colors().surface.gamma_multiply(0.92))
+            .corner_radius(10)
+            .stroke(egui::Stroke::new(1.0_f32, colors().border))
+            .inner_margin(egui::Margin::same(16))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(tr("Initial setup")).size(LEAD).strong());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add(egui::Button::new(muted(tr("Done"))).frame(false))
+                            .clicked()
+                        {
+                            self.preferences.setup_completed = true;
+                        }
+                    });
+                });
+                ui.label(muted(tr("Choose a few defaults before you start.")));
+                ui.add_space(10.0);
+                setting_row(
+                    ui,
+                    "Import settings from another editor",
+                    "Import matching setup from VS Code, Cursor, Windsurf, or Zed.",
+                    |ui| {
+                        self.import_editor_menu(ui);
+                    },
+                );
+                setting_row(
+                    ui,
+                    "Editor density",
+                    "Use tighter spacing across code and lists.",
+                    |ui| {
+                        checkbox(ui, &mut self.preferences.compact, tr("Compact"));
+                    },
+                );
+                setting_row(
+                    ui,
+                    "Reduce motion",
+                    "Disable animations and ambient transitions.",
+                    |ui| {
+                        checkbox(ui, &mut self.preferences.reduce_motion, tr("Reduce motion"));
+                    },
+                );
+            });
+        if old
+            != (
+                self.preferences.theme,
+                self.preferences.font_size,
+                self.preferences.high_contrast,
+            )
+        {
+            install(
+                ui.ctx(),
+                self.preferences.font_size,
+                self.preferences.high_contrast,
+                self.preferences.theme,
+            );
+            self.syntax =
+                egui_extras::syntax_highlighting::CodeTheme::dark(self.preferences.font_size);
+        }
+    }
+
+    fn import_editor_menu(&mut self, ui: &mut Ui) {
+        ui.menu_button(tr("Import"), |ui| {
+            for editor in super::preferences::ExternalEditor::ALL {
+                if ui.button(editor.name()).clicked() {
+                    ui.close();
+                    match self.preferences.import_from(editor) {
+                        Ok(fields) => {
+                            let msg = format!(
+                                "Imported {} from {}.",
+                                fields.join(", "),
+                                editor.name()
+                            );
+                            self.notice = Some((false, msg.clone()));
+                            self.notify(NotificationSource::Covalos, msg, false);
+                            install(
+                                ui.ctx(),
+                                self.preferences.font_size,
+                                self.preferences.high_contrast,
+                                self.preferences.theme,
+                            );
+                            self.syntax = egui_extras::syntax_highlighting::CodeTheme::dark(
+                                self.preferences.font_size,
+                            );
+                        }
+                        Err(err) => {
+                            self.error(err);
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     pub(super) fn settings_window(&mut self, ctx: &egui::Context) {
         if !self.settings_open {
             return;
         }
-        egui::Window::new(tr("Settings")).open(&mut self.settings_open)
-            .collapsible(false).resizable(false)
-            .fixed_size(egui::vec2(470.0,(ctx.content_rect().height()-140.0).clamp(240.0,560.0)))
-            .vscroll(true).constrain_to(ctx.content_rect().shrink(16.0))
+        let width = (ctx.content_rect().width() - 80.0).clamp(520.0, 780.0);
+        let height = (ctx.content_rect().height() - 100.0).clamp(360.0, 600.0);
+        let tab_id = Id::new("settings-active-section");
+        let query_id = Id::new("settings-search-query");
+        let mut active_tab: SettingsSection = ctx
+            .data(|d| d.get_temp(tab_id))
+            .unwrap_or(SettingsSection::General);
+        let mut search: String = ctx.data(|d| d.get_temp(query_id)).unwrap_or_default();
+
+        let mut open = self.settings_open;
+        egui::Window::new(tr("Settings"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .fixed_size(egui::vec2(width, height))
+            .constrain_to(ctx.content_rect().shrink(16.0))
             .show(ctx, |ui| {
-                ui.set_max_width(470.0);
-                let old = (self.preferences.theme,self.preferences.font_size,self.preferences.high_contrast);
-                section(ui, tr("Appearance"), tr("Tune the workspace for long editing sessions."));
-                ui.horizontal(|ui| {
-                    ui.label(secondary(tr("Theme")));
-                    egui::ComboBox::from_id_salt("appearance-theme").selected_text(tr(self.preferences.theme.name()))
-                        .show_ui(ui, |ui| {for theme in Theme::ALL {ui.selectable_value(&mut self.preferences.theme,theme,tr(theme.name()));}});
-                });
-                ui.horizontal(|ui| {
-                    ui.label(secondary(tr("Language")));
-                    let response = egui::ComboBox::from_id_salt("appearance-language")
-                        .selected_text(self.preferences.language.native_name())
-                        .show_ui(ui, |ui| {
-                            for language in super::i18n::Language::ALL {
-                                let option = ui.selectable_value(
-                                    &mut self.preferences.language,
-                                    language,
-                                    language.native_name(),
+                let old = (
+                    self.preferences.theme,
+                    self.preferences.font_size,
+                    self.preferences.high_contrast,
+                );
+                let nav_w = 176.0;
+                let content_h = (ui.available_height() - 4.0).max(200.0);
+                ui.horizontal_top(|ui| {
+                    // Left navigation column with search and clean sections.
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(nav_w, content_h),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            ui.add(
+                                TextEdit::singleline(&mut search)
+                                    .hint_text(tr("Search settings"))
+                                    .desired_width(nav_w - 8.0)
+                                    .char_limit(80),
+                            );
+                            ui.add_space(10.0);
+                            let needle = search.trim().to_ascii_lowercase();
+                            for item in SettingsSection::ALL {
+                                if !needle.is_empty() && !item.matches(&needle) {
+                                    continue;
+                                }
+                                let selected = active_tab == item;
+                                let (rect, response) = ui.allocate_exact_size(
+                                    egui::vec2(nav_w - 8.0, 28.0),
+                                    egui::Sense::click(),
                                 );
-                                #[cfg(test)]
-                                super::motion::record(ui, format!("Language {}", language.native_name()), option.rect);
-                                let _ = option;
+                                if selected || response.hovered() {
+                                    ui.painter().rect_filled(
+                                        rect,
+                                        6,
+                                        if selected {
+                                            colors().elevated
+                                        } else {
+                                            colors().hover
+                                        },
+                                    );
+                                }
+                                draw_icon_sized(
+                                    ui.painter(),
+                                    rect.left_center() + egui::vec2(14.0, 0.0),
+                                    item.icon(),
+                                    if selected {
+                                        colors().text
+                                    } else {
+                                        colors().muted
+                                    },
+                                    14.0,
+                                );
+                                ui.painter().text(
+                                    rect.left_center() + egui::vec2(28.0, 0.0),
+                                    egui::Align2::LEFT_CENTER,
+                                    tr(item.label()),
+                                    egui::FontId::proportional(BODY),
+                                    if selected {
+                                        colors().text
+                                    } else {
+                                        colors().secondary
+                                    },
+                                );
+                                if response.clicked() {
+                                    active_tab = item;
+                                }
+                            }
+                        },
+                    );
+                    ui.separator();
+                    // Right minimalist content column.
+                    ScrollArea::vertical()
+                        .id_salt("settings-body")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.set_min_width(ui.available_width());
+                            ui.label(RichText::new(tr(active_tab.label())).size(LEAD).strong());
+                            ui.add_space(10.0);
+                            match active_tab {
+                                SettingsSection::General => {
+                                    setting_row(
+                                        ui,
+                                        "Version",
+                                        &format!(
+                                            "{} · build {}",
+                                            crate::brand::RELEASE,
+                                            crate::brand::VERSION
+                                        ),
+                                        |ui| {
+                                            if ui.button(tr("About Covalos")).clicked() {
+                                                self.about_open = true;
+                                            }
+                                        },
+                                    );
+                                    setting_row(
+                                        ui,
+                                        "Language",
+                                        "Switch interface language live.",
+                                        |ui| {
+                                            let response = egui::ComboBox::from_id_salt(
+                                                "appearance-language",
+                                            )
+                                            .selected_text(self.preferences.language.native_name())
+                                            .show_ui(ui, |ui| {
+                                                for language in super::i18n::Language::ALL {
+                                                    let option = ui.selectable_value(
+                                                        &mut self.preferences.language,
+                                                        language,
+                                                        language.native_name(),
+                                                    );
+                                                    #[cfg(test)]
+                                                    super::motion::record(
+                                                        ui,
+                                                        format!(
+                                                            "Language {}",
+                                                            language.native_name()
+                                                        ),
+                                                        option.rect,
+                                                    );
+                                                    let _ = option;
+                                                }
+                                            });
+                                            #[cfg(test)]
+                                            super::motion::record(
+                                                ui,
+                                                "Language selector",
+                                                response.response.rect,
+                                            );
+                                            let _ = response;
+                                        },
+                                    );
+                                    setting_row(
+                                        ui,
+                                        "Import from another editor",
+                                        "Import font size, theme, and density from VS Code, Cursor, Windsurf, or Zed.",
+                                        |ui| {
+                                            self.import_editor_menu(ui);
+                                        },
+                                    );
+                                    setting_row(
+                                        ui,
+                                        "Initial setup",
+                                        "Show the quick setup checklist on the Welcome view.",
+                                        |ui| {
+                                            let label = if self.preferences.setup_completed {
+                                                tr("Show again")
+                                            } else {
+                                                tr("Visible")
+                                            };
+                                            if ui
+                                                .add_enabled(
+                                                    self.preferences.setup_completed,
+                                                    egui::Button::new(label),
+                                                )
+                                                .clicked()
+                                            {
+                                                self.preferences.setup_completed = false;
+                                            }
+                                        },
+                                    );
+                                    setting_row(
+                                        ui,
+                                        "Library Studio shortcut",
+                                        "Keyboard shortcut to open Library Studio.",
+                                        |ui| {
+                                            let valid = super::panels::parse_shortcut(
+                                                &self.preferences.library_shortcut,
+                                            )
+                                            .is_some();
+                                            ui.add(
+                                                egui::TextEdit::singleline(
+                                                    &mut self.preferences.library_shortcut,
+                                                )
+                                                .desired_width(120.0)
+                                                .text_color(if valid {
+                                                    colors().text
+                                                } else {
+                                                    colors().error
+                                                }),
+                                            );
+                                        },
+                                    );
+                                }
+                                SettingsSection::Appearance => {
+                                    setting_row(
+                                        ui,
+                                        "Theme",
+                                        "Tune the workspace for long editing sessions.",
+                                        |ui| {
+                                            egui::ComboBox::from_id_salt("appearance-theme")
+                                                .selected_text(tr(self.preferences.theme.name()))
+                                                .show_ui(ui, |ui| {
+                                                    for theme in Theme::ALL {
+                                                        ui.selectable_value(
+                                                            &mut self.preferences.theme,
+                                                            theme,
+                                                            tr(theme.name()),
+                                                        );
+                                                    }
+                                                });
+                                        },
+                                    );
+                                    ui.add_space(6.0);
+                                    ui.horizontal_wrapped(|ui| {
+                                        for theme in Theme::ALL {
+                                            let selected = self.preferences.theme == theme;
+                                            let response = ui.add_sized(
+                                                [72.0, 42.0],
+                                                egui::Button::new("")
+                                                    .fill(theme.colors().canvas)
+                                                    .stroke(egui::Stroke::new(
+                                                        if selected { 2.0_f32 } else { 1.0_f32 },
+                                                        if selected {
+                                                            colors().accent
+                                                        } else {
+                                                            colors().border
+                                                        },
+                                                    )),
+                                            );
+                                            let p = ui.painter_at(response.rect);
+                                            p.rect_filled(
+                                                egui::Rect::from_min_size(
+                                                    response.rect.min + egui::vec2(8.0, 9.0),
+                                                    egui::vec2(8.0, 23.0),
+                                                ),
+                                                2,
+                                                theme.colors().surface,
+                                            );
+                                            for (y, w, c) in [
+                                                (10.0, 34.0, theme.colors().accent),
+                                                (17.0, 42.0, theme.colors().secondary),
+                                                (24.0, 28.0, theme.colors().syntax_string),
+                                            ] {
+                                                p.line_segment(
+                                                    [
+                                                        response.rect.min + egui::vec2(22.0, y),
+                                                        response.rect.min + egui::vec2(22.0 + w, y),
+                                                    ],
+                                                    egui::Stroke::new(2.0_f32, c),
+                                                );
+                                            }
+                                            #[cfg(test)]
+                                            super::motion::record(
+                                                ui,
+                                                format!("Theme {}", theme.name()),
+                                                response.rect,
+                                            );
+                                            if response.on_hover_text(theme.name()).clicked() {
+                                                self.preferences.theme = theme;
+                                            }
+                                        }
+                                    });
+                                    ui.add_space(10.0);
+                                    ui.add(
+                                        egui::Slider::new(&mut self.preferences.motion, 0.0..=1.0)
+                                            .step_by(0.05)
+                                            .text(tr("Motion intensity")),
+                                    );
+                                    ui.add(
+                                        egui::Slider::new(
+                                            &mut self.preferences.explorer_zoom,
+                                            super::preferences::EXPLORER_ZOOM.0
+                                                ..=super::preferences::EXPLORER_ZOOM.1,
+                                        )
+                                        .step_by(0.05)
+                                        .text(tr("Explorer zoom")),
+                                    );
+                                    ui.add(
+                                        egui::Slider::new(
+                                            &mut self.preferences.ui_scale,
+                                            super::preferences::UI_SCALE.0
+                                                ..=super::preferences::UI_SCALE.1,
+                                        )
+                                        .step_by(0.05)
+                                        .text(tr("Interface scale")),
+                                    );
+                                    ui.horizontal_wrapped(|ui| {
+                                        if ui.button(tr("Reset Explorer zoom")).clicked() {
+                                            self.preferences.explorer_zoom = 1.0;
+                                        }
+                                        if ui.button(tr("Reset interface scale")).clicked() {
+                                            self.preferences.ui_scale = 1.0;
+                                        }
+                                    });
+                                    ui.add_space(6.0);
+                                    ui.horizontal(|ui| {
+                                        ui.label(secondary(tr("Navigation transitions")));
+                                        for t in super::preferences::Transitions::ALL {
+                                            ui.selectable_value(
+                                                &mut self.preferences.transitions,
+                                                t,
+                                                tr(t.name()),
+                                            );
+                                        }
+                                    });
+                                    checkbox(
+                                        ui,
+                                        &mut self.preferences.high_contrast,
+                                        tr("High contrast controls"),
+                                    );
+                                    checkbox(
+                                        ui,
+                                        &mut self.preferences.reduce_motion,
+                                        tr("Reduce motion"),
+                                    );
+                                }
+                                SettingsSection::Background => {
+                                    let prefs = &mut self.preferences.identity;
+                                    ui.horizontal(|ui| {
+                                        ui.label(secondary(tr("Preset")));
+                                        let selector = egui::ComboBox::from_id_salt(
+                                            "background-preset",
+                                        )
+                                        .selected_text(prefs.background.name())
+                                        .show_ui(ui, |ui| {
+                                            for preset in super::identity::Background::ALL {
+                                                let response = ui.selectable_value(
+                                                    &mut prefs.background,
+                                                    preset,
+                                                    tr(preset.name()),
+                                                );
+                                                if response.clicked() {
+                                                    prefs.background_chosen = true;
+                                                }
+                                                #[cfg(test)]
+                                                super::motion::record(
+                                                    ui,
+                                                    format!("Background {}", preset.name()),
+                                                    response.rect,
+                                                );
+                                                let _ = response;
+                                            }
+                                        });
+                                        #[cfg(test)]
+                                        super::motion::record(
+                                            ui,
+                                            "Background selector",
+                                            selector.response.rect,
+                                        );
+                                        let _ = selector;
+                                    });
+                                    let (_, preview) =
+                                        ui.allocate_space(egui::vec2(ui.available_width(), 96.0));
+                                    ui.painter().rect_filled(preview, 6, colors().canvas);
+                                    self.identity.paint(
+                                        ui,
+                                        preview,
+                                        prefs,
+                                        super::identity::Mood::Idle,
+                                    );
+                                    if prefs.background == super::identity::Background::Ascii {
+                                        egui::ComboBox::from_id_salt("ascii-pattern")
+                                            .selected_text(prefs.pattern.name())
+                                            .show_ui(ui, |ui| {
+                                                for pattern in super::identity::Pattern::ALL {
+                                                    ui.selectable_value(
+                                                        &mut prefs.pattern,
+                                                        pattern,
+                                                        pattern.name(),
+                                                    );
+                                                }
+                                            });
+                                    }
+                                    checkbox(ui, &mut prefs.animated, tr("Animate backgrounds"));
+                                    checkbox(ui, &mut prefs.interactive, tr("Pointer reactions"));
+                                    ui.add(
+                                        egui::Slider::new(&mut prefs.fps, 5..=60)
+                                            .text(tr("Ambient FPS"))
+                                            .suffix(" fps"),
+                                    );
+                                    ui.add(
+                                        egui::Slider::new(&mut prefs.speed, 0.1..=2.0)
+                                            .text(tr("Speed")),
+                                    );
+                                    ui.add(
+                                        egui::Slider::new(&mut prefs.density, 0.1..=1.0)
+                                            .text(tr("Density")),
+                                    );
+                                    ui.add(
+                                        egui::Slider::new(&mut prefs.intensity, 0.02..=0.4)
+                                            .text(tr("Intensity")),
+                                    );
+                                    ui.horizontal(|ui| {
+                                        checkbox(ui, &mut prefs.custom_tint, tr("Custom color"));
+                                        if prefs.custom_tint {
+                                            ui.color_edit_button_srgb(&mut prefs.tint);
+                                        }
+                                    });
+                                    checkbox(
+                                        ui,
+                                        &mut prefs.behind_code,
+                                        tr("Also show behind code"),
+                                    )
+                                    .on_hover_text(tr(
+                                        "Off by default. Keep the code area quiet.",
+                                    ));
+                                    ui.add_space(10.0);
+                                    egui::CollapsingHeader::new(tr("Luma companion")).show(
+                                        ui,
+                                        |ui| {
+                                            checkbox(
+                                                ui,
+                                                &mut prefs.mascot,
+                                                tr("Show Luma in workspace"),
+                                            );
+                                            checkbox(
+                                                ui,
+                                                &mut prefs.mascot_motion,
+                                                tr("Animate Luma"),
+                                            );
+                                            ui.add(
+                                                egui::Slider::new(
+                                                    &mut prefs.mascot_intensity,
+                                                    0.0..=1.0,
+                                                )
+                                                .text(tr("Motion intensity")),
+                                            );
+                                            ui.add(
+                                                egui::Slider::new(
+                                                    &mut prefs.mascot_size,
+                                                    40.0..=80.0,
+                                                )
+                                                .text(tr("Size"))
+                                                .suffix(" pt"),
+                                            );
+                                        },
+                                    );
+                                }
+                                SettingsSection::Editor => {
+                                    setting_row(
+                                        ui,
+                                        "Code colors",
+                                        "Syntax palette independent of the UI theme.",
+                                        |ui| {
+                                            egui::ComboBox::from_id_salt("syntax-style")
+                                                .selected_text(tr(self.preferences.syntax.name()))
+                                                .show_ui(ui, |ui| {
+                                                    for style in super::syntax::SyntaxStyle::ALL {
+                                                        ui.selectable_value(
+                                                            &mut self.preferences.syntax,
+                                                            style,
+                                                            tr(style.name()),
+                                                        );
+                                                    }
+                                                });
+                                        },
+                                    );
+                                    super::syntax::set_style(self.preferences.syntax);
+                                    let preview = "fn orbit(r: f32) -> Vec2 {\n    let angle = TAU * 0.25; // quarter\n    vec2(r * angle.cos(), 42.0)\n}";
+                                    let size = self.preferences.font_size.min(15.0);
+                                    let line = size
+                                        * if self.preferences.compact {
+                                            COMPACT_CODE_LINE_HEIGHT
+                                        } else {
+                                            CODE_LINE_HEIGHT
+                                        };
+                                    egui::Frame::new()
+                                        .fill(colors().inset)
+                                        .corner_radius(8)
+                                        .stroke(egui::Stroke::new(1.0_f32, colors().border))
+                                        .inner_margin(egui::Margin::symmetric(12, 10))
+                                        .show(ui, |ui| {
+                                            ui.set_width(ui.available_width());
+                                            let job = super::syntax::highlight(
+                                                ui.ctx(),
+                                                preview,
+                                                "rs",
+                                                size,
+                                                line,
+                                            );
+                                            ui.add(egui::Label::new(job).extend());
+                                        });
+                                    ui.add_space(10.0);
+                                    ui.add(
+                                        egui::Slider::new(
+                                            &mut self.preferences.font_size,
+                                            11.0..=26.0,
+                                        )
+                                        .step_by(1.0)
+                                        .text(tr("Editor font size"))
+                                        .suffix(" pt"),
+                                    );
+                                    ui.horizontal(|ui| {
+                                        ui.label(secondary(tr("Editor density")));
+                                        ui.selectable_value(
+                                            &mut self.preferences.compact,
+                                            true,
+                                            tr("Compact"),
+                                        );
+                                        ui.selectable_value(
+                                            &mut self.preferences.compact,
+                                            false,
+                                            tr("Comfortable"),
+                                        );
+                                        if ui.button(tr("Reset editor zoom")).clicked() {
+                                            self.preferences.font_size = 14.0;
+                                        }
+                                    });
+                                    ui.add(
+                                        egui::Label::new(muted(
+                                            "Ctrl + wheel or Ctrl +/− zooms the panel under the pointer; Ctrl+0 resets it.",
+                                        ))
+                                        .wrap(),
+                                    );
+                                }
+                                SettingsSection::Notifications => {
+                                    setting_row(
+                                        ui,
+                                        "Quiet agent notifications",
+                                        "Suppress taskbar attention when agents finish.",
+                                        |ui| {
+                                            checkbox(
+                                                ui,
+                                                &mut self.preferences.quiet_notifications,
+                                                "",
+                                            );
+                                        },
+                                    );
+                                    ui.add(
+                                        egui::Slider::new(
+                                            &mut self.preferences.notification_interval,
+                                            5..=120,
+                                        )
+                                        .text(tr("Taskbar attention interval"))
+                                        .suffix(" s"),
+                                    );
+                                }
+                                SettingsSection::Agents => {
+                                    setting_row(
+                                        ui,
+                                        "Allow Auto buffer edits",
+                                        "Auto applies an eligible replacement to the active buffer. Use Save to write the file.",
+                                        |ui| {
+                                            checkbox(
+                                                ui,
+                                                &mut self.preferences.allow_auto_buffer,
+                                                "",
+                                            );
+                                        },
+                                    );
+                                }
+                                SettingsSection::Integrations => {
+                                    let status = self.discord.status();
+                                    let d = &mut self.preferences.discord;
+                                    checkbox(
+                                        ui,
+                                        &mut d.enabled,
+                                        tr("Show Covalos activity in Discord"),
+                                    );
+                                    ui.horizontal(|ui| {
+                                        ui.label(secondary(tr("Application ID")));
+                                        ui.add(
+                                            egui::TextEdit::singleline(&mut d.application_id)
+                                                .desired_width(180.0)
+                                                .hint_text("Discord Developer Portal"),
+                                        );
+                                    });
+                                    checkbox(ui, &mut d.show_activity, tr("Show current activity"));
+                                    checkbox(ui, &mut d.show_language, tr("Show language"));
+                                    checkbox(ui, &mut d.show_project, tr("Show project name"));
+                                    checkbox(ui, &mut d.show_elapsed, tr("Show session time"));
+                                    ui.label(muted(format!("{}: {}", tr("Status"), tr(status))));
+                                    ui.add(
+                                        egui::Label::new(muted(
+                                            "Paths, file names, prompts and accounts are never sent. Only the local Discord app receives the status.",
+                                        ))
+                                        .wrap(),
+                                    );
+                                }
                             }
                         });
-                    #[cfg(test)]
-                    super::motion::record(ui, "Language selector", response.response.rect);
-                    let _ = response;
                 });
-                ui.add_space(8.0);
-                ui.horizontal_wrapped(|ui| { for theme in Theme::ALL {
-                    let selected=self.preferences.theme==theme;
-                    let response=ui.add_sized([72.0,42.0],egui::Button::new("").fill(theme.colors().canvas).stroke(egui::Stroke::new(if selected{2.0_f32}else{1.0_f32},if selected{colors().accent}else{colors().border})));
-                    let p=ui.painter_at(response.rect);p.rect_filled(egui::Rect::from_min_size(response.rect.min+egui::vec2(8.0,9.0),egui::vec2(8.0,23.0)),2,theme.colors().surface);for (y,w,c) in [(10.0,34.0,theme.colors().accent),(17.0,42.0,theme.colors().secondary),(24.0,28.0,theme.colors().syntax_string)]{p.line_segment([response.rect.min+egui::vec2(22.0,y),response.rect.min+egui::vec2(22.0+w,y)],egui::Stroke::new(2.0_f32,c));}
-                    #[cfg(test)] super::motion::record(ui,format!("Theme {}",theme.name()),response.rect);
-                    if response.on_hover_text(theme.name()).clicked(){self.preferences.theme=theme;}
-                }});
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    ui.label(secondary(tr("Code colors")));
-                    egui::ComboBox::from_id_salt("syntax-style")
-                        .selected_text(tr(self.preferences.syntax.name()))
-                        .show_ui(ui, |ui| {
-                            for style in super::syntax::SyntaxStyle::ALL {
-                                ui.selectable_value(&mut self.preferences.syntax, style, tr(style.name()));
-                            }
-                        });
-                });
-                // Live preview of the chosen code colors at the editor's density.
-                super::syntax::set_style(self.preferences.syntax);
-                let preview = "fn orbit(r: f32) -> Vec2 {\n    let angle = TAU * 0.25; // quarter\n    vec2(r * angle.cos(), 42.0)\n}";
-                let size = self.preferences.font_size.min(15.0);
-                let line = size * if self.preferences.compact { COMPACT_CODE_LINE_HEIGHT } else { CODE_LINE_HEIGHT };
-                egui::Frame::new().fill(colors().inset).corner_radius(8).stroke(egui::Stroke::new(1.0_f32, colors().border)).inner_margin(egui::Margin::symmetric(12, 10)).show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    let job = super::syntax::highlight(ui.ctx(), preview, "rs", size, line);
-                    ui.add(egui::Label::new(job).extend());
-                });
-                ui.add_space(8.0);
-                ui.add(egui::Slider::new(&mut self.preferences.font_size,11.0..=26.0).step_by(1.0).text(tr("Editor font size")).suffix(" pt"));
-                ui.horizontal(|ui| {
-                    ui.label(secondary(tr("Editor density")));
-                    ui.selectable_value(&mut self.preferences.compact, true, tr("Compact"));
-                    ui.selectable_value(&mut self.preferences.compact, false, tr("Comfortable"));
-                });
-                ui.add(egui::Slider::new(&mut self.preferences.motion, 0.0..=1.0).step_by(0.05).text(tr("Motion intensity")));
-                ui.add(egui::Slider::new(&mut self.preferences.explorer_zoom, super::preferences::EXPLORER_ZOOM.0..=super::preferences::EXPLORER_ZOOM.1).step_by(0.05).text(tr("Explorer zoom")));
-                ui.add(egui::Slider::new(&mut self.preferences.ui_scale, super::preferences::UI_SCALE.0..=super::preferences::UI_SCALE.1).step_by(0.05).text(tr("Interface scale")));
-                ui.horizontal_wrapped(|ui| {
-                    if ui.button(tr("Reset editor zoom")).clicked() { self.preferences.font_size = 14.0; }
-                    if ui.button(tr("Reset Explorer zoom")).clicked() { self.preferences.explorer_zoom = 1.0; }
-                    if ui.button(tr("Reset interface scale")).clicked() { self.preferences.ui_scale = 1.0; }
-                });
-                ui.add(egui::Label::new(muted("Ctrl + wheel or Ctrl +/− zooms the panel under the pointer; Ctrl+0 resets it.")).wrap());
-                ui.horizontal(|ui| {
-                    ui.label(secondary(tr("Navigation transitions")));
-                    for t in super::preferences::Transitions::ALL {
-                        ui.selectable_value(&mut self.preferences.transitions, t, tr(t.name()));
-                    }
-                });
-                let status = self.discord.status();
-                egui::CollapsingHeader::new(tr("Discord Rich Presence")).default_open(self.preferences.discord.enabled).show(ui, |ui| {
-                    let d = &mut self.preferences.discord;
-                    checkbox(ui, &mut d.enabled, tr("Show Covalos activity in Discord"));
-                    ui.horizontal(|ui| {
-                        ui.label(secondary(tr("Application ID")));
-                        ui.add(egui::TextEdit::singleline(&mut d.application_id).desired_width(180.0).hint_text("Discord Developer Portal"));
-                    });
-                    checkbox(ui, &mut d.show_activity, tr("Show current activity"));
-                    checkbox(ui, &mut d.show_language, tr("Show language"));
-                    checkbox(ui, &mut d.show_project, tr("Show project name"));
-                    checkbox(ui, &mut d.show_elapsed, tr("Show session time"));
-                    ui.label(muted(format!("{}: {}", tr("Status"), tr(status))));
-                    ui.add(egui::Label::new(muted("Paths, file names, prompts and accounts are never sent. Only the local Discord app receives the status.")).wrap());
-                });
-                ui.horizontal(|ui| {
-                    ui.label(secondary(tr("Library Studio shortcut")));
-                    let valid = super::panels::parse_shortcut(&self.preferences.library_shortcut).is_some();
-                    ui.add(egui::TextEdit::singleline(&mut self.preferences.library_shortcut).desired_width(120.0).text_color(if valid { colors().text } else { colors().error }));
-                });
-                checkbox(ui,&mut self.preferences.high_contrast,tr("High contrast controls"));
-                checkbox(ui,&mut self.preferences.reduce_motion,tr("Reduce motion"));
-                if old != (self.preferences.theme,self.preferences.font_size,self.preferences.high_contrast) {
-                    install(ctx,self.preferences.font_size,self.preferences.high_contrast,self.preferences.theme);
-                    self.syntax=egui_extras::syntax_highlighting::CodeTheme::dark(self.preferences.font_size);
+                if old
+                    != (
+                        self.preferences.theme,
+                        self.preferences.font_size,
+                        self.preferences.high_contrast,
+                    )
+                {
+                    install(
+                        ctx,
+                        self.preferences.font_size,
+                        self.preferences.high_contrast,
+                        self.preferences.theme,
+                    );
+                    self.syntax = egui_extras::syntax_highlighting::CodeTheme::dark(
+                        self.preferences.font_size,
+                    );
                 }
-                ui.add_space(16.0);
-                egui::CollapsingHeader::new(tr("Background & ASCII")).default_open(true).show(ui, |ui| {
-                    let prefs=&mut self.preferences.identity;
-                    ui.horizontal(|ui| {
-                        ui.label(secondary(tr("Preset")));
-                        let selector=egui::ComboBox::from_id_salt("background-preset").selected_text(prefs.background.name()).show_ui(ui, |ui| {
-                            for preset in super::identity::Background::ALL {let response=ui.selectable_value(&mut prefs.background,preset,tr(preset.name())); if response.clicked() { prefs.background_chosen = true; } #[cfg(test)] super::motion::record(ui,format!("Background {}",preset.name()),response.rect); let _=response;}
-                        });
-                        #[cfg(test)] super::motion::record(ui,"Background selector",selector.response.rect);
-                        let _=selector;
-                    });
-                    let (_,preview)=ui.allocate_space(egui::vec2(ui.available_width(),100.0));
-                    ui.painter().rect_filled(preview,6,colors().canvas);
-                    self.identity.paint(ui,preview,prefs,super::identity::Mood::Idle);
-                    checkbox(ui,&mut prefs.animated,tr("Animate backgrounds"));
-                    checkbox(ui,&mut prefs.interactive,tr("Pointer reactions"));
-                    ui.add(egui::Slider::new(&mut prefs.fps,5..=60).text(tr("Ambient FPS")).suffix(" fps"));
-                    ui.add(egui::Slider::new(&mut prefs.speed,0.1..=2.0).text(tr("Speed")));
-                    ui.add(egui::Slider::new(&mut prefs.density,0.1..=1.0).text(tr("Density")));
-                    ui.add(egui::Slider::new(&mut prefs.intensity,0.02..=0.4).text(tr("Intensity")));
-                    ui.horizontal(|ui| { checkbox(ui,&mut prefs.custom_tint,tr("Custom color"));if prefs.custom_tint {ui.color_edit_button_srgb(&mut prefs.tint);} });
-                    if prefs.background==super::identity::Background::Ascii {
-                        egui::ComboBox::from_id_salt("ascii-pattern").selected_text(prefs.pattern.name()).show_ui(ui,|ui| {
-                            for pattern in super::identity::Pattern::ALL {ui.selectable_value(&mut prefs.pattern,pattern,pattern.name());}
-                        });
-                    }
-                    checkbox(ui,&mut prefs.behind_code,tr("Also show behind code")).on_hover_text(tr("Off by default. Keep the code area quiet."));
-                    ui.label(muted(tr("Animation pauses without focus, when minimized, or with Reduce motion.")));
-                });
-                ui.add_space(12.0);
-                egui::CollapsingHeader::new(tr("Luma companion")).show(ui, |ui| {
-                    let prefs=&mut self.preferences.identity;
-                    checkbox(ui,&mut prefs.mascot,tr("Show Luma in workspace"));
-                    checkbox(ui,&mut prefs.mascot_motion,tr("Animate Luma"));
-                    ui.add(egui::Slider::new(&mut prefs.mascot_intensity,0.0..=1.0).text(tr("Motion intensity")));
-                    checkbox(ui,&mut prefs.interactive,tr("Follow pointer and open companion"));
-                    ui.add(egui::Slider::new(&mut prefs.mascot_size,40.0..=80.0).text(tr("Size")).suffix(" pt"));
-                    ui.label(muted(tr("Original celestial silk moth. Its state follows actual agent and search activity.")));
-                });
-                ui.add_space(16.0);
-                checkbox(ui,&mut self.preferences.quiet_notifications,tr("Quiet agent notifications"));
-                ui.add(egui::Slider::new(&mut self.preferences.notification_interval,5..=120).text(tr("Taskbar attention interval")).suffix(" s"));
-                section(ui, tr("Agent editing"), tr("Control how proposed changes reach your editor."));
-                checkbox(ui,&mut self.preferences.allow_auto_buffer,tr("Allow Auto buffer edits"))
-                    .on_hover_text(tr("Auto applies an eligible replacement to the active buffer. Use Save to write the file."));
             });
+        self.settings_open = open;
+        ctx.data_mut(|d| {
+            d.insert_temp(tab_id, active_tab);
+            d.insert_temp(query_id, search);
+        });
     }
 
     pub(super) fn about_window(&mut self, ctx: &egui::Context) {
@@ -873,6 +1435,84 @@ impl Editor {
 }
 
 /// Home action card: icon tile, title, shortcut; lifts and lights its border on hover.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SettingsSection {
+    General,
+    Appearance,
+    Background,
+    Editor,
+    Notifications,
+    Agents,
+    Integrations,
+}
+
+impl SettingsSection {
+    const ALL: [Self; 7] = [
+        Self::General,
+        Self::Appearance,
+        Self::Background,
+        Self::Editor,
+        Self::Notifications,
+        Self::Agents,
+        Self::Integrations,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::General => "General",
+            Self::Appearance => "Appearance",
+            Self::Background => "Background & ASCII",
+            Self::Editor => "Editor",
+            Self::Notifications => "Notifications",
+            Self::Agents => "Agents",
+            Self::Integrations => "Integrations",
+        }
+    }
+
+    fn icon(self) -> Icon {
+        match self {
+            Self::General => Icon::Settings,
+            Self::Appearance => Icon::Palette,
+            Self::Background => Icon::Sparkles,
+            Self::Editor => Icon::Code,
+            Self::Notifications => Icon::Bell,
+            Self::Agents => Icon::Hub,
+            Self::Integrations => Icon::Globe,
+        }
+    }
+
+    fn matches(self, query: &str) -> bool {
+        let keywords = match self {
+            Self::General => "general version language import setup shortcut",
+            Self::Appearance => "appearance theme obsidian dark light scale zoom motion contrast",
+            Self::Background => "background ascii dither bloom orbital luma mascot tint",
+            Self::Editor => "editor font size syntax colors density compact",
+            Self::Notifications => "notifications quiet taskbar attention",
+            Self::Agents => "agents auto buffer edits",
+            Self::Integrations => "integrations discord presence",
+        };
+        keywords.contains(query) || self.label().to_ascii_lowercase().contains(query)
+    }
+}
+
+fn setting_row(ui: &mut Ui, title: &str, subtitle: &str, control: impl FnOnce(&mut Ui)) {
+    ui.horizontal(|ui| {
+        let left_w = (ui.available_width() - 160.0).max(120.0);
+        ui.allocate_ui_with_layout(
+            egui::vec2(left_w, 36.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.label(RichText::new(tr(title)).size(BODY).color(colors().text));
+                ui.add(egui::Label::new(muted(subtitle)).wrap());
+            },
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), control);
+    });
+    ui.add_space(6.0);
+    ui.separator();
+    ui.add_space(6.0);
+}
+
 fn home_card(ui: &mut Ui, width: f32, icon: Icon, title: &str, detail: &str) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 64.0), egui::Sense::click());
     #[cfg(test)]

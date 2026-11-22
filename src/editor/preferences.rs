@@ -31,6 +31,7 @@ pub(super) struct Preferences {
     pub(super) assistant_open: bool,
     pub(super) tools_open: bool,
     pub(super) allow_auto_buffer: bool,
+    pub(super) setup_completed: bool,
     pub(super) sidebar_width: f32,
     pub(super) assistant_width: f32,
     pub(super) tools_height: f32,
@@ -67,6 +68,7 @@ impl Default for Preferences {
             assistant_open: true,
             tools_open: false,
             allow_auto_buffer: false,
+            setup_completed: false,
             sidebar_width: 220.0,
             assistant_width: 340.0,
             tools_height: 210.0,
@@ -203,6 +205,203 @@ impl Preferences {
         self.recent.insert(0, root.to_owned());
         self.recent.truncate(8);
     }
+
+    /// Safely import allowlisted UI settings from a known local editor config file.
+    pub(super) fn import_from(&mut self, source: ExternalEditor) -> Result<Vec<&'static str>, String> {
+        let Some(path) = source.settings_path() else {
+            return Err(format!("Could not locate {} settings folder.", source.name()));
+        };
+        if !path.is_file() {
+            return Err(format!("No {} settings file found.", source.name()));
+        }
+        self.import_from_path(source, &path)
+    }
+
+    fn import_from_path(
+        &mut self,
+        source: ExternalEditor,
+        path: &Path,
+    ) -> Result<Vec<&'static str>, String> {
+        const MAX_IMPORT_BYTES: u64 = 512 * 1024;
+        let meta = fs::metadata(path)
+            .map_err(|e| format!("Could not read {} settings: {e}", source.name()))?;
+        if meta.len() > MAX_IMPORT_BYTES {
+            return Err(format!("{} settings file is too large to import.", source.name()));
+        }
+        let raw = fs::read_to_string(path)
+            .map_err(|e| format!("Could not read {} settings: {e}", source.name()))?;
+        let cleaned = strip_jsonc(&raw);
+        let value: serde_json::Value = serde_json::from_str(&cleaned)
+            .map_err(|_| format!("{} settings file is not valid JSON.", source.name()))?;
+        let Some(obj) = value.as_object() else {
+            return Err(format!("{} settings file must be a JSON object.", source.name()));
+        };
+        let mut applied = Vec::new();
+        let font_key = match source {
+            ExternalEditor::Zed => "buffer_font_size",
+            _ => "editor.fontSize",
+        };
+        if let Some(size) = obj.get(font_key).and_then(|v| v.as_f64())
+            && size.is_finite()
+        {
+            self.font_size = (size as f32).clamp(EDITOR_FONT.0, EDITOR_FONT.1);
+            applied.push("font size");
+        }
+        let theme_name = match source {
+            ExternalEditor::Zed => obj
+                .get("theme")
+                .and_then(|v| v.as_str().or_else(|| v.get("mode").and_then(|m| m.as_str()))),
+            _ => obj.get("workbench.colorTheme").and_then(|v| v.as_str()),
+        };
+        if let Some(name) = theme_name {
+            let lower = name.to_ascii_lowercase();
+            if lower.contains("light") || lower.contains("day") {
+                self.theme = super::theme::Theme::Light;
+                applied.push("theme");
+            } else if lower.contains("high contrast") {
+                self.theme = super::theme::Theme::HighContrast;
+                applied.push("theme");
+            } else if !lower.is_empty() {
+                self.theme = super::theme::Theme::Obsidian;
+                applied.push("theme");
+            }
+        }
+        if let Some(line_height) = obj.get("editor.lineHeight").and_then(|v| v.as_f64())
+            && line_height.is_finite()
+            && line_height > 0.0
+        {
+            self.compact = line_height <= 1.25 || (line_height > 10.0 && line_height <= 20.0);
+            applied.push("density");
+        }
+        if applied.is_empty() {
+            return Err(format!("No compatible settings found in {}.", source.name()));
+        }
+        Ok(applied)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ExternalEditor {
+    VsCode,
+    Cursor,
+    Windsurf,
+    Zed,
+}
+
+impl ExternalEditor {
+    pub(super) const ALL: [Self; 4] = [Self::VsCode, Self::Cursor, Self::Windsurf, Self::Zed];
+
+    pub(super) fn name(self) -> &'static str {
+        match self {
+            Self::VsCode => "VS Code",
+            Self::Cursor => "Cursor",
+            Self::Windsurf => "Windsurf",
+            Self::Zed => "Zed",
+        }
+    }
+
+    pub(super) fn settings_path(self) -> Option<PathBuf> {
+        #[cfg(windows)]
+        let base = std::env::var_os("APPDATA").map(PathBuf::from)?;
+        #[cfg(target_os = "macos")]
+        let base = std::env::var_os("HOME")
+            .map(PathBuf::from)?
+            .join("Library/Application Support");
+        #[cfg(all(unix, not(target_os = "macos")))]
+        let base = std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
+
+        Some(match self {
+            Self::VsCode => base.join("Code").join("User").join("settings.json"),
+            Self::Cursor => base.join("Cursor").join("User").join("settings.json"),
+            Self::Windsurf => base.join("Windsurf").join("User").join("settings.json"),
+            Self::Zed => {
+                #[cfg(target_os = "macos")]
+                {
+                    std::env::var_os("HOME")
+                        .map(PathBuf::from)?
+                        .join(".config/zed/settings.json")
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    base.join("Zed").join("settings.json")
+                }
+            }
+        })
+    }
+}
+
+/// Remove `//` comments and trailing commas from JSONC editor configs without touching strings.
+fn strip_jsonc(input: &str) -> String {
+    let mut no_comments = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    let mut in_string = false;
+    let mut escaped = false;
+    while let Some(c) = chars.next() {
+        if in_string {
+            no_comments.push(c);
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        if c == '"' {
+            in_string = true;
+            no_comments.push(c);
+        } else if c == '/' && chars.peek() == Some(&'/') {
+            for next in chars.by_ref() {
+                if next == '\n' {
+                    no_comments.push('\n');
+                    break;
+                }
+            }
+        } else {
+            no_comments.push(c);
+        }
+    }
+    // Strip trailing commas before `}` or `]`.
+    let bytes = no_comments.as_bytes();
+    let mut out = String::with_capacity(no_comments.len());
+    let mut i = 0;
+    in_string = false;
+    escaped = false;
+    while i < bytes.len() {
+        let ch = no_comments[i..].chars().next().unwrap();
+        let len = ch.len_utf8();
+        if in_string {
+            out.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            i += len;
+            continue;
+        }
+        if ch == '"' {
+            in_string = true;
+            out.push(ch);
+            i += len;
+            continue;
+        }
+        if ch == ',' {
+            let rest = no_comments[i + len..].trim_start();
+            if rest.starts_with('}') || rest.starts_with(']') {
+                i += len;
+                continue;
+            }
+        }
+        out.push(ch);
+        i += len;
+    }
+    out
 }
 
 #[cfg(test)]
@@ -254,6 +453,36 @@ mod tests {
         assert_eq!(loaded.font_size, 12.0);
         assert_eq!(loaded.transitions, Transitions::Subtle);
         assert!(!loaded.discord.enabled && !loaded.discord.show_project);
+        Ok(())
+    }
+
+    #[test]
+    fn external_editor_import_applies_safe_fields_and_bounds_values() -> io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("settings.json");
+        fs::write(
+            &path,
+            r#"{
+                // User editor preferences
+                "editor.fontSize": 99,
+                "workbench.colorTheme": "Default Light Modern",
+                "editor.lineHeight": 18,
+                "secret.token": "should-never-be-read",
+            }"#,
+        )?;
+        let mut prefs = Preferences::default();
+        let applied = prefs
+            .import_from_path(ExternalEditor::VsCode, &path)
+            .expect("import valid settings");
+        assert_eq!(prefs.font_size, EDITOR_FONT.1);
+        assert_eq!(prefs.theme, super::super::theme::Theme::Light);
+        assert!(prefs.compact);
+        assert!(applied.contains(&"font size"));
+        assert!(applied.contains(&"theme"));
+
+        let oversized = dir.path().join("huge.json");
+        fs::write(&oversized, vec![b' '; 600 * 1024])?;
+        assert!(prefs.import_from_path(ExternalEditor::VsCode, &oversized).is_err());
         Ok(())
     }
 }
