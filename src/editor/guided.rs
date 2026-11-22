@@ -91,11 +91,13 @@ pub(super) struct SyncSnapshot {
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub(super) struct GuidedSession {
     pub(super) plan: GuidedPlan,
     pub(super) step_index: usize,
     pub(super) line_index: usize,
     pub(super) completed_steps: Vec<bool>,
+    pub(super) window_open: bool,
 }
 
 /// Runtime controller held by `Editor`.
@@ -126,6 +128,7 @@ impl GuidedController {
             step_index: 0,
             line_index: 0,
             completed_steps: vec![false; count],
+            window_open: true,
         };
         session.skip_blank_lines();
         self.session = Some(session);
@@ -147,15 +150,18 @@ impl GuidedController {
                     .completed_steps
                     .resize(session.plan.steps.len(), false);
                 session.skip_blank_lines();
+                let should_open = session.window_open;
                 self.session = Some(session);
+                self.open = should_open;
             }
         }
     }
 
-    pub(super) fn save_to_disk(&self, workspace: Option<&Path>) {
-        let (Some(root), Some(session)) = (workspace, &self.session) else {
+    pub(super) fn save_to_disk(&mut self, workspace: Option<&Path>) {
+        let (Some(root), Some(session)) = (workspace, self.session.as_mut()) else {
             return;
         };
+        session.window_open = self.open;
         if let Some(path) = persistence_path(root) {
             if let Some(parent) = path.parent() {
                 let _ = std::fs::create_dir_all(parent);
@@ -1171,7 +1177,11 @@ impl super::Editor {
                 });
             });
 
+        let prev_open = self.guided.open;
         self.guided.open = open;
+        if prev_open != open {
+            self.guided.save_to_disk(self.root.as_deref());
+        }
         if toggle_why {
             self.preferences.guided.show_why = !self.preferences.guided.show_why;
         }
@@ -1300,6 +1310,7 @@ mod tests {
             plan,
             step_index: 0,
             line_index: 0,
+            window_open: true,
         };
         let snap1 = session.sync_with_buffer(
             Some("src/main.ts"),

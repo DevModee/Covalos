@@ -260,7 +260,18 @@ impl Editor {
                 egui::TextStyle::Monospace.resolve(&ctx.style()).size,
             ),
         };
-        if let Some(root) = root {
+        editor.hub.agents.chat.model = editor.preferences.agent_model.clone();
+        if !editor.preferences.agent_effort.trim().is_empty() {
+            editor.hub.agents.chat.effort = editor.preferences.agent_effort.clone();
+        }
+        let startup_root = root.or_else(|| {
+            editor
+                .preferences
+                .last_workspace
+                .clone()
+                .filter(|p| p.is_dir())
+        });
+        if let Some(root) = startup_root {
             editor.open_workspace(root);
         }
         editor
@@ -288,6 +299,8 @@ impl Editor {
         if !self.save_conversation() {
             return;
         }
+        self.snapshot_workspace_state();
+        self.guided.save_to_disk(self.root.as_deref());
         self.preferences.remember(&root);
         self.reset_chat();
         self.hub.change_workspace(
@@ -297,7 +310,7 @@ impl Editor {
         self.include_project_note = false;
         self.guided.clear(None);
         self.guided.restore_for_workspace(&root);
-        self.root = Some(root);
+        self.root = Some(root.clone());
         self.hub_open = false;
         self.tools.workspace_changed();
         self.terminals.workspace_changed(self.root.as_deref());
@@ -313,6 +326,47 @@ impl Editor {
         self.find_open = false;
         self.notice = None;
         self.restore_conversation();
+        // Restore previously open tabs and active file for this workspace.
+        if let Some(saved) = self.preferences.workspace_files(&root).cloned() {
+            for file in &saved.files {
+                if file.is_file() {
+                    self.open_file(file.clone());
+                }
+            }
+            if let Some(active_path) = saved.active
+                && let Some(idx) = self.documents.iter().position(|d| d.path == active_path)
+            {
+                self.activate(idx);
+            }
+        }
+    }
+
+    fn snapshot_workspace_state(&mut self) {
+        if let Some(root) = self.root.clone() {
+            let files: Vec<PathBuf> = self.documents.iter().map(|d| d.path.clone()).collect();
+            let active = self
+                .active
+                .and_then(|i| self.documents.get(i))
+                .map(|d| d.path.clone());
+            self.preferences
+                .remember_workspace_files(&root, files, active);
+        }
+        self.preferences.agent_model = self.hub.agents.chat.model.clone();
+        self.preferences.agent_effort = self.hub.agents.chat.effort.clone();
+        self.preferences.agent_session = self.hub.agents.chat.dock.clone();
+        self.preferences.agent_detached = self.hub.agents.chat.detached.clone();
+    }
+
+    fn persist_all_state(&mut self) {
+        self.snapshot_workspace_state();
+        self.guided.save_to_disk(self.root.as_deref());
+        if let Some(rt) = self.hub.agents.runtime.as_mut() {
+            rt.save_sessions();
+        }
+        if let Some(path) = &self.preferences_path {
+            self.saved_preferences = self.preferences.clone();
+            let _ = self.preferences.save(path);
+        }
     }
 
     fn pick_file(&mut self) {
@@ -456,6 +510,7 @@ impl Editor {
                     self.conversation_exit_warning = true;
                     return;
                 }
+                self.persist_all_state();
                 self.force_close = true;
                 self.chat.run.take();
                 self.hub.general_chat.run.take();
@@ -996,6 +1051,7 @@ impl eframe::App for Editor {
         self.render(ctx);
         self.sync_preview(ctx, frame);
         self.autosave_conversation(ctx);
+        self.snapshot_workspace_state();
         if self.preferences != self.saved_preferences
             && !ctx.input(|input| input.pointer.any_down())
         {
@@ -1006,6 +1062,11 @@ impl eframe::App for Editor {
                 self.error(format!("Could not save editor settings. {error}"));
             }
         }
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        let _ = self.save_conversation();
+        self.persist_all_state();
     }
 }
 

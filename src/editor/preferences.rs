@@ -4,6 +4,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub(super) struct WorkspaceSession {
+    pub(super) root: PathBuf,
+    pub(super) files: Vec<PathBuf>,
+    pub(super) active: Option<PathBuf>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub(super) struct Preferences {
@@ -42,7 +50,14 @@ pub(super) struct Preferences {
     pub(super) agent_session: Option<String>,
     /// Conversations open in their own windows.
     pub(super) agent_detached: Vec<String>,
+    /// Last chosen CLI model and thinking effort for Agent Hub.
+    pub(super) agent_model: Option<String>,
+    pub(super) agent_effort: String,
     pub(super) preview_width: f32,
+    /// Last active workspace folder to reopen automatically on next launch.
+    pub(super) last_workspace: Option<PathBuf>,
+    /// Open tabs and active file remembered per workspace.
+    pub(super) workspace_sessions: Vec<WorkspaceSession>,
     pub(super) recent: Vec<PathBuf>,
     notes: Vec<(PathBuf, String)>,
     tasks: Vec<(PathBuf, Vec<super::hub::Task>)>,
@@ -79,7 +94,11 @@ impl Default for Preferences {
             tools_height: 210.0,
             agent_session: None,
             agent_detached: Vec::new(),
+            agent_model: None,
+            agent_effort: "Medium".into(),
             preview_width: 520.0,
+            last_workspace: None,
+            workspace_sessions: Vec::new(),
             recent: Vec::new(),
             notes: Vec::new(),
             tasks: Vec::new(),
@@ -250,9 +269,33 @@ impl Preferences {
     }
 
     pub(super) fn remember(&mut self, root: &Path) {
+        self.last_workspace = Some(root.to_owned());
         self.recent.retain(|p| p != root);
         self.recent.insert(0, root.to_owned());
         self.recent.truncate(8);
+    }
+
+    pub(super) fn remember_workspace_files(
+        &mut self,
+        root: &Path,
+        mut files: Vec<PathBuf>,
+        active: Option<PathBuf>,
+    ) {
+        files.truncate(32);
+        self.workspace_sessions.retain(|s| s.root != root);
+        self.workspace_sessions.insert(
+            0,
+            WorkspaceSession {
+                root: root.to_owned(),
+                files,
+                active,
+            },
+        );
+        self.workspace_sessions.truncate(16);
+    }
+
+    pub(super) fn workspace_files(&self, root: &Path) -> Option<&WorkspaceSession> {
+        self.workspace_sessions.iter().find(|s| s.root == root)
     }
 
     /// Safely import allowlisted UI settings from a known local editor config file.
