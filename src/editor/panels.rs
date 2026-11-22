@@ -481,11 +481,32 @@ impl Editor {
                         self.preferences.assistant_open = !self.preferences.assistant_open;
                     }
                 });
-                // Bottom cluster: terminal, library studio, and settings.
+                // Bottom cluster: terminal, notifications, library studio, and settings.
                 ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.y = 4.0;
                     if icon_button(ui, Icon::Settings, "Settings", self.settings_open).clicked() {
                         self.settings_open = !self.settings_open;
+                    }
+                    let bell = icon_button(
+                        ui,
+                        Icon::Bell,
+                        "Notifications",
+                        self.notifications_open,
+                    );
+                    if self.notifications.iter().any(|n| n.unread) {
+                        ui.painter().circle_filled(
+                            bell.rect.right_top() + egui::vec2(-6.0, 6.0),
+                            3.0,
+                            colors().accent,
+                        );
+                    }
+                    if bell.clicked() {
+                        self.notifications_open = !self.notifications_open;
+                        if self.notifications_open {
+                            for item in &mut self.notifications {
+                                item.unread = false;
+                            }
+                        }
                     }
                     if icon_button(ui, Icon::Library, "Library Studio", self.studio_open).clicked()
                     {

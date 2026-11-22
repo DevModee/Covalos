@@ -143,6 +143,10 @@ pub struct Editor {
     sidebar_open: bool,
     /// Live filename filter for the Explorer tree.
     explorer_filter: String,
+    notifications: Vec<shell::Notification>,
+    notifications_open: bool,
+    notifications_query: String,
+    notifications_filter: shell::NotificationFilter,
     discord: discord::Presence,
     session_started: u64,
     explorer_rect: Option<egui::Rect>,
@@ -235,6 +239,10 @@ impl Editor {
             sidebar_requested: false,
             sidebar_open: true,
             explorer_filter: String::new(),
+            notifications: Vec::new(),
+            notifications_open: false,
+            notifications_query: String::new(),
+            notifications_filter: shell::NotificationFilter::All,
             discord: discord::Presence::default(),
             session_started: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -468,7 +476,27 @@ impl Editor {
     fn error(&mut self, message: impl Into<String>) {
         let message = message.into();
         self.editor_log(&message);
+        self.notify(shell::NotificationSource::Covalos, message.clone(), true);
         self.notice = Some((true, message));
+    }
+
+    fn notify(
+        &mut self,
+        source: shell::NotificationSource,
+        message: impl Into<String>,
+        is_error: bool,
+    ) {
+        const MAX_NOTIFICATIONS: usize = 64;
+        let message = message.into();
+        if self.notifications.len() >= MAX_NOTIFICATIONS {
+            self.notifications.remove(0);
+        }
+        self.notifications.push(shell::Notification {
+            source,
+            message,
+            is_error,
+            unread: !self.notifications_open,
+        });
     }
 
     fn show_find(&mut self) {
@@ -873,6 +901,7 @@ impl Editor {
         self.tunnel_modal(ctx);
         self.settings_window(ctx);
         self.about_window(ctx);
+        self.notifications_modal(ctx);
         self.palette_modal(ctx);
         self.modals(ctx);
         self.conversation_close_modal(ctx);

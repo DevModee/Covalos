@@ -13,6 +13,63 @@ use eframe::egui::{self, Id, Key, RichText, ScrollArea, TextEdit, Ui};
 use super::{Editor, Pending, theme::*};
 use crate::workspace;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum NotificationSource {
+    Covalos,
+    #[allow(dead_code)]
+    Agent,
+    #[allow(dead_code)]
+    GitHub,
+}
+
+impl NotificationSource {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Covalos => "Covalos",
+            Self::Agent => "Agent",
+            Self::GitHub => "GitHub",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum NotificationFilter {
+    #[default]
+    All,
+    Covalos,
+    Agent,
+    GitHub,
+}
+
+impl NotificationFilter {
+    const ALL: [Self; 4] = [Self::All, Self::Covalos, Self::Agent, Self::GitHub];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Covalos => "Covalos",
+            Self::Agent => "Agent",
+            Self::GitHub => "GitHub",
+        }
+    }
+
+    fn matches(self, source: NotificationSource) -> bool {
+        match self {
+            Self::All => true,
+            Self::Covalos => source == NotificationSource::Covalos,
+            Self::Agent => source == NotificationSource::Agent,
+            Self::GitHub => source == NotificationSource::GitHub,
+        }
+    }
+}
+
+pub(super) struct Notification {
+    pub(super) source: NotificationSource,
+    pub(super) message: String,
+    pub(super) is_error: bool,
+    pub(super) unread: bool,
+}
+
 pub(super) struct Palette {
     query: String,
     focus: bool,
@@ -493,6 +550,148 @@ impl Editor {
                     .wrap(),
                 );
             });
+    }
+
+    pub(super) fn notifications_modal(&mut self, ctx: &egui::Context) {
+        if !self.notifications_open {
+            return;
+        }
+        let width = (ctx.content_rect().width() * 0.56).clamp(340.0, 620.0);
+        let area = egui::Modal::default_area(Id::new("notifications-modal")).anchor(
+            egui::Align2::CENTER_TOP,
+            egui::vec2(0.0, ctx.content_rect().height() * 0.12),
+        );
+        let mut close_requested = false;
+        let modal = egui::Modal::new(Id::new("notifications-modal"))
+            .frame(modal_frame().inner_margin(egui::Margin::same(14)))
+            .area(area)
+            .show(ctx, |ui| {
+                super::motion::enter(ui, Id::new("notifications-entry"), 0.16);
+                ui.set_width(width);
+                // Floating search header with inline clear/close control.
+                ui.horizontal(|ui| {
+                    let (_, icon_rect) = ui.allocate_space(egui::vec2(18.0, 24.0));
+                    draw_icon_sized(
+                        ui.painter(),
+                        icon_rect.center(),
+                        Icon::Search,
+                        colors().muted,
+                        15.0,
+                    );
+                    ui.add(
+                        TextEdit::singleline(&mut self.notifications_query)
+                            .hint_text(tr("Search notifications"))
+                            .frame(false)
+                            .desired_width((ui.available_width() - 34.0).max(120.0))
+                            .char_limit(120),
+                    );
+                    if icon_button(ui, Icon::Close, "Close", false).clicked() {
+                        close_requested = true;
+                    }
+                });
+                ui.add_space(6.0);
+                ui.separator();
+                ui.add_space(8.0);
+                // Source filter pills + clear all action.
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    for filter in NotificationFilter::ALL {
+                        let selected = self.notifications_filter == filter;
+                        let button = egui::Button::new(
+                            RichText::new(tr(filter.label()))
+                                .size(SMALL)
+                                .color(if selected {
+                                    colors().text
+                                } else {
+                                    colors().secondary
+                                }),
+                        )
+                        .fill(if selected {
+                            colors().elevated
+                        } else {
+                            egui::Color32::TRANSPARENT
+                        })
+                        .stroke(if selected {
+                            egui::Stroke::new(1.0_f32, colors().border)
+                        } else {
+                            egui::Stroke::NONE
+                        })
+                        .corner_radius(6);
+                        if ui.add(button).clicked() {
+                            self.notifications_filter = filter;
+                        }
+                    }
+                    if !self.notifications.is_empty() {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .add(egui::Button::new(muted(tr("Clear all"))).frame(false))
+                                .clicked()
+                            {
+                                self.notifications.clear();
+                            }
+                        });
+                    }
+                });
+                ui.add_space(10.0);
+                let query = self.notifications_query.trim().to_ascii_lowercase();
+                let items: Vec<&Notification> = self
+                    .notifications
+                    .iter()
+                    .rev()
+                    .filter(|item| {
+                        self.notifications_filter.matches(item.source)
+                            && (query.is_empty()
+                                || item.message.to_ascii_lowercase().contains(&query))
+                    })
+                    .collect();
+                if items.is_empty() {
+                    ui.add_space(14.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(muted(tr("No notifications yet.")));
+                    });
+                    ui.add_space(14.0);
+                } else {
+                    ScrollArea::vertical()
+                        .id_salt("notifications-list")
+                        .max_height((ctx.content_rect().height() * 0.42).min(300.0))
+                        .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.y = 4.0;
+                            for item in items {
+                                egui::Frame::new()
+                                    .fill(colors().inset)
+                                    .corner_radius(6)
+                                    .stroke(egui::Stroke::new(1.0_f32, colors().border))
+                                    .inner_margin(egui::Margin::symmetric(10, 8))
+                                    .show(ui, |ui| {
+                                        ui.set_width(ui.available_width());
+                                        ui.horizontal(|ui| {
+                                            ui.label(
+                                                RichText::new(tr(item.source.label()))
+                                                    .size(SMALL)
+                                                    .color(if item.is_error {
+                                                        colors().error
+                                                    } else {
+                                                        colors().accent
+                                                    })
+                                                    .strong(),
+                                            );
+                                            ui.add(
+                                                egui::Label::new(
+                                                    RichText::new(&item.message)
+                                                        .size(BODY)
+                                                        .color(colors().text),
+                                                )
+                                                .wrap(),
+                                            );
+                                        });
+                                    });
+                            }
+                        });
+                }
+            });
+        if close_requested || modal.should_close() {
+            self.notifications_open = false;
+        }
     }
 
     pub(super) fn palette_modal(&mut self, ctx: &egui::Context) {
