@@ -391,6 +391,7 @@ impl Editor {
             self.preferences.theme,
             self.preferences.font_size,
             self.preferences.high_contrast,
+            self.preferences.brightness.to_bits(),
         );
         egui::Frame::new()
             .fill(colors().surface.gamma_multiply(0.92))
@@ -422,6 +423,18 @@ impl Editor {
                 );
                 setting_row(
                     ui,
+                    "Surface brightness",
+                    "Adjust background clarity across chrome, Explorer, and editor.",
+                    |ui| {
+                        ui.add(
+                            egui::Slider::new(&mut self.preferences.brightness, 0.0..=1.0)
+                                .step_by(0.05)
+                                .show_value(false),
+                        );
+                    },
+                );
+                setting_row(
+                    ui,
                     "Editor density",
                     "Use tighter spacing across code and lists.",
                     |ui| {
@@ -442,8 +455,10 @@ impl Editor {
                 self.preferences.theme,
                 self.preferences.font_size,
                 self.preferences.high_contrast,
+                self.preferences.brightness.to_bits(),
             )
         {
+            set_brightness(self.preferences.brightness);
             install(
                 ui.ctx(),
                 self.preferences.font_size,
@@ -513,6 +528,7 @@ impl Editor {
                     self.preferences.theme,
                     self.preferences.font_size,
                     self.preferences.high_contrast,
+                    self.preferences.brightness.to_bits(),
                 );
                 let nav_w = 176.0;
                 let content_h = (ui.available_height() - 4.0).max(200.0);
@@ -762,6 +778,14 @@ impl Editor {
                                         }
                                     });
                                     ui.add_space(10.0);
+                                    ui.add(
+                                        egui::Slider::new(
+                                            &mut self.preferences.brightness,
+                                            0.0..=1.0,
+                                        )
+                                        .step_by(0.05)
+                                        .text(tr("Surface brightness")),
+                                    );
                                     ui.add(
                                         egui::Slider::new(&mut self.preferences.motion, 0.0..=1.0)
                                             .step_by(0.05)
@@ -1086,8 +1110,10 @@ impl Editor {
                         self.preferences.theme,
                         self.preferences.font_size,
                         self.preferences.high_contrast,
+                        self.preferences.brightness.to_bits(),
                     )
                 {
+                    set_brightness(self.preferences.brightness);
                     install(
                         ctx,
                         self.preferences.font_size,
