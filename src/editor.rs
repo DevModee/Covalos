@@ -832,11 +832,11 @@ impl Editor {
         if self.studio_open && !self.hub_open {
             self.activity_rail(ctx);
             egui::CentralPanel::default()
-                .frame(theme::island(egui::Margin::same(0)).fill(theme::colors().canvas))
+                .frame(theme::centre_island(egui::Margin::same(0)).fill(theme::colors().canvas))
                 .show(ctx, |ui| self.library_studio(ui));
         } else if self.hub_open {
             egui::CentralPanel::default()
-                .frame(theme::island(egui::Margin::same(0)).fill(theme::colors().canvas))
+                .frame(theme::centre_island(egui::Margin::same(0)).fill(theme::colors().canvas))
                 .show(ctx, |ui| self.agent_hub(ui));
         } else {
             let focus = self.clean.focus;
@@ -854,7 +854,7 @@ impl Editor {
             }
             self.preview_panel(ctx);
             egui::CentralPanel::default()
-                .frame(theme::island(egui::Margin::same(0)).fill(theme::colors().inset))
+                .frame(theme::centre_island(egui::Margin::same(0)))
                 .show(ctx, |ui| self.editor_panel(ui));
         }
         if !self.hub_open && !self.studio_open {

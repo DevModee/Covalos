@@ -48,7 +48,7 @@ pub(super) struct Preferences {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
-            theme: super::theme::Theme::Nocturne,
+            theme: super::theme::Theme::Obsidian,
             syntax: super::syntax::SyntaxStyle::Auto,
             motion: 1.0,
             library_shortcut: "Ctrl+Shift+L".into(),

@@ -10,12 +10,12 @@ pub(super) const BODY: f32 = 13.0;
 pub(super) const LEAD: f32 = 15.0;
 pub(super) const HEADING: f32 = 20.0;
 pub(super) const DISPLAY: f32 = 40.0;
-pub(super) const CHROME_HEIGHT: f32 = 44.0;
-pub(super) const RAIL_WIDTH: f32 = 48.0;
-pub(super) const TAB_HEIGHT: f32 = 36.0;
-pub(super) const BREADCRUMB_HEIGHT: f32 = 28.0;
-pub(super) const STATUS_HEIGHT: f32 = 25.0;
-pub(super) const PANEL_PADDING: i8 = 12;
+pub(super) const CHROME_HEIGHT: f32 = 40.0;
+pub(super) const RAIL_WIDTH: f32 = 44.0;
+pub(super) const TAB_HEIGHT: f32 = 34.0;
+pub(super) const BREADCRUMB_HEIGHT: f32 = 26.0;
+pub(super) const STATUS_HEIGHT: f32 = 24.0;
+pub(super) const PANEL_PADDING: i8 = 10;
 pub(super) const CONTROL_RADIUS: u8 = 6;
 pub(super) const CHECKBOX_RADIUS: u8 = 2;
 pub(super) const MODAL_RADIUS: u8 = 12;
@@ -29,6 +29,7 @@ pub(super) const COMPACT_CODE_LINE_HEIGHT: f32 = 1.16;
 #[serde(rename_all = "snake_case")]
 pub(super) enum Theme {
     #[default]
+    Obsidian,
     Nocturne,
     Dark,
     Midnight,
@@ -37,7 +38,8 @@ pub(super) enum Theme {
     HighContrast,
 }
 impl Theme {
-    pub(super) const ALL: [Self; 6] = [
+    pub(super) const ALL: [Self; 7] = [
+        Self::Obsidian,
         Self::Nocturne,
         Self::Dark,
         Self::Midnight,
@@ -47,6 +49,7 @@ impl Theme {
     ];
     pub(super) fn name(self) -> &'static str {
         match self {
+            Self::Obsidian => "Covalos Obsidian",
             Self::Nocturne => "Covalos Nocturne",
             Self::Dark => "Covalos Graphite",
             Self::Midnight => "Covalos Midnight",
@@ -88,6 +91,31 @@ pub(super) struct Palette {
 impl Theme {
     pub(super) fn colors(self) -> Palette {
         match self {
+            // Neutral obsidian chrome framing an elevated island card with hairline borders
+            // and a crisp electric-blue focus accent.
+            Self::Obsidian => Palette {
+                canvas: Color32::from_rgb(12, 12, 14),
+                surface: Color32::from_rgb(20, 20, 23),
+                inset: Color32::from_rgb(22, 22, 26),
+                elevated: Color32::from_rgb(31, 31, 36),
+                hover: Color32::from_rgb(39, 39, 46),
+                border: Color32::from_rgb(42, 42, 48),
+                control_border: Color32::from_rgb(63, 63, 72),
+                text: Color32::from_rgb(242, 242, 245),
+                secondary: Color32::from_rgb(176, 176, 186),
+                muted: Color32::from_rgb(138, 138, 150),
+                disabled: Color32::from_rgb(98, 98, 110),
+                accent: Color32::from_rgb(106, 176, 255),
+                accent_hover: Color32::from_rgb(148, 200, 255),
+                accent_bg: Color32::from_rgb(21, 37, 63),
+                success: Color32::from_rgb(110, 222, 165),
+                error: Color32::from_rgb(255, 132, 146),
+                warning: Color32::from_rgb(246, 198, 118),
+                syntax_string: Color32::from_rgb(122, 222, 164),
+                syntax_number: Color32::from_rgb(245, 178, 116),
+                caret: Color32::from_rgb(96, 170, 255),
+                selection: Color32::from_rgba_unmultiplied(59, 130, 246, 76),
+            },
             // Deep violet-black base: surfaces separated by value, hairline borders, a lilac
             // accent and a luminous pink caret. Neutrals carry a slight violet cast.
             Self::Nocturne => Palette {
@@ -233,7 +261,7 @@ impl Theme {
 }
 thread_local! {
     // egui renders on its UI thread. Each test and viewport installs its palette before drawing.
-    static ACTIVE_THEME: std::cell::Cell<Theme> = const { std::cell::Cell::new(Theme::Nocturne) };
+    static ACTIVE_THEME: std::cell::Cell<Theme> = const { std::cell::Cell::new(Theme::Obsidian) };
 }
 pub(super) fn active() -> Theme {
     ACTIVE_THEME.with(|theme| theme.get())
@@ -362,12 +390,12 @@ pub(super) fn install(ctx: &Context, font_size: f32, high_contrast: bool, theme:
     ctx.set_style(style);
 }
 
-/// Corner radius and spacing of the panel "islands": every tool window is a rounded
-/// surface floating on the darker canvas, separated by a 6 pt gutter (IntelliJ-style).
+/// Corner radius and spacing of the workbench islands: recessed outer chrome framing
+/// elevated, rounded content surfaces with 1px hairline borders.
 pub(super) const ISLAND_RADIUS: u8 = 10;
-pub(super) const ISLAND_GAP: i8 = 3;
+pub(super) const ISLAND_GAP: i8 = 4;
 
-/// Window chrome (title bar, activity rail, status bar): flat, on the canvas.
+/// Window chrome (title bar, activity rail, status bar): flat, on the recessed canvas.
 pub(super) fn panel_frame(margin: Margin) -> Frame {
     Frame::new().fill(colors().canvas).inner_margin(margin)
 }
@@ -376,6 +404,16 @@ pub(super) fn panel_frame(margin: Margin) -> Frame {
 pub(super) fn island(margin: Margin) -> Frame {
     Frame::new()
         .fill(colors().surface)
+        .inner_margin(margin)
+        .outer_margin(Margin::same(ISLAND_GAP))
+        .corner_radius(ISLAND_RADIUS)
+        .stroke(Stroke::new(1.0_f32, colors().border))
+}
+
+/// Primary floating center card for the editor, studio, and hub views.
+pub(super) fn centre_island(margin: Margin) -> Frame {
+    Frame::new()
+        .fill(colors().inset)
         .inner_margin(margin)
         .outer_margin(Margin::same(ISLAND_GAP))
         .corner_radius(ISLAND_RADIUS)

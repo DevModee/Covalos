@@ -105,7 +105,7 @@ impl SyntaxStyle {
             Self::Auto => match theme {
                 Theme::Light => Self::Daylight,
                 Theme::HighContrast => Self::HighContrast,
-                Theme::Dark | Theme::Midnight => Self::Graphite,
+                Theme::Obsidian | Theme::Dark | Theme::Midnight => Self::Graphite,
                 Theme::Nocturne | Theme::Violet => Self::Nocturne,
             },
             other => other,
