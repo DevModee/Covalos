@@ -162,11 +162,16 @@ fn frame(op: u32, payload: &serde_json::Value) -> Vec<u8> {
     out
 }
 
+pub(super) const BETA_URL: &str = "https://www.matiasgs.com/trabajo/covalos";
+
 fn activity_payload(activity: Option<&Activity>, nonce: u64) -> serde_json::Value {
     let activity = activity.map(|a| {
         let mut value = serde_json::json!({
             "details": a.details,
-            "assets": { "large_image": "covalos", "large_text": "Covalos" },
+            "assets": { "large_image": "covalos", "large_text": "Covalos (Beta)" },
+            "buttons": [
+                { "label": "View Covalos Beta", "url": BETA_URL }
+            ],
         });
         if let Some(state) = &a.state {
             value["state"] = serde_json::json!(state);

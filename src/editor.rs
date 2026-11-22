@@ -945,7 +945,7 @@ impl Editor {
             (state, _) => state,
         };
         let activity = discord::Activity {
-            details: "Developing with COVALOS".to_owned(),
+            details: "Covalos · In Beta".to_owned(),
             state,
             started: prefs.show_elapsed.then_some(self.session_started),
         };
