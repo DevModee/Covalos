@@ -408,6 +408,8 @@ const SPANISH: &[(&str, &str)] = &[
         "Use your Claude, Codex, or Gemini subscription via official CLI or connect an API key.",
         "Usá tu suscripción de Claude, Codex o Gemini mediante el CLI oficial o conectá una API key.",
     ),
+    ("Install CLI", "Instalar CLI"),
+    ("Installing CLI…", "Instalando CLI…"),
     ("Interface scale", "Escala de la interfaz"),
     ("Reset editor zoom", "Restablecer zoom del editor"),
     ("Reset Explorer zoom", "Restablecer zoom del Explorador"),

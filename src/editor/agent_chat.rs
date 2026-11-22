@@ -107,6 +107,50 @@ pub(super) struct AddAi {
     key: String,
     created: Option<AccountId>,
     error: Option<String>,
+    install: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
+}
+
+fn cli_npm_package(provider: usize) -> Option<&'static str> {
+    match provider {
+        0 => Some("@anthropic-ai/claude-code"),
+        1 => Some("@openai/codex"),
+        2 => Some("@google/gemini-cli"),
+        _ => None,
+    }
+}
+
+fn spawn_cli_install(
+    package: &'static str,
+    ctx: egui::Context,
+) -> std::sync::mpsc::Receiver<Result<(), String>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut command = std::process::Command::new(if cfg!(windows) { "npm.cmd" } else { "npm" });
+        crate::process::configure(&mut command);
+        let result = command
+            .args(["install", "-g", package])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .map_err(|e| format!("Could not run npm (install Node.js first): {e}"))
+            .and_then(|out| {
+                if out.status.success() {
+                    Ok(())
+                } else {
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    let line = stderr
+                        .lines()
+                        .rev()
+                        .find(|l| !l.trim().is_empty())
+                        .unwrap_or("npm install failed");
+                    Err(line.trim().to_owned())
+                }
+            });
+        let _ = tx.send(result);
+        ctx.request_repaint();
+    });
+    rx
 }
 
 enum Action {
@@ -1624,6 +1668,23 @@ impl Editor {
                     .detections
                     .get(&kind)
                     .is_some_and(|d| d.program.is_some());
+                if let Some(rx) = &form.install {
+                    match rx.try_recv() {
+                        Ok(Ok(())) => {
+                            form.install = None;
+                            form.error = None;
+                            runtime.redetect();
+                        }
+                        Ok(Err(err)) => {
+                            form.install = None;
+                            form.error = Some(err);
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                            form.install = None;
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                    }
+                }
                 if !installed {
                     ui.label(RichText::new(tr("Not installed on this PC")).color(colors().warning));
                     ui.label(meta_text(match form.provider {
@@ -1631,9 +1692,20 @@ impl Editor {
                         1 => "Install the Codex app or: npm install -g @openai/codex",
                         _ => "Install: npm install -g @google/gemini-cli",
                     }));
-                    if ui.small_button(tr("Detect again")).clicked() {
-                        runtime.redetect();
-                    }
+                    ui.horizontal(|ui| {
+                        if form.install.is_some() {
+                            busy_indicator(ui);
+                            ui.label(muted(tr("Installing CLI…")));
+                        } else if let Some(pkg) = cli_npm_package(form.provider)
+                            && ui.add(primary(tr("Install CLI"))).clicked()
+                        {
+                            form.error = None;
+                            form.install = Some(spawn_cli_install(pkg, ctx.clone()));
+                        }
+                        if ui.small_button(tr("Detect again")).clicked() {
+                            runtime.redetect();
+                        }
+                    });
                     ui.add_space(6.0);
                 }
                 let isolated = runtime
