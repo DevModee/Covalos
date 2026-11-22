@@ -62,7 +62,7 @@ impl Default for Preferences {
             discord: super::discord::DiscordPreferences::default(),
             language: super::i18n::Language::system(),
             identity: super::identity::IdentityPreferences::default(),
-            font_size: 14.0,
+            font_size: 15.0,
             compact: false,
             reduce_motion: false,
             quiet_notifications: false,

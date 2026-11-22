@@ -200,7 +200,7 @@ impl Editor {
             .map(workspace::filename)
             .unwrap_or_else(|| tr("Projects").to_owned());
         ui.menu_button(
-            RichText::new(format!("{label}  ▾"))
+            RichText::new(label)
                 .size(BODY)
                 .color(if self.root.is_some() {
                     colors().text
@@ -208,17 +208,22 @@ impl Editor {
                     colors().secondary
                 }),
             |ui| {
+                ui.set_min_width(180.0);
                 if !self.preferences.recent.is_empty() {
                     for root in self.preferences.recent.clone() {
                         let is_active = self.root.as_ref() == Some(&root);
                         let name = workspace::filename(&root);
                         let text = if is_active {
-                            format!("✓  {name}")
+                            format!("•  {name}")
                         } else {
-                            format!("    {name}")
+                            format!("   {name}")
                         };
                         if ui
-                            .button(text)
+                            .button(RichText::new(text).color(if is_active {
+                                colors().accent
+                            } else {
+                                colors().text
+                            }))
                             .on_hover_text(root.display().to_string())
                             .clicked()
                         {

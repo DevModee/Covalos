@@ -5,9 +5,9 @@ pub(crate) const BRAND: &str = crate::brand::NAME;
 pub(crate) const TITLE: &str = crate::brand::TITLE;
 
 pub(super) const UNIT: f32 = 4.0;
-pub(super) const SMALL: f32 = 12.0;
-pub(super) const BODY: f32 = 13.0;
-pub(super) const LEAD: f32 = 15.0;
+pub(super) const SMALL: f32 = 12.5;
+pub(super) const BODY: f32 = 13.5;
+pub(super) const LEAD: f32 = 15.5;
 pub(super) const HEADING: f32 = 20.0;
 pub(super) const DISPLAY: f32 = 40.0;
 pub(super) const CHROME_HEIGHT: f32 = 40.0;
@@ -457,6 +457,21 @@ pub(super) fn centre_island(margin: Margin) -> Frame {
         .inner_margin(margin)
         .outer_margin(Margin {
             left: 2,
+            right: 6,
+            top: 0,
+            bottom: 4,
+        })
+        .corner_radius(ISLAND_RADIUS)
+        .stroke(Stroke::new(1.0_f32, colors().border))
+}
+
+/// Right-side dock card aligned flush with the top edge of the center island.
+pub(super) fn side_island(margin: Margin) -> Frame {
+    Frame::new()
+        .fill(colors().surface)
+        .inner_margin(margin)
+        .outer_margin(Margin {
+            left: 4,
             right: 6,
             top: 0,
             bottom: 4,

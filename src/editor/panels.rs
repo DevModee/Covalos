@@ -154,8 +154,8 @@ impl Editor {
                 if drag.double_clicked() {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
                 }
-                let left_width = if rect.width() > 1100.0 { 330.0 } else { 250.0 };
-                let right_width = if rect.width() > 1000.0 { 312.0 } else { 248.0 };
+                let left_width = if rect.width() > 1100.0 { 400.0 } else { 290.0 };
+                let right_width = if rect.width() > 1000.0 { 260.0 } else { 210.0 };
                 let left =
                     egui::Rect::from_min_size(rect.min, egui::vec2(left_width, rect.height()));
                 ui.scope_builder(
@@ -576,7 +576,7 @@ impl Editor {
         };
         let max = (ctx.content_rect().width() - RAIL_WIDTH - MIN_EDITOR_WIDTH - assistant)
             .clamp(180.0, 480.0);
-        let min = (160.0 * zoom).min(max);
+        let min = (110.0 * zoom).min(max);
         let mut collapse_sidebar = false;
         let panel = SidePanel::left("workspace")
             .default_width(self.preferences.sidebar_width.clamp(min, max))
@@ -598,7 +598,7 @@ impl Editor {
                         } else {
                             0.0
                         };
-                        let title_w = (ui.available_width() - actions_w).max(40.0);
+                        let title_w = (ui.available_width() - actions_w).max(60.0);
                         let root_label = ui
                             .allocate_ui_with_layout(
                                 egui::vec2(title_w, 28.0),
@@ -614,17 +614,10 @@ impl Editor {
                                         colors().muted,
                                         14.0,
                                     );
-                                    ui.add(
-                                        egui::Label::new(
-                                            RichText::new(workspace::filename(&root))
-                                                .strong()
-                                                .color(colors().text),
-                                        )
-                                        .truncate(),
-                                    )
+                                    self.workspace_picker(ui);
                                 },
                             )
-                            .inner
+                            .response
                             .on_hover_text(root.display().to_string());
                         root_label.context_menu(|ui| {
                             selected = super::files::tree_menu(ui, &root, &root, true);
@@ -712,10 +705,15 @@ impl Editor {
                     Sidebar::Git => self.git_panel(ui),
                 }
             });
-        if collapse_sidebar {
+        let width = panel.response.rect.width();
+        if collapse_sidebar
+            || (width < 140.0 * zoom && !ctx.input(|i| i.pointer.any_down()))
+        {
             self.toggle_sidebar();
+            self.preferences.sidebar_width = 240.0;
+        } else {
+            self.preferences.sidebar_width = width;
         }
-        self.preferences.sidebar_width = panel.response.rect.width();
         self.explorer_rect = Some(panel.response.rect);
     }
 
@@ -1480,7 +1478,7 @@ impl Editor {
         let panel = SidePanel::right("assistant")
             .default_width(desired)
             .show_separator_line(false)
-            .frame(island(Margin::same(12)));
+            .frame(side_island(Margin::same(12)));
         let panel = if animating {
             panel
                 .exact_width((desired * progress).max(1.0))
