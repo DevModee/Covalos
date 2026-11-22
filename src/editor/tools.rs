@@ -1087,13 +1087,21 @@ impl Editor {
         let max_height = (ctx.content_rect().height() * 0.6).clamp(160.0, 560.0);
         let panel = TopBottomPanel::bottom("tools")
             .resizable(true)
-            .default_height(self.preferences.tools_height.min(max_height))
-            .height_range(130.0..=max_height)
-            .frame(super::theme::island(Margin::symmetric(12, 8)))
+            .show_separator_line(false)
+            .default_height(self.preferences.tools_height.min(max_height).max(130.0))
+            .height_range(80.0..=max_height)
+            .frame(super::theme::centre_island(Margin::symmetric(12, 8)))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    let (_, mark) = ui.allocate_space(egui::vec2(20.0, 24.0));
-                    draw_icon(ui.painter(), mark.center(), Icon::Terminal, colors().muted);
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    let (_, mark) = ui.allocate_space(egui::vec2(18.0, 24.0));
+                    draw_icon_sized(
+                        ui.painter(),
+                        mark.center(),
+                        Icon::Terminal,
+                        colors().muted,
+                        14.0,
+                    );
                     let (errors, warnings) = self.lsp.counts();
                     let problems = if errors + warnings > 0 {
                         format!("{} {}", tr("Problems"), errors + warnings)
@@ -1107,17 +1115,36 @@ impl Editor {
                         (Tab::Output, tr("Output").to_owned()),
                         (Tab::AgentLog, tr("Agent log").to_owned()),
                     ] {
-                        if ui.selectable_label(self.tools.tab == tab, label).clicked() {
+                        let selected = self.tools.tab == tab;
+                        let btn = egui::Button::new(
+                            RichText::new(label).size(SMALL).color(if selected {
+                                colors().text
+                            } else {
+                                colors().secondary
+                            }),
+                        )
+                        .fill(if selected {
+                            colors().elevated
+                        } else {
+                            egui::Color32::TRANSPARENT
+                        })
+                        .stroke(if selected {
+                            egui::Stroke::new(1.0_f32, colors().border)
+                        } else {
+                            egui::Stroke::NONE
+                        })
+                        .corner_radius(10);
+                        if ui.add(btn).clicked() {
                             self.tools.tab = tab;
                         }
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.button(tr("Hide")).clicked() {
+                        if icon_button(ui, Icon::Close, "Hide", false).clicked() {
                             self.preferences.tools_open = false;
                         }
                     });
                 });
-                ui.add_space(2.0);
+                ui.add_space(4.0);
                 match self.tools.tab {
                     Tab::Terminal => self.terminal_view(ui),
                     Tab::Ports => self.ports_view(ui),
@@ -1150,7 +1177,10 @@ impl Editor {
                 }
             });
         let height = panel.response.rect.height();
-        if height < max_height {
+        if height < 115.0 && !ctx.input(|i| i.pointer.any_down()) {
+            self.preferences.tools_open = false;
+            self.preferences.tools_height = 220.0;
+        } else if height < max_height {
             self.preferences.tools_height = height;
         }
     }

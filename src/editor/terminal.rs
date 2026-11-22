@@ -495,12 +495,30 @@ impl Editor {
             for (i, term) in terms.tabs.iter().enumerate() {
                 let text = format!(
                     "{}{}",
-                    if term.busy.is_some() { "● " } else { "" },
+                    if term.busy.is_some() { "• " } else { "" },
                     term.title()
                 );
                 let selected = i == terms.active || Some(i) == terms.second;
+                let btn = egui::Button::new(
+                    RichText::new(text).size(SMALL).color(if selected {
+                        colors().text
+                    } else {
+                        colors().secondary
+                    }),
+                )
+                .fill(if selected {
+                    colors().elevated
+                } else {
+                    egui::Color32::TRANSPARENT
+                })
+                .stroke(if selected {
+                    egui::Stroke::new(1.0_f32, colors().border)
+                } else {
+                    egui::Stroke::NONE
+                })
+                .corner_radius(10);
                 let response = ui
-                    .selectable_label(selected, RichText::new(text).size(SMALL))
+                    .add(btn)
                     .on_hover_text(term.cwd.display().to_string());
                 if response.clicked() {
                     terms.active = i;
@@ -510,29 +528,19 @@ impl Editor {
                     close = Some(i);
                 }
             }
-            if ui
-                .small_button("+")
-                .on_hover_text(tr("New terminal"))
-                .clicked()
-            {
+            if icon_button(ui, Icon::Add, "New terminal", false).clicked() {
                 add = true;
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
                 if !terms.tabs.is_empty()
-                    && ui
-                        .small_button(tr("Close"))
-                        .on_hover_text(tr("Close this terminal and stop its process"))
-                        .clicked()
+                    && icon_button(ui, Icon::Close, "Close", false).clicked()
                 {
                     close = Some(terms.active);
                 }
                 if terms.tabs.len() > 1 {
                     let split = terms.second.is_some();
-                    if ui
-                        .selectable_label(split, RichText::new(tr("Split")).size(SMALL))
-                        .on_hover_text(tr("Show two terminals side by side"))
-                        .clicked()
-                    {
+                    if icon_button(ui, Icon::Layers, "Split", split).clicked() {
                         terms.second = if split {
                             None
                         } else {
@@ -545,24 +553,25 @@ impl Editor {
                     }
                 }
                 if let Some(term) = terms.tabs.get(terms.active) {
-                    if ui
-                        .small_button(tr("Copy output"))
-                        .on_hover_text(tr("Copy the terminal text, including scrollback"))
-                        .clicked()
-                    {
+                    if icon_button(ui, Icon::Copy, "Copy output", false).clicked() {
                         ui.ctx().copy_text(term.contents());
                     }
-                    if ui
-                        .small_button("Ctrl+C")
-                        .on_hover_text(tr("Interrupt the running program"))
-                        .clicked()
+                    if icon_button(ui, Icon::Stop, "Interrupt the running program", false).clicked()
                     {
                         term.interrupt();
                         terms.focus_input = true;
                     }
                     for url in term.urls().into_iter().rev().take(2) {
+                        let preview_btn = egui::Button::new(
+                            RichText::new(format!("{} {url}", tr("Preview")))
+                                .size(SMALL)
+                                .color(colors().accent),
+                        )
+                        .fill(colors().elevated)
+                        .stroke(egui::Stroke::new(1.0_f32, colors().border))
+                        .corner_radius(8);
                         if ui
-                            .small_button(format!("{} {url}", tr("Preview")))
+                            .add(preview_btn)
                             .on_hover_text(tr("Open in the Covalos preview"))
                             .clicked()
                         {
