@@ -29,6 +29,37 @@ enum Tab {
     AgentLog,
 }
 
+#[derive(Clone, Copy, PartialEq, Default)]
+enum SourceTab {
+    #[default]
+    Changes,
+    GitHub,
+}
+
+#[derive(Clone, Copy, PartialEq, Default)]
+enum GitHubKind {
+    #[default]
+    PullRequests,
+    Issues,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CommitEntry {
+    hash: String,
+    subject: String,
+    author: String,
+    when: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GitHubItem {
+    number: u64,
+    title: String,
+    author: String,
+    state: String,
+    url: String,
+}
+
 #[derive(Default)]
 pub(super) struct Tools {
     tab: Tab,
@@ -40,6 +71,23 @@ pub(super) struct Tools {
     git_selected: Option<String>,
     /// Last complete `git status` output, kept while a diff is shown.
     git_status: String,
+    source_tab: SourceTab,
+    commit_message: String,
+    stage_all: bool,
+    changes_filter: String,
+    history_filter: String,
+    history_job: Option<Job>,
+    history_raw: String,
+    history: Vec<CommitEntry>,
+    history_loaded: bool,
+    github_kind: GitHubKind,
+    github_job: Option<Job>,
+    github_raw: String,
+    github_items: Vec<GitHubItem>,
+    github_loaded: bool,
+    github_error: Option<String>,
+    commit_job: Option<Job>,
+    commit_output: String,
 }
 
 /// What the Git job last produced: the working-tree summary or one file's diff.
@@ -172,6 +220,33 @@ impl Tools {
             && self.git_status != self.git_view
         {
             self.git_status.clone_from(&self.git_view);
+        }
+        let had_history = self.history_job.is_some();
+        drain(&mut self.history_job, &mut self.history_raw);
+        if had_history && self.history_job.is_none() {
+            self.history = parse_history(&self.history_raw);
+            self.history_loaded = true;
+        }
+        let had_github = self.github_job.is_some();
+        drain(&mut self.github_job, &mut self.github_raw);
+        if had_github && self.github_job.is_none() {
+            match parse_github_items(&self.github_raw) {
+                Ok(items) => {
+                    self.github_items = items;
+                    self.github_error = None;
+                }
+                Err(err) => {
+                    self.github_items.clear();
+                    self.github_error = Some(err);
+                }
+            }
+            self.github_loaded = true;
+        }
+        let had_commit = self.commit_job.is_some();
+        drain(&mut self.commit_job, &mut self.commit_output);
+        if had_commit && self.commit_job.is_none() {
+            append(&mut self.output, &self.commit_output);
+            self.commit_output.clear();
         }
     }
 
@@ -335,6 +410,71 @@ impl Editor {
         }
         self.tools.git_view.clear();
         self.tools.git = Some(worker(command, ctx.clone(), false));
+        if diff.is_none() {
+            self.git_refresh_history(ctx);
+        }
+    }
+
+    fn git_refresh_history(&mut self, ctx: &Context) {
+        let Some(root) = &self.root else { return };
+        let mut command = Command::new("git");
+        command
+            .current_dir(root)
+            .env("GIT_OPTIONAL_LOCKS", "0")
+            .args([
+                "--no-pager",
+                "log",
+                "-n",
+                "50",
+                "--format=%h\x1f%s\x1f%an\x1f%ar",
+            ]);
+        self.tools.history_raw.clear();
+        self.tools.history_job = Some(worker(command, ctx.clone(), false));
+    }
+
+    fn git_commit(&mut self, ctx: &Context) {
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        let message = self.tools.commit_message.trim().to_owned();
+        if message.is_empty() {
+            self.error("Enter a commit message first.");
+            return;
+        }
+        if self.tools.stage_all {
+            let mut add = Command::new("git");
+            hidden(&mut add);
+            let _ = add.current_dir(&root).args(["add", "-A"]).output();
+        }
+        let mut commit = Command::new("git");
+        commit
+            .current_dir(&root)
+            .args(["commit", "-m", &message]);
+        self.tools.commit_output.clear();
+        self.tools.commit_job = Some(worker(commit, ctx.clone(), true));
+        self.tools.commit_message.clear();
+        self.notice = Some((false, "Commit started".into()));
+        self.git_refresh(ctx, None);
+    }
+
+    fn github_refresh(&mut self, ctx: &Context) {
+        let Some(root) = &self.root else { return };
+        let sub = match self.tools.github_kind {
+            GitHubKind::PullRequests => "pr",
+            GitHubKind::Issues => "issue",
+        };
+        let mut command = Command::new("gh");
+        command.current_dir(root).args([
+            sub,
+            "list",
+            "--limit",
+            "20",
+            "--json",
+            "number,title,author,state,url",
+        ]);
+        self.tools.github_raw.clear();
+        self.tools.github_error = None;
+        self.tools.github_job = Some(worker(command, ctx.clone(), false));
     }
 
     /// Show one file's diff (working tree or staged) inside the Git panel.
@@ -378,7 +518,146 @@ impl Editor {
         {
             self.git_refresh(ui.ctx(), None);
         }
-        self.git_status_view(ui);
+        // Clean 2-tab switch: Changes & History vs GitHub (PRs / Issues).
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for (tab, label) in [
+                (SourceTab::Changes, "Changes"),
+                (SourceTab::GitHub, "GitHub"),
+            ] {
+                let selected = self.tools.source_tab == tab;
+                let btn = egui::Button::new(
+                    RichText::new(tr(label)).size(SMALL).color(if selected {
+                        colors().text
+                    } else {
+                        colors().secondary
+                    }),
+                )
+                .fill(if selected {
+                    colors().elevated
+                } else {
+                    egui::Color32::TRANSPARENT
+                })
+                .stroke(if selected {
+                    egui::Stroke::new(1.0_f32, colors().border)
+                } else {
+                    egui::Stroke::NONE
+                })
+                .corner_radius(6);
+                if ui.add(btn).clicked() {
+                    self.tools.source_tab = tab;
+                    if tab == SourceTab::GitHub && !self.tools.github_loaded {
+                        self.github_refresh(ui.ctx());
+                    }
+                }
+            }
+        });
+        ui.add_space(6.0);
+        match self.tools.source_tab {
+            SourceTab::Changes => self.git_status_view(ui),
+            SourceTab::GitHub => self.github_view(ui),
+        }
+    }
+
+    fn github_view(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for (kind, label) in [
+                (GitHubKind::PullRequests, "Pull Requests"),
+                (GitHubKind::Issues, "Issues"),
+            ] {
+                let selected = self.tools.github_kind == kind;
+                if ui.selectable_label(selected, tr(label)).clicked() && !selected {
+                    self.tools.github_kind = kind;
+                    self.github_refresh(ui.ctx());
+                }
+            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if icon_button(ui, Icon::Refresh, "Refresh changes", false).clicked() {
+                    self.github_refresh(ui.ctx());
+                }
+                if self.tools.github_job.is_some() {
+                    busy_indicator(ui);
+                }
+            });
+        });
+        ui.add_space(6.0);
+        if let Some(err) = &self.tools.github_error {
+            egui::Frame::new()
+                .fill(colors().surface)
+                .corner_radius(8)
+                .stroke(egui::Stroke::new(1.0_f32, colors().border))
+                .inner_margin(Margin::same(10))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.add(
+                        egui::Label::new(muted(
+                            "Install GitHub CLI (gh) and run gh auth login to view PRs and issues.",
+                        ))
+                        .wrap(),
+                    );
+                    if !err.is_empty() {
+                        ui.add_space(4.0);
+                        ui.add(egui::Label::new(muted(err)).wrap());
+                    }
+                });
+            return;
+        }
+        if self.tools.github_items.is_empty() && self.tools.github_job.is_none() {
+            ui.add_space(16.0);
+            ui.vertical_centered(|ui| {
+                ui.label(muted(tr("No open items found.")));
+            });
+            return;
+        }
+        ScrollArea::vertical()
+            .id_salt("github-items")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 4.0;
+                for item in &self.tools.github_items {
+                    let response = egui::Frame::new()
+                        .fill(colors().surface)
+                        .corner_radius(6)
+                        .stroke(egui::Stroke::new(1.0_f32, colors().border))
+                        .inner_margin(Margin::symmetric(8, 6))
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(format!("#{}", item.number))
+                                        .size(SMALL)
+                                        .color(colors().accent)
+                                        .strong(),
+                                );
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(&item.title)
+                                            .size(BODY)
+                                            .color(colors().text),
+                                    )
+                                    .truncate(),
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label(muted(&item.author));
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    ui.label(
+                                        RichText::new(&item.state)
+                                            .size(11.0)
+                                            .color(colors().success),
+                                    );
+                                });
+                            });
+                        })
+                        .response
+                        .interact(egui::Sense::click())
+                        .on_hover_text(&item.url);
+                    if response.clicked() && is_safe_github_url(&item.url) {
+                        ui.ctx().open_url(egui::OpenUrl::new_tab(&item.url));
+                    }
+                }
+            });
     }
 
     /// The selected file's diff, shown in the editor area like an IntelliJ diff tab.
@@ -450,35 +729,85 @@ impl Editor {
             ui.label(muted("This folder is not a Git repository."));
             return;
         }
-        if status.changes.is_empty() && self.tools.git.is_none() {
-            ui.add_space(24.0);
-            ui.vertical_centered(|ui| {
-                let (_, mark) = ui.allocate_space(egui::vec2(28.0, 28.0));
-                draw_icon_sized(
-                    ui.painter(),
-                    mark.center(),
-                    Icon::Check,
-                    colors().success,
-                    22.0,
+        // Commit composer card (commit message + Stage all + Commit button).
+        let mut do_commit = false;
+        egui::Frame::new()
+            .fill(colors().surface)
+            .corner_radius(8)
+            .stroke(egui::Stroke::new(1.0_f32, colors().border))
+            .inner_margin(Margin::same(8))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.tools.commit_message)
+                        .hint_text(tr("Commit message"))
+                        .frame(false)
+                        .desired_rows(2)
+                        .desired_width(f32::INFINITY)
+                        .char_limit(500),
                 );
-                ui.label(RichText::new(tr("Working tree clean")).color(colors().secondary));
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    checkbox(ui, &mut self.tools.stage_all, tr("Stage all"));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let can_commit = !self.tools.commit_message.trim().is_empty()
+                            && self.tools.commit_job.is_none();
+                        if ui.add_enabled(can_commit, primary(tr("Commit"))).clicked() {
+                            do_commit = true;
+                        }
+                    });
+                });
             });
-            return;
+        if do_commit {
+            self.git_commit(ui.ctx());
         }
+        ui.add_space(6.0);
+        // Filter changes input.
+        ui.add(
+            egui::TextEdit::singleline(&mut self.tools.changes_filter)
+                .hint_text(tr("Filter changes"))
+                .margin(Margin::symmetric(8, 4))
+                .desired_width(f32::INFINITY)
+                .char_limit(120),
+        );
+        ui.add_space(6.0);
+        let filter = self.tools.changes_filter.trim().to_ascii_lowercase();
         let mut open = None;
         let mut diff = None;
         ScrollArea::vertical()
             .id_salt("git-changes")
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                if status.changes.is_empty() && self.tools.git.is_none() {
+                    ui.add_space(10.0);
+                    ui.vertical_centered(|ui| {
+                        let (_, mark) = ui.allocate_space(egui::vec2(22.0, 22.0));
+                        draw_icon_sized(
+                            ui.painter(),
+                            mark.center(),
+                            Icon::Check,
+                            colors().success,
+                            18.0,
+                        );
+                        ui.label(RichText::new(tr("Working tree clean")).color(colors().secondary));
+                    });
+                    ui.add_space(10.0);
+                }
                 for group in [
                     Group::Conflicts,
                     Group::Staged,
                     Group::Changes,
                     Group::Untracked,
                 ] {
-                    let items: Vec<&Change> =
-                        status.changes.iter().filter(|c| c.group == group).collect();
+                    let items: Vec<&Change> = status
+                        .changes
+                        .iter()
+                        .filter(|c| {
+                            c.group == group
+                                && (filter.is_empty()
+                                    || c.path.to_ascii_lowercase().contains(&filter))
+                        })
+                        .collect();
                     if items.is_empty() {
                         continue;
                     }
@@ -572,6 +901,78 @@ impl Editor {
                     }
                     ui.add_space(6.0);
                 }
+                // Collapsible History section with search and recent commits.
+                ui.add_space(8.0);
+                let history_count = self.tools.history.len();
+                let history_header = format!("{} ({history_count})", tr("History"));
+                egui::CollapsingHeader::new(
+                    RichText::new(history_header)
+                        .size(SMALL)
+                        .color(colors().secondary),
+                )
+                .id_salt("git-history-section")
+                .default_open(true)
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.tools.history_filter)
+                            .hint_text(tr("Search message, author, hash…"))
+                            .margin(Margin::symmetric(8, 4))
+                            .desired_width(f32::INFINITY)
+                            .char_limit(120),
+                    );
+                    ui.add_space(6.0);
+                    let q = self.tools.history_filter.trim().to_ascii_lowercase();
+                    for entry in &self.tools.history {
+                        if !q.is_empty()
+                            && !entry.subject.to_ascii_lowercase().contains(&q)
+                            && !entry.author.to_ascii_lowercase().contains(&q)
+                            && !entry.hash.to_ascii_lowercase().contains(&q)
+                        {
+                            continue;
+                        }
+                        ui.horizontal(|ui| {
+                            let initial = entry
+                                .author
+                                .chars()
+                                .next()
+                                .unwrap_or('?')
+                                .to_ascii_uppercase()
+                                .to_string();
+                            let (avatar, _) =
+                                ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+                            ui.painter().circle_filled(
+                                avatar.center(),
+                                8.5,
+                                colors().elevated,
+                            );
+                            ui.painter().text(
+                                avatar.center(),
+                                egui::Align2::CENTER_CENTER,
+                                initial,
+                                egui::FontId::proportional(10.0),
+                                colors().secondary,
+                            );
+                            ui.vertical(|ui| {
+                                ui.spacing_mut().item_spacing.y = 1.0;
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(&entry.subject)
+                                            .size(SMALL)
+                                            .color(colors().text),
+                                    )
+                                    .truncate(),
+                                )
+                                .on_hover_text(format!("{} · {}", entry.hash, entry.subject));
+                                ui.label(
+                                    RichText::new(format!("{} · {}", entry.author, entry.when))
+                                        .size(11.0)
+                                        .color(colors().muted),
+                                );
+                            });
+                        });
+                        ui.add_space(4.0);
+                    }
+                });
             });
         if let Some(path) = open
             && let Some(root) = self.root.clone()
@@ -891,6 +1292,71 @@ fn change_row(ui: &mut Ui, change: &Change, selected: bool) -> egui::Response {
     response.on_hover_text(&change.path)
 }
 
+fn parse_history(raw: &str) -> Vec<CommitEntry> {
+    raw.lines()
+        .filter_map(|line| {
+            let mut parts = line.split('\x1f');
+            let hash = parts.next()?.trim();
+            let subject = parts.next()?.trim();
+            let author = parts.next()?.trim();
+            let when = parts.next()?.trim();
+            if hash.is_empty() || subject.is_empty() {
+                return None;
+            }
+            Some(CommitEntry {
+                hash: hash.to_owned(),
+                subject: subject.to_owned(),
+                author: author.to_owned(),
+                when: when.to_owned(),
+            })
+        })
+        .collect()
+}
+
+fn is_safe_github_url(url: &str) -> bool {
+    url.starts_with("https://github.com/")
+        && !url.chars().any(|c| c.is_control() || c.is_whitespace())
+}
+
+fn parse_github_items(raw: &str) -> Result<Vec<GitHubItem>, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+    let value: serde_json::Value = serde_json::from_str(trimmed)
+        .map_err(|_| trimmed.lines().next().unwrap_or("GitHub CLI unavailable.").to_owned())?;
+    let Some(arr) = value.as_array() else {
+        return Err("Unexpected GitHub CLI output.".to_owned());
+    };
+    let mut items = Vec::with_capacity(arr.len());
+    for entry in arr {
+        let Some(number) = entry.get("number").and_then(|v| v.as_u64()) else {
+            continue;
+        };
+        let Some(title) = entry.get("title").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let author = entry
+            .get("author")
+            .and_then(|a| a.get("login"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let state = entry
+            .get("state")
+            .and_then(|v| v.as_str())
+            .unwrap_or("OPEN");
+        let url = entry.get("url").and_then(|v| v.as_str()).unwrap_or("");
+        items.push(GitHubItem {
+            number,
+            title: title.to_owned(),
+            author: author.to_owned(),
+            state: state.to_owned(),
+            url: url.to_owned(),
+        });
+    }
+    Ok(items)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -920,5 +1386,30 @@ mod tests {
                 .as_deref(),
             Some("main")
         );
+    }
+
+    #[test]
+    fn git_history_parses_delimited_log_lines() {
+        let entries = parse_history(
+            "a1b2c3d\x1fAdd island theme\x1fDevModee\x1f2 hours ago\n\
+             e4f5a6b\x1fFix explorer filter\x1fDevModee\x1fyesterday\n",
+        );
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].hash, "a1b2c3d");
+        assert_eq!(entries[0].subject, "Add island theme");
+        assert_eq!(entries[0].author, "DevModee");
+        assert_eq!(entries[1].when, "yesterday");
+    }
+
+    #[test]
+    fn github_items_parse_gh_json_and_validate_urls() {
+        let raw = r#"[{"number":42,"title":"Add GitHub panel","author":{"login":"DevModee"},"state":"OPEN","url":"https://github.com/DevModee/covalos/pull/42"}]"#;
+        let items = parse_github_items(raw).expect("parse gh json");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].number, 42);
+        assert_eq!(items[0].author, "DevModee");
+        assert!(is_safe_github_url(&items[0].url));
+        assert!(!is_safe_github_url("javascript:alert(1)"));
+        assert!(!is_safe_github_url("https://evil.example/pr/1"));
     }
 }
