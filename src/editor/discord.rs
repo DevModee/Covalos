@@ -3,20 +3,21 @@
 //!
 //! Off by default and privacy-first: nothing leaves the machine except to the local
 //! Discord desktop client, and only coarse activity is shared unless the user opts in.
-//! Discord requires an Application ID registered in the Developer Portal; COVALOS does
-//! not ship one, so the user (or the project owner) enters it in Settings.
+//! Uses Covalos's official Discord Application ID so Rich Presence works out of the box
+//! without requiring users to register or configure their own app.
 use std::sync::{
     Arc, Mutex,
     mpsc::{self, RecvTimeoutError, Sender},
 };
 use std::time::Duration;
 
+/// Official public Discord Application ID for Covalos Rich Presence.
+const COVALOS_APPLICATION_ID: &str = "1573944656377417818";
+
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub(super) struct DiscordPreferences {
     pub(super) enabled: bool,
-    /// Application ID of the COVALOS app in the Discord Developer Portal.
-    pub(super) application_id: String,
     pub(super) show_language: bool,
     /// Project names can be private; off by default.
     pub(super) show_project: bool,
@@ -28,7 +29,6 @@ impl Default for DiscordPreferences {
     fn default() -> Self {
         Self {
             enabled: false,
-            application_id: String::new(),
             show_language: true,
             show_project: false,
             show_activity: true,
@@ -71,19 +71,14 @@ impl Default for Presence {
 impl Presence {
     /// Called every frame; only sends when the activity actually changes.
     pub(super) fn update(&mut self, prefs: &DiscordPreferences, activity: Activity) {
-        let id = prefs.application_id.trim();
-        let valid = !id.is_empty() && id.chars().all(|c| c.is_ascii_digit());
-        if !prefs.enabled || !valid {
+        if !prefs.enabled {
             if self.sender.take().is_some() {
                 self.last = None;
             }
-            *self.status.lock().unwrap_or_else(|e| e.into_inner()) = if !prefs.enabled {
-                "Off"
-            } else {
-                "Enter a valid Application ID"
-            };
+            *self.status.lock().unwrap_or_else(|e| e.into_inner()) = "Off";
             return;
         }
+        let id = COVALOS_APPLICATION_ID;
         if self.sender.is_none() || self.client != id {
             // Dropping the old sender clears the old presence and stops its thread.
             self.sender = Some(spawn(id.to_owned(), self.status.clone()));
@@ -326,7 +321,11 @@ mod tests {
         let text = payload.to_string();
         assert!(text.contains("SET_ACTIVITY") && text.contains("Editing Rust"));
         assert!(activity_payload(None, 8)["args"]["activity"].is_null());
-        // Disabled or missing ID never starts a connection.
+        // Official Application ID is a numeric snowflake and disabled presence never connects.
+        assert!(
+            !COVALOS_APPLICATION_ID.is_empty()
+                && COVALOS_APPLICATION_ID.chars().all(|c| c.is_ascii_digit())
+        );
         let mut presence = Presence::default();
         let activity = Activity {
             details: "x".into(),
@@ -335,14 +334,8 @@ mod tests {
             language_asset: None,
             language_text: None,
         };
-        presence.update(&DiscordPreferences::default(), activity.clone());
+        presence.update(&DiscordPreferences::default(), activity);
         assert_eq!(presence.status(), "Off");
-        let prefs = DiscordPreferences {
-            enabled: true,
-            application_id: "not-an-id".into(),
-            ..Default::default()
-        };
-        presence.update(&prefs, activity);
         assert!(presence.sender.is_none());
     }
 }

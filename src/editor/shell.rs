@@ -1865,14 +1865,6 @@ impl Editor {
                                         &mut d.enabled,
                                         tr("Show Covalos activity in Discord"),
                                     );
-                                    ui.horizontal(|ui| {
-                                        ui.label(secondary(tr("Application ID")));
-                                        ui.add(
-                                            egui::TextEdit::singleline(&mut d.application_id)
-                                                .desired_width(180.0)
-                                                .hint_text("Discord Developer Portal"),
-                                        );
-                                    });
                                     checkbox(ui, &mut d.show_activity, tr("Show current activity"));
                                     checkbox(ui, &mut d.show_language, tr("Show language"));
                                     checkbox(ui, &mut d.show_project, tr("Show project name"));
