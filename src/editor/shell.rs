@@ -428,13 +428,45 @@ impl Editor {
             colors().inset.gamma_multiply(0.85),
         );
         let auto_skill_id = Id::new("home-auto-skill");
+        let usage_modal_id = Id::new("agent-usage-open");
         let mut auto_skill: bool = ui
             .ctx()
             .data(|d| d.get_temp(auto_skill_id))
             .unwrap_or(true);
+        let mut usage_open: bool = ui
+            .ctx()
+            .data(|d| d.get_temp(usage_modal_id))
+            .unwrap_or(false);
         let mut send_prompt_now = false;
         let mut open_add_ai = false;
         let mut quick_action: Option<&str> = None;
+
+        // Collect real aggregated token metrics from local runtime sessions.
+        let (total_in, total_out, total_turns) = self.hub.agents.runtime.as_ref().map_or(
+            (0u64, 0u64, 0u32),
+            |rt| {
+                rt.sessions.iter().fold((0u64, 0u64, 0u32), |acc, s| {
+                    (
+                        acc.0.saturating_add(s.meta.input_tokens),
+                        acc.1.saturating_add(s.meta.output_tokens),
+                        acc.2.saturating_add(s.meta.turns),
+                    )
+                })
+            },
+        );
+        let accounts: Vec<(covalos_agents::AccountId, String, covalos_agents::ProviderKind)> =
+            self.hub
+                .agents
+                .runtime
+                .as_ref()
+                .map(|rt| {
+                    rt.profiles
+                        .accounts()
+                        .iter()
+                        .map(|a| (a.id.clone(), a.label.clone(), a.provider.clone()))
+                        .collect()
+                })
+                .unwrap_or_default();
 
         ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
             ui.set_width(width);
@@ -457,7 +489,7 @@ impl Editor {
                     ui.set_width(ui.available_width());
                     let response = ui.add(
                         TextEdit::multiline(&mut self.chat.prompt)
-                            .hint_text(tr("Ask anything, @ to add context"))
+                            .hint_text(tr("Ask anything. @ files, $ skills, / commands"))
                             .frame(false)
                             .desired_rows(2)
                             .desired_width(f32::INFINITY)
@@ -473,24 +505,6 @@ impl Editor {
                         ui.spacing_mut().item_spacing.x = 6.0;
                         if icon_button(ui, Icon::Add, "Open file", false).clicked() {
                             self.pick_file();
-                        }
-                        let provider_label = if let Some(rt) = &self.hub.agents.runtime
-                            && let Some(profile) = rt.profiles.accounts().first()
-                        {
-                            profile.label.clone()
-                        } else {
-                            tr("+ Add AI").to_owned()
-                        };
-                        let pill = egui::Button::new(
-                            RichText::new(provider_label)
-                                .size(SMALL)
-                                .color(colors().secondary),
-                        )
-                        .fill(colors().elevated)
-                        .stroke(egui::Stroke::new(1.0_f32, colors().border))
-                        .corner_radius(8);
-                        if ui.add(pill).clicked() {
-                            open_add_ai = true;
                         }
                         let skill_pill = egui::Button::new(
                             RichText::new(if auto_skill {
@@ -541,10 +555,122 @@ impl Editor {
                             if ui.add_enabled(can_send, send_btn).clicked() {
                                 send_prompt_now = true;
                             }
+                            // Model + Effort + Account dropdown (subscription CLI models, no API needed).
+                            let active_provider = accounts
+                                .first()
+                                .map(|(_, _, p)| p.clone())
+                                .unwrap_or(covalos_agents::ProviderKind::ClaudeCode);
+                            let model_text = self
+                                .hub
+                                .agents
+                                .chat
+                                .model
+                                .clone()
+                                .or_else(|| accounts.first().map(|(_, label, _)| label.clone()))
+                                .unwrap_or_else(|| tr("+ Add AI").to_owned());
+                            let pill_label = format!(
+                                "{}  {}",
+                                model_text, self.hub.agents.chat.effort
+                            );
+                            ui.menu_button(
+                                RichText::new(pill_label)
+                                    .size(SMALL)
+                                    .color(colors().text),
+                                |ui| {
+                                    ui.set_min_width(210.0);
+                                    ui.label(muted(tr("Model")));
+                                    for (id, display) in
+                                        super::agent_chat::curated_cli_models(&active_provider)
+                                    {
+                                        let active = self.hub.agents.chat.model.as_deref()
+                                            == Some(*id);
+                                        let text = if active {
+                                            format!("•  {display}")
+                                        } else {
+                                            format!("   {display}")
+                                        };
+                                        if ui
+                                            .button(RichText::new(text).color(if active {
+                                                colors().accent
+                                            } else {
+                                                colors().text
+                                            }))
+                                            .clicked()
+                                        {
+                                            self.hub.agents.chat.model = Some((*id).to_owned());
+                                            ui.close();
+                                        }
+                                    }
+                                    ui.separator();
+                                    ui.label(muted(tr("Effort")));
+                                    ui.horizontal(|ui| {
+                                        for level in ["Low", "Medium", "High"] {
+                                            let active = self.hub.agents.chat.effort == level;
+                                            if ui.selectable_label(active, tr(level)).clicked() {
+                                                self.hub.agents.chat.effort = level.to_owned();
+                                            }
+                                        }
+                                    });
+                                    if !accounts.is_empty() {
+                                        ui.separator();
+                                        ui.label(muted(tr("Accounts")));
+                                        for (acc_id, label, _) in &accounts {
+                                            if ui.button(label).clicked() {
+                                                self.hub.agents.chat.target =
+                                                    super::agent_chat::Target::Account(
+                                                        acc_id.clone(),
+                                                    );
+                                                ui.close();
+                                            }
+                                        }
+                                    }
+                                    ui.separator();
+                                    if ui.button(tr("View usage")).clicked() {
+                                        usage_open = true;
+                                        ui.close();
+                                    }
+                                    if ui.button(tr("+ Add AI")).clicked() {
+                                        open_add_ai = true;
+                                        ui.close();
+                                    }
+                                },
+                            );
                         });
                     });
                 });
-            ui.add_space(14.0);
+            // Compact 1-line telemetry bar right under the composer (Ctx + Token usage button).
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                ui.label(muted("Ctx"));
+                let (bar_rect, _) =
+                    ui.allocate_exact_size(egui::vec2(48.0, 6.0), egui::Sense::hover());
+                ui.painter()
+                    .rect_filled(bar_rect, 3, colors().elevated);
+                let ratio = ((total_in + total_out) as f32 / 1_000_000.0).clamp(0.0, 1.0);
+                if ratio > 0.005 {
+                    let fill_rect = egui::Rect::from_min_size(
+                        bar_rect.min,
+                        egui::vec2((bar_rect.width() * ratio).max(4.0), bar_rect.height()),
+                    );
+                    ui.painter().rect_filled(fill_rect, 3, colors().accent);
+                }
+                ui.label(muted(format!(
+                    "{} · {} {}",
+                    format_tokens(total_in + total_out),
+                    total_turns,
+                    tr("turns")
+                )));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add(egui::Button::new(muted(tr("View usage"))).frame(false))
+                        .clicked()
+                    {
+                        usage_open = true;
+                    }
+                });
+            });
+            ui.add_space(12.0);
             // Minimalist quick-start rows.
             for (icon, color, label) in [
                 (Icon::Compare, colors().accent, "Review my changes"),
@@ -582,7 +708,13 @@ impl Editor {
                 }
             }
         });
-        ui.ctx().data_mut(|d| d.insert_temp(auto_skill_id, auto_skill));
+        ui.ctx().data_mut(|d| {
+            d.insert_temp(auto_skill_id, auto_skill);
+            d.insert_temp(usage_modal_id, usage_open);
+        });
+        if usage_open {
+            self.agent_usage_modal(ui.ctx(), usage_modal_id);
+        }
         if open_add_ai {
             self.hub.agents.chat.add_ai = Some(Default::default());
         }
@@ -601,6 +733,30 @@ impl Editor {
         }
         if send_prompt_now {
             let trimmed = self.chat.prompt.trim().to_owned();
+            // Handle CLI-style /model and /effort slash commands right in the composer.
+            if let Some(model) = trimmed.strip_prefix("/model").map(str::trim)
+                && !model.is_empty()
+                && !model.starts_with('-')
+            {
+                self.hub.agents.chat.model = Some(model.to_owned());
+                self.chat.prompt.clear();
+                self.notice = Some((false, format!("Model: {model}")));
+                return;
+            }
+            if let Some(effort) = trimmed.strip_prefix("/effort").map(str::trim) {
+                let normalized = match effort.to_ascii_lowercase().as_str() {
+                    "low" => Some("Low"),
+                    "medium" => Some("Medium"),
+                    "high" => Some("High"),
+                    _ => None,
+                };
+                if let Some(level) = normalized {
+                    self.hub.agents.chat.effort = level.to_owned();
+                    self.chat.prompt.clear();
+                    self.notice = Some((false, format!("Effort: {level}")));
+                    return;
+                }
+            }
             // If user pasted a GitHub SKILL.md URL, import it directly through the safe skill importer.
             if let Some(url) = trimmed
                 .split_whitespace()
@@ -618,6 +774,161 @@ impl Editor {
             self.preferences.assistant_open = true;
             self.hub_open = false;
             self.send_prompt(ui.ctx());
+        }
+    }
+
+    /// Real local token usage dashboard (Input/Output tokens, Sessions, Models & Agents breakdown).
+    fn agent_usage_modal(&mut self, ctx: &egui::Context, open_id: Id) {
+        let width = (ctx.content_rect().width() - 96.0).clamp(520.0, 740.0);
+        let mut close_now = false;
+        let area = egui::Modal::default_area(Id::new("agent-usage-modal")).anchor(
+            egui::Align2::CENTER_CENTER,
+            egui::vec2(0.0, 0.0),
+        );
+        let modal = egui::Modal::new(Id::new("agent-usage-modal"))
+            .backdrop_color(egui::Color32::from_black_alpha(150))
+            .frame(
+                egui::Frame::new()
+                    .fill(colors().surface)
+                    .corner_radius(MODAL_RADIUS)
+                    .stroke(egui::Stroke::new(1.0_f32, colors().control_border))
+                    .inner_margin(egui::Margin::same(18)),
+            )
+            .area(area)
+            .show(ctx, |ui| {
+                ui.set_width(width);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(tr("Agent usage")).size(HEADING).strong());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if icon_button(ui, Icon::Close, "Close", false).clicked() {
+                            close_now = true;
+                        }
+                    });
+                });
+                ui.add_space(12.0);
+                let mut total_in = 0u64;
+                let mut total_out = 0u64;
+                let mut total_turns = 0u32;
+                let mut total_sessions = 0usize;
+                let mut by_model: std::collections::BTreeMap<String, (u64, u64, u32)> =
+                    Default::default();
+                let mut by_agent: std::collections::BTreeMap<&'static str, (u64, u64, u32)> =
+                    Default::default();
+                if let Some(rt) = &self.hub.agents.runtime {
+                    total_sessions = rt.sessions.len();
+                    for session in &rt.sessions {
+                        let m = &session.meta;
+                        total_in = total_in.saturating_add(m.input_tokens);
+                        total_out = total_out.saturating_add(m.output_tokens);
+                        total_turns = total_turns.saturating_add(m.turns);
+                        let model_name = m
+                            .model
+                            .clone()
+                            .unwrap_or_else(|| "default".to_owned());
+                        let entry = by_model.entry(model_name).or_default();
+                        entry.0 += m.input_tokens;
+                        entry.1 += m.output_tokens;
+                        entry.2 += m.turns;
+                        let agent_name = super::agent_chat::provider_name(&m.provider);
+                        let a_entry = by_agent.entry(agent_name).or_default();
+                        a_entry.0 += m.input_tokens;
+                        a_entry.1 += m.output_tokens;
+                        a_entry.2 += m.turns;
+                    }
+                }
+                // 4 KPI cards.
+                let card_w = (width - 24.0) / 4.0;
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    for (label, value, detail) in [
+                        (
+                            tr("Input tokens"),
+                            format_tokens(total_in),
+                            tr("Session total"),
+                        ),
+                        (
+                            tr("Output tokens"),
+                            format_tokens(total_out),
+                            tr("Session total"),
+                        ),
+                        (
+                            tr("Sessions"),
+                            total_sessions.to_string(),
+                            tr("Local workspaces"),
+                        ),
+                        (
+                            tr("Turns"),
+                            total_turns.to_string(),
+                            tr("Completed turns"),
+                        ),
+                    ] {
+                        egui::Frame::new()
+                            .fill(colors().inset)
+                            .corner_radius(8)
+                            .stroke(egui::Stroke::new(1.0_f32, colors().border))
+                            .inner_margin(egui::Margin::same(10))
+                            .show(ui, |ui| {
+                                ui.set_width((card_w - 20.0).max(90.0));
+                                ui.label(muted(label));
+                                ui.add_space(4.0);
+                                ui.label(RichText::new(value).size(HEADING).strong());
+                                ui.label(muted(detail));
+                            });
+                    }
+                });
+                ui.add_space(14.0);
+                if total_in + total_out == 0 && total_turns == 0 {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(14.0);
+                        ui.label(muted(tr("Start a conversation to see token usage.")));
+                        ui.add_space(14.0);
+                    });
+                    return;
+                }
+                let max_tokens = (total_in + total_out).max(1) as f32;
+                let col_w = (width - 16.0) * 0.5;
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = 16.0;
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(col_w, 180.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            ui.label(RichText::new(tr("Models")).strong());
+                            ui.add_space(6.0);
+                            for (name, (inp, out, turns)) in &by_model {
+                                usage_bar_row(
+                                    ui,
+                                    name,
+                                    *inp + *out,
+                                    max_tokens,
+                                    *turns,
+                                    colors().accent,
+                                );
+                            }
+                        },
+                    );
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(col_w, 180.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            ui.label(RichText::new(tr("Agents")).strong());
+                            ui.add_space(6.0);
+                            for (name, (inp, out, turns)) in &by_agent {
+                                usage_bar_row(
+                                    ui,
+                                    name,
+                                    *inp + *out,
+                                    max_tokens,
+                                    *turns,
+                                    colors().success,
+                                );
+                            }
+                        },
+                    );
+                });
+            });
+        if close_now || modal.should_close() {
+            ctx.data_mut(|d| d.insert_temp(open_id, false));
         }
     }
 
@@ -1935,6 +2246,48 @@ impl SettingsSection {
         };
         keywords.contains(query) || self.label().to_ascii_lowercase().contains(query)
     }
+}
+
+fn format_tokens(n: u64) -> String {
+    if n >= 1_000_000_000 {
+        format!("{:.1}B", n as f64 / 1_000_000_000.0)
+    } else if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}k", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
+}
+
+fn usage_bar_row(
+    ui: &mut Ui,
+    name: &str,
+    tokens: u64,
+    max_tokens: f32,
+    turns: u32,
+    color: egui::Color32,
+) {
+    ui.horizontal(|ui| {
+        ui.add(egui::Label::new(RichText::new(name).size(SMALL)).truncate());
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(muted(format!("{} · {turns}", format_tokens(tokens))));
+        });
+    });
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), 5.0),
+        egui::Sense::hover(),
+    );
+    ui.painter().rect_filled(rect, 2, colors().elevated);
+    let ratio = (tokens as f32 / max_tokens).clamp(0.0, 1.0);
+    if ratio > 0.005 {
+        let fill = egui::Rect::from_min_size(
+            rect.min,
+            egui::vec2((rect.width() * ratio).max(4.0), rect.height()),
+        );
+        ui.painter().rect_filled(fill, 2, color);
+    }
+    ui.add_space(6.0);
 }
 
 fn setting_row(ui: &mut Ui, title: &str, subtitle: &str, control: impl FnOnce(&mut Ui)) {

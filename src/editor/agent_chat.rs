@@ -40,7 +40,8 @@ pub(super) struct ChatState {
     pub(super) split: Option<String>,
     pub(super) detached: Vec<String>,
     pub(super) target: Target,
-    model: Option<String>,
+    pub(super) model: Option<String>,
+    pub(super) effort: String,
     custom_model: String,
     preset: usize,
     worktree: bool,
@@ -61,6 +62,7 @@ impl Default for ChatState {
             detached: Vec::new(),
             target: Target::Auto,
             model: None,
+            effort: "Medium".into(),
             custom_model: String::new(),
             preset: 1,
             worktree: false,
@@ -160,6 +162,26 @@ enum Action {
     Objective(String),
     OpenOrchestrator,
     AddAi,
+}
+
+pub(super) fn curated_cli_models(kind: &ProviderKind) -> &'static [(&'static str, &'static str)] {
+    match kind {
+        ProviderKind::ClaudeCode => &[
+            ("claude-sonnet-4-5", "Claude Sonnet 4.5"),
+            ("claude-opus-4-5", "Claude Opus 4.5"),
+            ("claude-haiku-4-5", "Claude Haiku 4.5"),
+        ],
+        ProviderKind::Codex => &[
+            ("gpt-5.3-codex", "GPT-5.3 Codex"),
+            ("gpt-5.2-codex", "GPT-5.2 Codex"),
+            ("o4-mini", "o4-mini"),
+        ],
+        ProviderKind::Gemini => &[
+            ("gemini-2.5-pro", "Gemini 2.5 Pro"),
+            ("gemini-2.5-flash", "Gemini 2.5 Flash"),
+        ],
+        _ => &[],
+    }
 }
 
 pub(super) fn provider_name(kind: &ProviderKind) -> &'static str {
@@ -1596,18 +1618,17 @@ impl Editor {
         let modal = egui::Modal::new(Id::new("add-ai"))
             .frame(modal_frame())
             .show(ctx, |ui| {
-                ui.set_width(520.0);
+                ui.set_width(480.0);
                 ui.label(RichText::new(tr("Add AI")).size(HEADING).strong());
-                ui.label(secondary(tr(
-                    "Covalos only uses each provider's official sign-in or API key. It never reads \
-                     or copies another app's tokens.",
+                ui.label(muted(tr(
+                    "Connect with your subscription CLI or an API key.",
                 )));
                 ui.add_space(10.0);
                 if let Some(id) = form.created.clone() {
                     add_ai_done(ui, runtime, &mut form, &id, &mut keep);
                     return;
                 }
-                for (i, (name, detail)) in ADD_PROVIDERS.iter().enumerate() {
+                for (i, (name, detail)) in ADD_PROVIDERS.iter().take(3).enumerate() {
                     let kind = match i {
                         0 => Some(ProviderKind::ClaudeCode),
                         1 => Some(ProviderKind::Codex),
@@ -1616,13 +1637,11 @@ impl Editor {
                     };
                     let state = kind.as_ref().and_then(|k| runtime.detections.get(k)).map(|d| {
                         if !d.done {
-                            (colors().muted, "Detecting…".to_owned())
-                        } else if let Some(v) = &d.version {
-                            (colors().success, v.chars().take(22).collect())
+                            (colors().muted, tr("Detecting…").to_owned())
                         } else if d.program.is_some() {
-                            (colors().warning, "Found".to_owned())
+                            (colors().success, tr("Installed").to_owned())
                         } else {
-                            (colors().muted, "Not installed".to_owned())
+                            (colors().muted, tr("Not installed").to_owned())
                         }
                     });
                     if choice_row(ui, form.provider == i, name, tr(detail), state).clicked() {
