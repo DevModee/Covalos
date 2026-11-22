@@ -12,6 +12,7 @@ mod companion;
 mod discord;
 mod dither;
 mod files;
+mod guided;
 mod hub;
 mod i18n;
 mod icons;
@@ -148,6 +149,7 @@ pub struct Editor {
     notifications_query: String,
     notifications_filter: shell::NotificationFilter,
     discord: discord::Presence,
+    guided: guided::GuidedController,
     session_started: u64,
     explorer_rect: Option<egui::Rect>,
     disk_checked: Option<std::time::Instant>,
@@ -245,6 +247,7 @@ impl Editor {
             notifications_query: String::new(),
             notifications_filter: shell::NotificationFilter::All,
             discord: discord::Presence::default(),
+            guided: guided::GuidedController::default(),
             session_started: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs()),
@@ -292,6 +295,8 @@ impl Editor {
             self.preferences.tasks(&root),
         );
         self.include_project_note = false;
+        self.guided.clear(None);
+        self.guided.restore_for_workspace(&root);
         self.root = Some(root);
         self.hub_open = false;
         self.tools.workspace_changed();
@@ -850,6 +855,7 @@ impl Editor {
             ctx.set_zoom_factor(self.preferences.ui_scale);
         }
         self.update_presence();
+        self.tick_guided();
         if ctx.input(|input| input.viewport().close_requested()) && !self.force_close {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.request(Pending::Exit, ctx);
@@ -900,6 +906,7 @@ impl Editor {
         if !self.studio_open {
             self.floating_agents(ctx);
         }
+        self.guided_overlay(ctx);
         self.add_ai_modal(ctx);
         self.tunnel_modal(ctx);
         self.settings_window(ctx);
