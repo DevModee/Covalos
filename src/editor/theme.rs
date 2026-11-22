@@ -794,28 +794,26 @@ pub(super) fn icon_button(
     if selected || progress > 0.0 {
         ui.painter().rect_filled(
             response.rect.shrink(1.0),
-            CONTROL_RADIUS,
+            8,
             if selected {
-                colors().accent_bg
+                colors().elevated
             } else {
                 colors().hover.gamma_multiply(progress)
             },
         );
     }
     if selected {
-        ui.painter().rect_filled(
-            egui::Rect::from_min_size(
-                response.rect.left_center() + egui::vec2(-5.0, -7.0),
-                egui::vec2(2.0, 14.0),
-            ),
-            1,
-            colors().accent,
+        ui.painter().rect_stroke(
+            response.rect.shrink(1.0),
+            8,
+            Stroke::new(1.0_f32, colors().border),
+            egui::StrokeKind::Inside,
         );
     }
     if response.has_focus() {
         ui.painter().rect_stroke(
             response.rect,
-            CONTROL_RADIUS,
+            8,
             Stroke::new(1.0_f32, colors().accent),
             egui::StrokeKind::Inside,
         );

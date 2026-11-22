@@ -1238,8 +1238,8 @@ impl Editor {
                                             if hover > 0.01 {
                                                 painter.rect_filled(
                                                     response.rect,
-                                                    7,
-                                                    colors().hover.gamma_multiply(hover * 0.8),
+                                                    12,
+                                                    colors().hover.gamma_multiply(hover * 0.7),
                                                 );
                                             }
                                             if selected {
@@ -1348,12 +1348,12 @@ impl Editor {
                                                 egui::Shape::Vec(vec![
                                                     egui::Shape::rect_filled(
                                                         pill,
-                                                        7,
+                                                        12,
                                                         colors().elevated,
                                                     ),
                                                     egui::Shape::rect_stroke(
                                                         pill,
-                                                        7,
+                                                        12,
                                                         egui::Stroke::new(
                                                             1.0_f32,
                                                             colors().border,
@@ -1361,11 +1361,6 @@ impl Editor {
                                                         egui::StrokeKind::Inside,
                                                     ),
                                                 ]),
-                                            );
-                                            ui.painter().hline(
-                                                (pill.left() + 10.0)..=(pill.right() - 10.0),
-                                                pill.bottom() + 3.0,
-                                                egui::Stroke::new(2.0_f32, colors().accent),
                                             );
                                         }
                                     });
@@ -1385,12 +1380,8 @@ impl Editor {
                     });
                 });
             });
-        ui.painter().hline(
-            bar.response.rect.x_range(),
-            bar.response.rect.bottom() + 3.5,
-            egui::Stroke::new(1.0_f32, colors().border),
-        );
-        ui.add_space(4.0);
+        let _ = bar;
+        ui.add_space(2.0);
         if toggle_focus {
             self.clean.focus = !self.clean.focus;
         }
@@ -1716,19 +1707,16 @@ fn tree_row(
     );
     let fill = super::motion::blend(
         colors().hover.gamma_multiply(hover),
-        colors().accent_bg,
+        colors().elevated,
         selection,
     );
-    painter.rect_filled(rect, 5, fill);
+    painter.rect_filled(rect, 7, fill);
     if selection > 0.01 {
-        let h = (TREE_ROW * z - 10.0) * selection;
-        painter.rect_filled(
-            egui::Rect::from_center_size(
-                rect.left_center() + egui::vec2(1.0, 0.0),
-                egui::vec2(2.0, h),
-            ),
-            1,
-            colors().accent,
+        painter.rect_stroke(
+            rect,
+            7,
+            egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(selection)),
+            egui::StrokeKind::Inside,
         );
     }
     // Indent guides, brighter on the hovered branch.
@@ -1761,18 +1749,31 @@ fn tree_row(
                 ui,
                 egui::Rect::from_center_size(
                     egui::pos2(x + 6.0 * z, center_y),
-                    egui::vec2(14.0 * z, 14.0 * z),
+                    egui::vec2(13.0 * z, 13.0 * z),
                 ),
             );
-    }
-    super::assets::paint(
-        ui,
-        egui::Rect::from_center_size(
+        // Uniform muted-gray folder icon so colorful file-type icons stay distinct.
+        draw_icon_sized(
+            &painter,
             egui::pos2(x + 23.0 * z, center_y),
-            egui::vec2(16.0 * z, 16.0 * z),
-        ),
-        icon,
-    );
+            if open > 0.5 {
+                Icon::FolderOpen
+            } else {
+                Icon::Folder
+            },
+            super::motion::blend(colors().muted, colors().secondary, open.max(hover)),
+            15.0 * z,
+        );
+    } else {
+        super::assets::paint(
+            ui,
+            egui::Rect::from_center_size(
+                egui::pos2(x + 23.0 * z, center_y),
+                egui::vec2(16.0 * z, 16.0 * z),
+            ),
+            icon,
+        );
+    }
     let label_x = x + 36.0 * z;
     let max_width = (rect.right() - label_x - 6.0).max(1.0);
     let galley = ui.fonts_mut(|fonts| {
