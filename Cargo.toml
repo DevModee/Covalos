@@ -2,7 +2,7 @@
 name = "covalos"
 version = "0.4.0"
 edition = "2024"
-description = "COVALOS — Native Rust IDE with multi-agent orchestration"
+description = "Native Rust IDE with multi-agent orchestration"
 publish = false
 
 [workspace]

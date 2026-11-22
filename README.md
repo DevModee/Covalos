@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>A native Rust IDE built for speed, craft, guided learning, and multi-agent development.</strong><br/>
-  Obsidian island workbench, GPU Dither & ASCII Flow backgrounds, Guided Mode (lyric-style code-along), Agent Hub, Clean Code floating editors, ConPTY terminal, LSP, Git/GitHub, Library Studio, and full session persistence — with zero Electron overhead.
+  Obsidian island workbench, GPU Dither & ASCII Flow backgrounds, Guided Mode (lyric-style code-along), Agent Hub, Clean Code floating editors, ConPTY terminal, LSP, Git/GitHub, Library Studio, and full session persistence, with zero Electron overhead.
 </p>
 
 <p align="center">
@@ -20,54 +20,54 @@
 
 ## Vision
 
-**COVALOS** is a native desktop IDE written in Rust that brings together the speed, ergonomics, and visual discipline of **IntelliJ IDEA**, **Zed**, **Linear**, and **Raycast** with the multi-agent workflows of **Cursor**, **Kiro**, and **Google Antigravity**.
+**COVALOS** is a native desktop IDE written in Rust that combines the speed, ergonomics, and visual discipline of **IntelliJ IDEA**, **Zed**, **Linear**, and **Raycast** with the multi-agent workflows of **Cursor**, **Kiro**, and **Google Antigravity**.
 
-The name comes from *covalent* — distinct nuclei sharing a common field to form a stable structure. That is the core model of COVALOS: the developer and multiple AI agents operating over a shared workspace with explicit supervision, bounded authority, and zero black-box surprises.
+The name comes from *covalent*: distinct nuclei sharing a common field to form a stable structure. That is the core model of COVALOS, where the developer and multiple AI agents operate over a shared workspace with explicit supervision, bounded authority, and predictable state.
 
 **Core principles:**
-- **True native performance:** Single compiled Rust binary (`covalos.exe`) rendered on OpenGL — no bundled browser runtime.
-- **Minimalist futuristic craft:** The *Nocturne* dark design system — rounded island surfaces, crisp 1 px borders, disciplined typography, and critically damped spring motion (never noisy, gamer, or bloated).
-- **Developer control first:** Agents plan, review, and propose edits; code modifications and package installations require explicit user approval, backed by real snapshots and rollback.
+- **True native performance:** Single compiled Rust binary (`covalos.exe`) rendered on OpenGL, with no bundled browser runtime.
+- **Minimalist craft:** The *Nocturne* dark design system uses rounded island surfaces, crisp 1 px borders, disciplined typography, and critically damped spring motion.
+- **Developer control first:** Agents plan, review, and propose edits; code modifications and package installations require explicit user approval, backed by snapshots and rollback.
 
 ---
 
-## Real Captures
+## Screenshots
 
-> Every screenshot below is captured directly from a real Windows Release build (`covalos.exe`) running on OpenGL.
+> Captured from a Windows Release build (`covalos.exe`) running on OpenGL.
 
 | Home · *Nocturne + Dither Field* | Rust Editor · *Nocturne Syntax* |
 | :---: | :---: |
-| ![COVALOS Home with Dither Field](artifacts/covalos-verification/design-system/01-home/home-nocturne-dither-field-1366x768@100.png) | ![COVALOS Rust Editor in Nocturne](artifacts/covalos-verification/design-system/03-editor/rust/editor-rust-nocturne-1366x768@100.png) |
+| ![COVALOS Home with Dither Field](assets/screenshots/home-nocturne.png) | ![COVALOS Rust Editor in Nocturne](assets/screenshots/editor-rust.png) |
 
 | Clean Code · *Floating editors sharing the live buffer* | Library Studio · *Offline-first catalog + install review* |
 | :---: | :---: |
-| ![Clean Code floating editor](artifacts/covalos-verification/design-system/05-clean-code/clean-floating-single-1366x768@100.png) | ![Library Studio install review](artifacts/covalos-verification/library-studio/10-install-review-1366x768@100.png) |
+| ![Clean Code floating editor](assets/screenshots/clean-code-floating.png) | ![Library Studio install review](assets/screenshots/library-studio.png) |
 
 ---
 
-## What Is Built
+## Features
 
 ### 1. Native Editor, Terminal, LSP & Daily Workflow
-- **Island workbench & Explorer (`Ctrl+B`):** Two-cluster Activity Rail, collapsible Explorer with live file filter, colored monogram project switcher, smooth capsule-pill code tabs, breadcrumbs with file icons, and drag-to-close side/bottom panels.
-- **Full session persistence:** Automatically remembers and restores your last workspace, open tabs, active file, Agent Hub session/model/effort, and Guided Mode progress across restarts.
+- **Island workbench & Explorer (`Ctrl+B`):** Two-cluster Activity Rail, collapsible Explorer with live file filter, colored monogram project switcher, capsule-pill code tabs, breadcrumbs with file icons, and drag-to-close side/bottom panels.
+- **Full session persistence:** Automatically restores your last workspace, open tabs, active file, Agent Hub session/model/effort, and Guided Mode progress across restarts.
 - **Reliable file handling:** UTF-8 files up to 1 MiB, BOM and CRLF/LF preservation, external-change detection before overwriting, in-file find (`Ctrl+F`, `F3` / `Shift+F3`), and ignore-aware workspace search (`Ctrl+Shift+F`).
 - **LSP & semantic syntax highlighting:** Language Server Protocol support (diagnostics, completion, UTF-16 position mapping) paired with `syntect` grammars, a semantic token classifier, and independent code color schemes (*Obsidian*, *Nocturne*, *Graphite*, *Daylight*, *High Contrast*).
-- **Floating Command Palette (`Ctrl+P`):** Category filter pills (`All`, `Files`, `Navigation`, `Git`, `Settings`) for instant workspace navigation and commands.
+- **Floating Command Palette (`Ctrl+P`):** Category filter pills (`All`, `Files`, `Navigation`, `Git`, `Settings`) for workspace navigation and commands.
 - **Git & GitHub integration:** Branch detection, status grouped by state (*staged*, *working tree*, *untracked*, *conflicts*), built-in commit composer (`Stage all` + `Commit`), change filter, searchable commit history, inline diffs, and a **GitHub** PRs/Issues tab powered by `gh` with strict URL validation.
 - **Interactive ConPTY Terminal:** Native Windows ConPTY terminal with ANSI rendering, clickable dev-server URL detection, port attribution, and rounded island chrome.
-- **Notifications & safe settings import:** Floating Notifications overlay (`All`, `Covalos`, `Agent`, `GitHub`), two-column Settings modal with global `Surface brightness` slider, and a read-only safe importer for VS Code, Cursor, Windsurf, and Zed settings.
+- **Notifications & safe settings import:** Floating Notifications overlay (`All`, `Covalos`, `Agent`, `GitHub`), two-column Settings modal with global `Surface brightness` slider, and a read-only importer for VS Code, Cursor, Windsurf, and Zed settings.
 
-### 2. Guided Mode (*Modo Guiado* — Lyric-Style Code-Along)
-- **Learn by coding, never blind copy-paste:** Toggle **Guided Mode** in the Session Home composer (or click **Open in Guided Mode** on any AI plan) to launch a minimalist floating lyrics-style code window synced live to your real editor buffer.
-- **Deterministic dependency ordering (zero broken imports):** Before a session starts, Covalos's Rust validator inspects local imports (`TS/JS`, `Rust`, `Python`) and automatically orders or splits steps so you never type an `import` for a file that does not exist yet:
-  - **Natural (Just-in-Time):** Start in your entry file (e.g. `main.tsx`) up to the exact line where a module/route is needed → pause to create and write that dependency file first → return to `main.tsx` to import and use it.
-  - **Dependencies first (Bottom-Up):** Write leaf modules and components first, then connect everything in the entry file.
-- **Live karaoke sync & persistence:** Completed lines dim above with `✓`, the active line highlights with a real-time progress bar as you type (*Flexible* or *Strict* matching), optional 1-line `Why?` explanations, and automatic progress saving per workspace.
+### 2. Guided Mode (*Modo Guiado*)
+- **Learn by coding:** Toggle **Guided Mode** in the Session Home composer (or click **Open in Guided Mode** on any AI plan) to launch a floating lyrics-style code window synced live to your editor buffer.
+- **Deterministic dependency ordering:** Before a session starts, Covalos inspects local imports (`TS/JS`, `Rust`, `Python`) and orders or splits steps so you never type an `import` for a file that does not exist yet:
+  - **Natural (Just-in-Time):** Start in your entry file (e.g. `main.tsx`) up to the line where a dependency is needed, switch to create and write that file first, then return to `main.tsx` to import and use it.
+  - **Dependencies first (Bottom-Up):** Write leaf modules and components first, then wire them together in the entry file.
+- **Live karaoke sync & persistence:** Completed lines dim above, the active line highlights with a real-time progress bar as you type (*Flexible* or *Strict* matching), optional 1-line `Why?` explanations, and automatic progress saving per workspace.
 
 ### 3. Obsidian & Nocturne Design System & Motion
 - **Continuous island architecture:** Seamless outer shell framing a darker rounded editor well with hairline 1 px borders, global `Surface brightness` control, and high-contrast WCAG AA typography.
-- **Dither Field, Dither Bloom & ASCII Flow:** Original two-pass GLSL background renderer (value-noise fbm → Bayer 8×8 ordered dithering → square pixel grid with pointer trail). Pauses automatically without focus or with *Reduce Motion*. Benchmarked on AMD Ryzen 5 5600G + integrated Radeon Graphics at ~2.1% total CPU (~6% GPU) in steady-state animation and 0.0% CPU/GPU when disabled.
-- **Spring motion engine (`src/editor/motion.rs`):** Interruptible critically damped springs (*Snappy*, *Smooth*, *Gentle*), global motion intensity slider, and full *Reduce Motion* support.
+- **Dither Field, Dither Bloom & ASCII Flow:** Two-pass GLSL background renderer (value-noise fbm, Bayer 8x8 ordered dithering, and square pixel grid with pointer trail). Pauses automatically without focus or with *Reduce Motion*. Benchmarked on AMD Ryzen 5 5600G + integrated Radeon Graphics at ~2.1% total CPU (~6% GPU) in steady-state animation and 0.0% CPU/GPU when disabled.
+- **Spring motion engine (`src/editor/motion.rs`):** Interruptible critically damped springs (*Snappy*, *Smooth*, *Gentle*), global motion intensity slider, and *Reduce Motion* support.
 - **Customization & localization:** 7 themes (*Obsidian*, *COVALOS Nocturne*, *Graphite*, *Midnight*, *Violet*, *Light*, *High Contrast*), configurable font size, compact/comfortable density, live syntax preview, and full **English** / **Spanish** localization.
 
 ### 4. Clean Code (Floating Editors)
@@ -75,20 +75,20 @@ The name comes from *covalent* — distinct nuclei sharing a common field to for
 - Supports multiple simultaneous floating editors, focus mode, and spring-animated docking back into the tab strip.
 
 ### 5. Library Studio
-- **Local-first component catalog:** Incremental ETag sync across 10 official registries (**2,050+ real entries** synced in ~3–4 s), 5 link-only sources, and 7 offline native COVALOS resources with live interactive playgrounds.
-- **Strict license compliance:** Permissive (MIT/ISC) sources cache source code locally; non-redistributable sources (Commons Clause / Aceternity) store metadata only and fetch source on demand; commercial libraries show links only.
-- **Honest compatibility & verified install/rollback:** Detects project framework and package manager (`npm`, `pnpm`, `yarn`, `bun`), previews exact CLI commands, target files, dependencies, and conflicts before running, backs up manifests and conflicting files, and supports full rollback.
+- **Local-first component catalog:** Incremental ETag sync across 10 official registries (**2,050+ entries** synced in ~3-4 s), 5 link-only sources, and 7 offline native COVALOS resources with live interactive playgrounds.
+- **License compliance:** Permissive (MIT/ISC) sources cache source code locally; non-redistributable sources (Commons Clause / Aceternity) store metadata only and fetch source on demand; commercial libraries show links only.
+- **Compatibility & rollback:** Detects project framework and package manager (`npm`, `pnpm`, `yarn`, `bun`), previews exact CLI commands, target files, dependencies, and conflicts before running, backs up manifests and conflicting files, and supports full rollback.
 - **Structured Agent CLI (`--library`):** JSON output designed for agent workflows with explicit untrusted-data notices.
 
 ### 6. Agent Hub, Luma Companion & Discord Rich Presence
-- **Session Home & unified Agent Hub:** Start directly from `"Where should we begin?"` with official provider logos, curated model picker with per-model **Thinking effort** (`Low`, `Medium`, `High`, `Extra High`), `/model` and `/effort` slash commands, and a real local **Agent usage** dashboard (input/output tokens, turns, models).
+- **Session Home & unified Agent Hub:** Start directly from `"Where should we begin?"` with official provider logos, curated model picker with per-model **Thinking effort** (`Low`, `Medium`, `High`, `Extra High`), `/model` and `/effort` slash commands, and a local **Agent usage** dashboard (input/output tokens, turns, models).
 - **Official CLI drivers & one-click installer:** Headless streaming adapters for **Codex** (ChatGPT) and **Claude Code** (with **Gemini CLI** account registration and chat adapter coming soon), plus an allowlisted one-click npm installer for `@anthropic-ai/claude-code`, `@openai/codex`, and `@google/gemini-cli`.
-- **Global local rules & skills:** Edit persistent local agent instructions (`agent-rules.md`) directly inside Covalos, toggle **Auto skills**, and safely import `SKILL.md` files from public GitHub repositories.
-- **Hook bridge (`--agent-hook`), worktrees & Luma:** Scoped permission approvals, optional per-session git worktree isolation, and live status reflected by Luma, an original procedural vector companion rendered natively in `egui`.
-- **Privacy-first Discord Rich Presence:** Built-in official Covalos Discord IPC integration (opt-in, off by default) showing language icon, Covalos badge, session timer, optional project name, and a link to the Covalos Beta showcase — never sending file paths, filenames, prompts, or credentials.
+- **Global local rules & skills:** Edit persistent local agent instructions (`agent-rules.md`) directly inside Covalos, toggle **Auto skills**, and import `SKILL.md` files from public GitHub repositories.
+- **Hook bridge (`--agent-hook`), worktrees & Luma:** Scoped permission approvals, optional per-session git worktree isolation, and live status reflected by Luma, a procedural vector companion rendered natively in `egui`.
+- **Privacy-first Discord Rich Presence:** Built-in official Covalos Discord IPC integration (opt-in, off by default) showing language icon, Covalos badge, session timer, optional project name, and a link to the Covalos Beta page, without sending file paths, filenames, prompts, or credentials.
 
-### 7. Native Packaging & Safe Migration
-- **Windows x64 installer & executable identity:** `build.rs` embeds a multi-resolution `.ico` (16–256 px) and Windows PE `VERSIONINFO` (`COVALOS`, `0.4.0.0`) directly into `covalos.exe`, packaged with Inno Setup 6 via `tools/build-windows-installer.ps1`.
+### 7. Native Packaging & Migration
+- **Windows x64 installer & executable identity:** `build.rs` embeds a multi-resolution `.ico` (16-256 px) and Windows PE `VERSIONINFO` (`COVALOS`, `0.4.0.0`) directly into `covalos.exe`, packaged with Inno Setup 6 via `tools/build-windows-installer.ps1`.
 - **Non-destructive migration from AEROS:** Automatically detects legacy `AerosEditor` profiles on first launch, migrates settings, conversations, Library Studio state, and agent-bridge data once without overwriting existing COVALOS files or deleting legacy folders.
 
 ---
@@ -117,6 +117,8 @@ The name comes from *covalent* — distinct nuclei sharing a common field to for
 ## Windows Installer
 
 Build a standard Windows x64 installer with `.\tools\build-windows-installer.ps1`. It registers COVALOS in Installed apps, adds a Start menu shortcut and offers desktop/context menu integration. See [`docs/WINDOWS_INSTALLER.md`](docs/WINDOWS_INSTALLER.md) for the installer location, rebuild command, validation and signing status.
+
+---
 
 ## Building & Running
 
@@ -180,7 +182,7 @@ covalos.exe --library installed
 
 - [ ] **Final brand isotype sign-off**.
 - [x] **Windows x64 installer** with Windows registration, shortcuts, optional context menus and non-destructive uninstallation.
-- [ ] **Full multi-agent orchestration:** Verified headless adapters for **Gemini CLI** and **Antigravity (`agy`)**, shared cross-agent memory, and automatic Library Studio CLI guidance inside Agent Hub.
+- [ ] **Full multi-agent orchestration:** Headless adapters for **Gemini CLI** and **Antigravity (`agy`)**, shared cross-agent memory, and automatic Library Studio CLI guidance inside Agent Hub.
 - [ ] **Isolated WebView2 previews** for React components in Library Studio.
 - [ ] **Advanced IDE capabilities:** LSP (completion, diagnostics, formatting, go-to-definition), DAP debugging, persistent PTY terminal, and extension support.
 - [ ] **Instant minimize pause on borderless Windows frames** using native `IsIconic` state detection.
@@ -189,7 +191,7 @@ covalos.exe --library installed
 
 ## Documentation
 
-- [`docs/CHECKPOINT.md`](docs/CHECKPOINT.md) — Current build status, benchmark metrics, E2E verification, and next steps.
-- [`docs/DESIGN_SYSTEM.md`](docs/DESIGN_SYSTEM.md) — Nocturne design system specification, tokens, and GLSL shaders.
-- [`assets/brand/PROVENANCE.md`](assets/brand/PROVENANCE.md) — Provisional brand assets and one-step replacement workflow.
-- [`assets/brands/PROVENANCE.md`](assets/brands/PROVENANCE.md) — Third-party provider mark licenses and terms.
+- [`docs/DESIGN_SYSTEM.md`](docs/DESIGN_SYSTEM.md) - Nocturne design system specification, tokens, and GLSL shaders.
+- [`docs/WINDOWS_INSTALLER.md`](docs/WINDOWS_INSTALLER.md) - Windows x64 installer build, verification, and signing notes.
+- [`assets/brand/PROVENANCE.md`](assets/brand/PROVENANCE.md) - Provisional brand assets and replacement workflow.
+- [`assets/brands/PROVENANCE.md`](assets/brands/PROVENANCE.md) - Third-party provider mark licenses and terms.

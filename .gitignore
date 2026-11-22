@@ -1,5 +1,5 @@
 /target/
 /dist/
-
-# Provider-owned config homes captured in evidence snapshots
-artifacts/**/config-snapshot/profiles/accounts/
+/.codex/
+/artifacts/
+/design/
