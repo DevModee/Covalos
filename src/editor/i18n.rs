@@ -377,6 +377,8 @@ const SPANISH: &[(&str, &str)] = &[
     ("Filter changes", "Filtrar cambios"),
     ("History", "Historial"),
     ("Search message, author, hash…", "Buscar mensaje, autor, hash…"),
+    ("Files", "Archivos"),
+    ("Navigation", "Navegación"),
     ("Interface scale", "Escala de la interfaz"),
     ("Reset editor zoom", "Restablecer zoom del editor"),
     ("Reset Explorer zoom", "Restablecer zoom del Explorador"),

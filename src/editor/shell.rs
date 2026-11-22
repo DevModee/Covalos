@@ -70,10 +70,41 @@ pub(super) struct Notification {
     pub(super) unread: bool,
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum PaletteCategory {
+    #[default]
+    All,
+    Files,
+    Navigation,
+    Git,
+    Settings,
+}
+
+impl PaletteCategory {
+    const ALL: [Self; 5] = [
+        Self::All,
+        Self::Files,
+        Self::Navigation,
+        Self::Git,
+        Self::Settings,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Files => "Files",
+            Self::Navigation => "Navigation",
+            Self::Git => "Git",
+            Self::Settings => "Settings",
+        }
+    }
+}
+
 pub(super) struct Palette {
     query: String,
     focus: bool,
     selected: usize,
+    category: PaletteCategory,
     files: Vec<PathBuf>,
     results: mpsc::Receiver<Vec<PathBuf>>,
     stop: Arc<AtomicBool>,
@@ -101,6 +132,7 @@ impl Palette {
             query: String::new(),
             focus: true,
             selected: 0,
+            category: PaletteCategory::All,
             files: Vec::new(),
             results,
             stop,
@@ -118,6 +150,10 @@ enum Action {
     Save,
     Terminal,
     AgentHub,
+    Sidebar,
+    FocusMode,
+    Notifications,
+    SourceControl,
     Settings,
     Detach,
     DockAll,
@@ -125,20 +161,24 @@ enum Action {
     About,
 }
 
-const ACTIONS: &[(Action, &str)] = &[
-    (Action::OpenFolder, "Open folder"),
-    (Action::OpenFile, "Open file"),
-    (Action::CreateProject, "Create project"),
-    (Action::Search, "Search workspace"),
-    (Action::Find, "Find in active file"),
-    (Action::Save, "Save active file"),
-    (Action::Terminal, "Toggle terminal"),
-    (Action::AgentHub, "Toggle Agent Hub"),
-    (Action::Settings, "Open settings"),
-    (Action::Detach, "Detach to floating editor"),
-    (Action::DockAll, "Dock all"),
-    (Action::Library, "Open Library Studio"),
-    (Action::About, "About Covalos"),
+const ACTIONS: &[(Action, &str, PaletteCategory)] = &[
+    (Action::OpenFolder, "Open folder", PaletteCategory::Files),
+    (Action::OpenFile, "Open file", PaletteCategory::Files),
+    (Action::CreateProject, "Create project", PaletteCategory::Files),
+    (Action::Search, "Search workspace", PaletteCategory::Navigation),
+    (Action::Find, "Find in active file", PaletteCategory::Navigation),
+    (Action::Save, "Save active file", PaletteCategory::Files),
+    (Action::Terminal, "Toggle terminal", PaletteCategory::Navigation),
+    (Action::AgentHub, "Toggle Agent Hub", PaletteCategory::Navigation),
+    (Action::Sidebar, "Toggle sidebar", PaletteCategory::Navigation),
+    (Action::FocusMode, "Focus mode", PaletteCategory::Navigation),
+    (Action::Notifications, "Notifications", PaletteCategory::Navigation),
+    (Action::SourceControl, "Source control", PaletteCategory::Git),
+    (Action::Settings, "Open settings", PaletteCategory::Settings),
+    (Action::Detach, "Detach to floating editor", PaletteCategory::Navigation),
+    (Action::DockAll, "Dock all", PaletteCategory::Navigation),
+    (Action::Library, "Open Library Studio", PaletteCategory::Settings),
+    (Action::About, "About Covalos", PaletteCategory::Settings),
 ];
 
 enum Selection {
@@ -1269,34 +1309,71 @@ impl Editor {
             egui::vec2(0.0, ctx.content_rect().height() * 0.15),
         );
         let modal = egui::Modal::new(Id::new("command-palette"))
-            .frame(modal_frame())
+            .frame(modal_frame().inner_margin(egui::Margin::same(14)))
             .area(area)
             .show(ctx, |ui| {
                 super::motion::enter(ui, Id::new("quick-access-entry"), 0.20);
                 ui.set_width(palette_width);
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(tr("Quick access")).strong().size(LEAD));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(muted(tr("Esc")));
-                    });
-                });
-                ui.add_space(12.0);
                 let down = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::ArrowDown));
                 let up = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::ArrowUp));
                 let confirm = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Enter));
-                let input = ui.add(
-                    TextEdit::singleline(&mut palette.query)
-                        .hint_text(tr("Find a file, > command, @ project, ? Codex"))
-                        .margin(egui::Margin::same(10))
-                        .desired_width(f32::INFINITY)
-                        .char_limit(12_000),
-                );
-                if std::mem::take(&mut palette.focus) {
-                    input.request_focus();
-                }
-                if input.changed() {
-                    palette.selected = 0;
-                }
+                ui.horizontal(|ui| {
+                    let (_, icon_rect) = ui.allocate_space(egui::vec2(18.0, 24.0));
+                    draw_icon_sized(
+                        ui.painter(),
+                        icon_rect.center(),
+                        Icon::Search,
+                        colors().muted,
+                        15.0,
+                    );
+                    let input = ui.add(
+                        TextEdit::singleline(&mut palette.query)
+                            .hint_text(tr("Find a file, > command, @ project, ? Codex"))
+                            .frame(false)
+                            .desired_width((ui.available_width() - 36.0).max(120.0))
+                            .char_limit(12_000),
+                    );
+                    if std::mem::take(&mut palette.focus) {
+                        input.request_focus();
+                    }
+                    if input.changed() {
+                        palette.selected = 0;
+                    }
+                    ui.label(muted(tr("Esc")));
+                });
+                ui.add_space(6.0);
+                ui.separator();
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    for category in PaletteCategory::ALL {
+                        let selected = palette.category == category;
+                        let btn = egui::Button::new(
+                            RichText::new(tr(category.label()))
+                                .size(SMALL)
+                                .color(if selected {
+                                    colors().text
+                                } else {
+                                    colors().secondary
+                                }),
+                        )
+                        .fill(if selected {
+                            colors().elevated
+                        } else {
+                            egui::Color32::TRANSPARENT
+                        })
+                        .stroke(if selected {
+                            egui::Stroke::new(1.0_f32, colors().border)
+                        } else {
+                            egui::Stroke::NONE
+                        })
+                        .corner_radius(6);
+                        if ui.add(btn).clicked() {
+                            palette.category = category;
+                            palette.selected = 0;
+                        }
+                    }
+                });
                 ui.add_space(8.0);
                 let query = palette.query.trim();
                 let mut choices = Vec::new();
@@ -1316,13 +1393,38 @@ impl Editor {
                             .contains(&filter)
                             .then(|| (Selection::Project(root.clone()), title))
                     }));
+                } else if palette.category == PaletteCategory::Files
+                    && !query.starts_with('>')
+                    && let Some(root) = &self.root
+                {
+                    let filter = query.to_lowercase().replace('\\', "/");
+                    choices.extend(
+                        palette
+                            .files
+                            .iter()
+                            .filter_map(|file| {
+                                let label = file
+                                    .strip_prefix(root)
+                                    .unwrap_or(file)
+                                    .display()
+                                    .to_string();
+                                (filter.is_empty()
+                                    || label.to_lowercase().replace('\\', "/").contains(&filter))
+                                .then(|| (Selection::File(file.clone()), label))
+                            })
+                            .take(30),
+                    );
                 } else if query.is_empty() || query.starts_with('>') {
                     let filter = query.trim_start_matches('>').trim().to_lowercase();
                     choices.extend(
                         ACTIONS
                             .iter()
-                            .filter(|(_, label)| label.to_lowercase().contains(&filter))
-                            .map(|(action, label)| {
+                            .filter(|(_, label, cat)| {
+                                (palette.category == PaletteCategory::All
+                                    || *cat == palette.category)
+                                    && label.to_lowercase().contains(&filter)
+                            })
+                            .map(|(action, label, _)| {
                                 (Selection::Action(*action), (*label).to_owned())
                             }),
                     );
@@ -1376,6 +1478,9 @@ impl Editor {
                                 Selection::Action(Action::OpenFolder) => "Ctrl O",
                                 Selection::Action(Action::OpenFile) => "Ctrl Shift O",
                                 Selection::Action(Action::Save) => "Ctrl S",
+                                Selection::Action(Action::Sidebar) => "Ctrl B",
+                                Selection::Action(Action::Find) => "Ctrl F",
+                                Selection::Action(Action::Terminal) => "Ctrl `",
                                 Selection::Action(_) => "Command",
                             };
                             let response = row(ui, &label, hint, index == palette.selected);
@@ -1410,6 +1515,17 @@ impl Editor {
                 Action::Save => self.save_active(),
                 Action::Terminal => self.preferences.tools_open = !self.preferences.tools_open,
                 Action::AgentHub => self.hub_open = !self.hub_open,
+                Action::Sidebar => self.toggle_sidebar(),
+                Action::FocusMode => self.clean.focus = !self.clean.focus,
+                Action::Notifications => self.notifications_open = !self.notifications_open,
+                Action::SourceControl => {
+                    self.sidebar = super::Sidebar::Git;
+                    self.sidebar_open = true;
+                    if self.root.is_none() {
+                        self.sidebar_requested = true;
+                    }
+                    self.git_refresh(ctx, None);
+                }
                 Action::Settings => self.settings_open = true,
                 Action::Detach => {
                     if let Some(index) = self.active {
