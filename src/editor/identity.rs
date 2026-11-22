@@ -269,19 +269,11 @@ impl Identity {
         self.influence = if self.scene_active { pointer } else { None };
         let dithered = matches!(prefs.background, Background::Dither | Background::Bloom);
         if dithered && self.scene_active && background_visible {
-            self.dither.record(now, pointer, click);
-            if click {
-                self.until = self.until.max(now + super::dither::RIPPLE_SECONDS);
-            }
+            self.dither.record(now, pointer, false);
         } else {
             self.dither.clear();
         }
-        if click && !dithered && visible && prefs.interactive && !reduce && prefs.animated {
-            self.ripple = pointer.map(|p| (p, now));
-        }
-        if self.ripple.is_some_and(|(_, start)| now - start > 1.1) {
-            self.ripple = None;
-        }
+        self.ripple = None;
         let background_active = visible
             && !reduce
             && background_visible
@@ -1128,7 +1120,7 @@ mod interaction_tests {
             0.3,
         );
         assert!(frame.trail[0][2] < 1.0, "{:?}", frame.trail);
-        assert!(frame.ripples[0][2] >= 0.0, "{:?}", frame.ripples);
+        assert!(frame.ripples[0][2] < 0.0, "{:?}", frame.ripples);
     }
 
     #[test]

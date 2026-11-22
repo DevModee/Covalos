@@ -198,7 +198,7 @@ impl Editor {
             .root
             .as_deref()
             .map(workspace::filename)
-            .unwrap_or_else(|| "Projects".into());
+            .unwrap_or_else(|| tr("Projects").to_owned());
         ui.menu_button(RichText::new(label).color(colors().muted), |ui| {
             if ui.button(tr("Open folder…")).clicked() {
                 ui.close();
@@ -594,16 +594,35 @@ impl Editor {
                             }
                         },
                     );
-                    ui.separator();
-                    // Right minimalist content column.
-                    ScrollArea::vertical()
-                        .id_salt("settings-body")
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            ui.set_min_width(ui.available_width());
-                            ui.label(RichText::new(tr(active_tab.label())).size(LEAD).strong());
-                            ui.add_space(10.0);
-                            match active_tab {
+                    ui.add_space(6.0);
+                    // Right minimalist content column (explicit top-down layout inside a defined card).
+                    let body_w = (ui.available_width() - 4.0).max(260.0);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(body_w, content_h),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            egui::Frame::new()
+                                .fill(colors().inset)
+                                .corner_radius(8)
+                                .stroke(egui::Stroke::new(1.0_f32, colors().border))
+                                .inner_margin(egui::Margin::same(16))
+                                .show(ui, |ui| {
+                                    ui.set_min_size(egui::vec2(
+                                        (body_w - 32.0).max(220.0),
+                                        (content_h - 32.0).max(160.0),
+                                    ));
+                                    ScrollArea::vertical()
+                                        .id_salt("settings-body")
+                                        .auto_shrink([false, false])
+                                        .show(ui, |ui| {
+                                            ui.set_width(ui.available_width());
+                                            ui.label(
+                                                RichText::new(tr(active_tab.label()))
+                                                    .size(HEADING)
+                                                    .strong(),
+                                            );
+                                            ui.add_space(12.0);
+                                            match active_tab {
                                 SettingsSection::General => {
                                     setting_row(
                                         ui,
@@ -1103,7 +1122,10 @@ impl Editor {
                                     );
                                 }
                             }
-                        });
+                                        });
+                                });
+                        },
+                    );
                 });
                 if old
                     != (
@@ -1638,21 +1660,36 @@ impl SettingsSection {
 }
 
 fn setting_row(ui: &mut Ui, title: &str, subtitle: &str, control: impl FnOnce(&mut Ui)) {
-    ui.horizontal(|ui| {
-        let left_w = (ui.available_width() - 160.0).max(120.0);
+    let full_w = ui.available_width();
+    let control_w = 156.0_f32.min(full_w * 0.40);
+    let left_w = (full_w - control_w - 12.0).max(120.0);
+    ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
-            egui::vec2(left_w, 36.0),
+            egui::vec2(left_w, 0.0),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
-                ui.label(RichText::new(tr(title)).size(BODY).color(colors().text));
-                ui.add(egui::Label::new(muted(subtitle)).wrap());
+                ui.set_width(left_w);
+                ui.label(
+                    RichText::new(tr(title))
+                        .size(BODY)
+                        .color(colors().text)
+                        .strong(),
+                );
+                if !subtitle.is_empty() {
+                    ui.add_space(2.0);
+                    ui.add(egui::Label::new(muted(subtitle)).wrap());
+                }
             },
         );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), control);
+        ui.allocate_ui_with_layout(
+            egui::vec2(control_w, 28.0),
+            egui::Layout::right_to_left(egui::Align::Center),
+            control,
+        );
     });
-    ui.add_space(6.0);
+    ui.add_space(8.0);
     ui.separator();
-    ui.add_space(6.0);
+    ui.add_space(8.0);
 }
 
 fn home_card(ui: &mut Ui, width: f32, icon: Icon, title: &str, detail: &str) -> egui::Response {

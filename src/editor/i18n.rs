@@ -381,6 +381,11 @@ const SPANISH: &[(&str, &str)] = &[
     ("Navigation", "Navegación"),
     ("Surface brightness", "Claridad de superficies"),
     ("Adjust background clarity across chrome, Explorer, and editor.", "Ajustá la claridad de fondo en la barra, el Explorador y el editor."),
+    ("Projects", "Proyectos"),
+    (
+        "Agents work inside a project. Open a folder, then start a conversation here.",
+        "Los agentes trabajan dentro de un proyecto. Abrí una carpeta para iniciar una conversación acá.",
+    ),
     ("Interface scale", "Escala de la interfaz"),
     ("Reset editor zoom", "Restablecer zoom del editor"),
     ("Reset Explorer zoom", "Restablecer zoom del Explorador"),

@@ -328,10 +328,6 @@ impl Editor {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                         }
                         ui.add_space(8.0);
-                        if icon_button(ui, Icon::Settings, "Settings", self.settings_open).clicked()
-                        {
-                            self.settings_open = !self.settings_open;
-                        }
                         // One destination for every provider: Agents. Codex, Claude and
                         // Gemini are providers inside it, not separate places.
                         let agents = if rect.width() > 900.0 {
@@ -1488,24 +1484,26 @@ impl Editor {
         if progress <= 0.001 {
             return;
         }
-        let desired = self.preferences.assistant_width.min(max_width).max(240.0);
+        let desired = self.preferences.assistant_width.min(max_width).max(220.0);
         let animating = progress < 0.999 || previous < 0.999;
         let panel = SidePanel::right("assistant")
             .default_width(desired)
+            .show_separator_line(false)
             .frame(island(Margin::same(12)));
         let panel = if animating {
             panel
                 .exact_width((desired * progress).max(1.0))
                 .resizable(false)
         } else {
-            panel.width_range(240.0..=max_width)
+            panel.width_range(160.0..=max_width)
         };
         let result = panel.show(ctx, |ui| {
-            ui.set_min_width(ui.available_width());
+            let avail_w = ui.available_width().max(1.0);
+            ui.set_min_width(avail_w);
             let origin = ui.available_rect_before_wrap().min;
             let rect = egui::Rect::from_min_size(
                 origin,
-                egui::vec2((desired - 24.0).max(1.0), ui.available_height()),
+                egui::vec2(avail_w, ui.available_height()),
             );
             let mut content = ui.new_child(
                 egui::UiBuilder::new()
@@ -1517,13 +1515,13 @@ impl Editor {
             self.agent_dock(&mut content);
         });
         let width = result.response.rect.width();
-        ctx.layer_painter(egui::LayerId::background()).vline(
-            result.response.rect.left(),
-            result.response.rect.y_range(),
-            egui::Stroke::new(1.0_f32, colors().border),
-        );
-        if !animating && width + 1.0 < max_width {
-            self.preferences.assistant_width = width;
+        if !animating {
+            if width < 195.0 && !ctx.input(|i| i.pointer.any_down()) {
+                self.preferences.assistant_open = false;
+                self.preferences.assistant_width = 300.0;
+            } else if width + 1.0 < max_width {
+                self.preferences.assistant_width = width;
+            }
         }
     }
 
