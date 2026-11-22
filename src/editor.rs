@@ -179,6 +179,7 @@ impl Editor {
         theme::install_fonts(ctx);
         // Ctrl +/- must zoom the panel under the pointer, not the whole interface.
         ctx.options_mut(|o| o.zoom_with_keyboard = false);
+        theme::set_brightness(preferences.brightness);
         theme::install(
             ctx,
             preferences.font_size,

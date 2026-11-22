@@ -142,6 +142,7 @@ impl Editor {
     pub(super) fn top_bar(&mut self, ctx: &Context) {
         TopBottomPanel::top("menu")
             .exact_height(CHROME_HEIGHT)
+            .show_separator_line(false)
             .frame(panel_frame(Margin::symmetric(12, 6)))
             .show(ctx, |ui| {
                 let rect = ui.available_rect_before_wrap();
@@ -353,17 +354,13 @@ impl Editor {
                         }
                     },
                 );
-                ui.painter().hline(
-                    rect.x_range(),
-                    rect.bottom() + 6.0,
-                    egui::Stroke::new(1.0_f32, colors().border),
-                );
             });
     }
 
     pub(super) fn status_bar(&mut self, ctx: &Context) {
         TopBottomPanel::bottom("status")
             .exact_height(STATUS_HEIGHT)
+            .show_separator_line(false)
             .frame(panel_frame(Margin::symmetric(12, 2)))
             .show(ctx, |ui| {
                 let rect = ui.available_rect_before_wrap();
@@ -425,11 +422,6 @@ impl Editor {
                         }
                     },
                 );
-                ui.painter().hline(
-                    rect.x_range(),
-                    rect.top() - 2.0,
-                    egui::Stroke::new(1.0_f32, colors().border),
-                );
             });
     }
 
@@ -437,6 +429,7 @@ impl Editor {
         SidePanel::left("activity")
             .exact_width(RAIL_WIDTH)
             .resizable(false)
+            .show_separator_line(false)
             .frame(panel_frame(Margin::symmetric(6, 10)))
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing.y = 4.0;

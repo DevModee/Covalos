@@ -91,29 +91,29 @@ pub(super) struct Palette {
 impl Theme {
     pub(super) fn colors(self) -> Palette {
         match self {
-            // Neutral obsidian chrome framing an elevated island card with hairline borders
-            // and a crisp electric-blue focus accent.
+            // Continuous medium-gray outer shell (top bar, rail, Explorer, perimeter)
+            // framing a darker rounded editor well with hairline borders.
             Self::Obsidian => Palette {
-                canvas: Color32::from_rgb(12, 12, 14),
-                surface: Color32::from_rgb(20, 20, 23),
-                inset: Color32::from_rgb(22, 22, 26),
-                elevated: Color32::from_rgb(31, 31, 36),
-                hover: Color32::from_rgb(39, 39, 46),
-                border: Color32::from_rgb(42, 42, 48),
-                control_border: Color32::from_rgb(63, 63, 72),
+                canvas: Color32::from_rgb(28, 28, 32),
+                surface: Color32::from_rgb(28, 28, 32),
+                inset: Color32::from_rgb(15, 15, 18),
+                elevated: Color32::from_rgb(39, 39, 45),
+                hover: Color32::from_rgb(49, 49, 57),
+                border: Color32::from_rgb(46, 46, 53),
+                control_border: Color32::from_rgb(68, 68, 78),
                 text: Color32::from_rgb(242, 242, 245),
-                secondary: Color32::from_rgb(176, 176, 186),
-                muted: Color32::from_rgb(138, 138, 150),
-                disabled: Color32::from_rgb(98, 98, 110),
-                accent: Color32::from_rgb(106, 176, 255),
-                accent_hover: Color32::from_rgb(148, 200, 255),
-                accent_bg: Color32::from_rgb(21, 37, 63),
-                success: Color32::from_rgb(110, 222, 165),
-                error: Color32::from_rgb(255, 132, 146),
-                warning: Color32::from_rgb(246, 198, 118),
-                syntax_string: Color32::from_rgb(122, 222, 164),
-                syntax_number: Color32::from_rgb(245, 178, 116),
-                caret: Color32::from_rgb(96, 170, 255),
+                secondary: Color32::from_rgb(188, 188, 200),
+                muted: Color32::from_rgb(154, 154, 168),
+                disabled: Color32::from_rgb(108, 108, 120),
+                accent: Color32::from_rgb(112, 180, 255),
+                accent_hover: Color32::from_rgb(152, 204, 255),
+                accent_bg: Color32::from_rgb(24, 42, 70),
+                success: Color32::from_rgb(116, 224, 168),
+                error: Color32::from_rgb(255, 136, 150),
+                warning: Color32::from_rgb(246, 200, 122),
+                syntax_string: Color32::from_rgb(134, 226, 174),
+                syntax_number: Color32::from_rgb(248, 184, 122),
+                caret: Color32::from_rgb(102, 174, 255),
                 selection: Color32::from_rgba_unmultiplied(59, 130, 246, 76),
             },
             // Deep violet-black base: surfaces separated by value, hairline borders, a lilac
@@ -262,13 +262,48 @@ impl Theme {
 thread_local! {
     // egui renders on its UI thread. Each test and viewport installs its palette before drawing.
     static ACTIVE_THEME: std::cell::Cell<Theme> = const { std::cell::Cell::new(Theme::Obsidian) };
+    static SURFACE_BRIGHTNESS: std::cell::Cell<f32> = const { std::cell::Cell::new(0.35) };
 }
 pub(super) fn active() -> Theme {
     ACTIVE_THEME.with(|theme| theme.get())
 }
 
+pub(super) fn set_brightness(brightness: f32) {
+    let clamped = if brightness.is_finite() {
+        brightness.clamp(0.0, 1.0)
+    } else {
+        0.35
+    };
+    SURFACE_BRIGHTNESS.with(|b| b.set(clamped));
+}
+
+fn shift_rgb(color: Color32, delta: i16) -> Color32 {
+    let apply = |c: u8| (i16::from(c) + delta).clamp(0, 255) as u8;
+    Color32::from_rgba_unmultiplied(
+        apply(color.r()),
+        apply(color.g()),
+        apply(color.b()),
+        color.a(),
+    )
+}
+
 pub(super) fn colors() -> Palette {
-    ACTIVE_THEME.with(|theme| theme.get().colors())
+    let theme = ACTIVE_THEME.with(|theme| theme.get());
+    let mut palette = theme.colors();
+    if theme.is_dark() && theme != Theme::HighContrast {
+        let brightness = SURFACE_BRIGHTNESS.with(|b| b.get());
+        let delta = ((brightness - 0.35) * 32.0).round() as i16;
+        if delta != 0 {
+            palette.canvas = shift_rgb(palette.canvas, delta);
+            palette.surface = shift_rgb(palette.surface, delta);
+            palette.inset = shift_rgb(palette.inset, (delta * 3) / 4);
+            palette.elevated = shift_rgb(palette.elevated, delta);
+            palette.hover = shift_rgb(palette.hover, delta);
+            palette.border = shift_rgb(palette.border, delta);
+            palette.control_border = shift_rgb(palette.control_border, delta);
+        }
+    }
+    palette
 }
 
 pub(super) fn install_fonts(ctx: &Context) {
@@ -395,22 +430,14 @@ pub(super) fn install(ctx: &Context, font_size: f32, high_contrast: bool, theme:
 pub(super) const ISLAND_RADIUS: u8 = 10;
 pub(super) const ISLAND_GAP: i8 = 4;
 
-/// Window chrome (title bar, activity rail, status bar): flat, on the recessed canvas.
+/// Window chrome (title bar, activity rail, status bar): flat, on the continuous outer shell.
 pub(super) fn panel_frame(margin: Margin) -> Frame {
     Frame::new().fill(colors().canvas).inner_margin(margin)
 }
 
-/// Recessed sidebar frame that sits flush on the outer chrome beside the floating center island.
+/// Seamless sidebar frame connected continuously to the top bar and outer window contour.
 pub(super) fn sidebar_frame(margin: Margin) -> Frame {
-    Frame::new()
-        .fill(colors().canvas)
-        .inner_margin(margin)
-        .outer_margin(Margin {
-            left: 0,
-            right: 0,
-            top: ISLAND_GAP,
-            bottom: ISLAND_GAP,
-        })
+    Frame::new().fill(colors().canvas).inner_margin(margin)
 }
 
 /// A rounded tool-window surface with a hairline edge.
@@ -423,12 +450,17 @@ pub(super) fn island(margin: Margin) -> Frame {
         .stroke(Stroke::new(1.0_f32, colors().border))
 }
 
-/// Primary floating center card for the editor, studio, and hub views.
+/// Darker recessed center card framed inside the continuous outer chrome.
 pub(super) fn centre_island(margin: Margin) -> Frame {
     Frame::new()
         .fill(colors().inset)
         .inner_margin(margin)
-        .outer_margin(Margin::same(ISLAND_GAP))
+        .outer_margin(Margin {
+            left: 2,
+            right: 6,
+            top: 0,
+            bottom: 4,
+        })
         .corner_radius(ISLAND_RADIUS)
         .stroke(Stroke::new(1.0_f32, colors().border))
 }

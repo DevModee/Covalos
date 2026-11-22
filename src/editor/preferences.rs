@@ -12,6 +12,8 @@ pub(super) struct Preferences {
     pub(super) syntax: super::syntax::SyntaxStyle,
     /// Motion intensity from 0 (instant) to 1 (full); Reduced Motion still wins.
     pub(super) motion: f32,
+    /// Global surface clarity for dark themes (0.0 darkest .. 1.0 brightest).
+    pub(super) brightness: f32,
     /// Shortcut that opens Library Studio, e.g. "Ctrl+Shift+L".
     pub(super) library_shortcut: String,
     /// Explorer zoom, independent from the editor font size and the interface scale.
@@ -52,6 +54,7 @@ impl Default for Preferences {
             theme: super::theme::Theme::Obsidian,
             syntax: super::syntax::SyntaxStyle::Auto,
             motion: 1.0,
+            brightness: 0.35,
             library_shortcut: "Ctrl+Shift+L".into(),
             explorer_zoom: 1.0,
             ui_scale: 1.0,
@@ -144,6 +147,11 @@ impl Preferences {
             prefs.motion.clamp(0.0, 1.0)
         } else {
             1.0
+        };
+        prefs.brightness = if prefs.brightness.is_finite() {
+            prefs.brightness.clamp(0.0, 1.0)
+        } else {
+            0.35
         };
         prefs.sidebar_width = prefs.sidebar_width.clamp(155.0, 480.0);
         prefs.assistant_width = prefs.assistant_width.clamp(230.0, 520.0);
