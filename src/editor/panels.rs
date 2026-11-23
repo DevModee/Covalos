@@ -73,6 +73,9 @@ impl Editor {
         if shortcut(Modifiers::COMMAND, Key::B) {
             self.toggle_sidebar();
         }
+        if shortcut(Modifiers::ALT, Key::Z) {
+            self.preferences.word_wrap = !self.preferences.word_wrap;
+        }
         if shortcut(Modifiers::COMMAND, Key::Backtick) {
             self.preferences.tools_open = !self.preferences.tools_open;
         }
@@ -269,6 +272,23 @@ impl Editor {
                                 .fill(colors().inset)
                                 .stroke(egui::Stroke::new(1.0_f32, colors().border)),
                         );
+                        let hover = super::motion::state(
+                            ui,
+                            response.id.with("command-hover"),
+                            response.hovered(),
+                            super::motion::HOVER,
+                        );
+                        if hover > 0.01 {
+                            ui.painter().rect_stroke(
+                                response.rect,
+                                CONTROL_RADIUS,
+                                egui::Stroke::new(
+                                    1.0_f32,
+                                    colors().control_border.gamma_multiply(hover),
+                                ),
+                                egui::StrokeKind::Inside,
+                            );
+                        }
                         draw_icon(
                             ui.painter(),
                             response.rect.left_center() + egui::vec2(16.0, 0.0),
@@ -396,6 +416,7 @@ impl Editor {
                         if self.guided.session.is_some()
                             && ui
                                 .selectable_label(self.guided.open, tr("Guided Mode"))
+                                .on_hover_text(tr("Show or hide the Guided Mode window"))
                                 .clicked()
                         {
                             self.guided.open = !self.guided.open;
@@ -929,6 +950,8 @@ impl Editor {
         let mut detach_active = false;
         let mut open_find = false;
         let mut toggle_terminal = false;
+        let mut toggle_wrap = false;
+        let mut reveal = None;
         let doc = &self.documents[index];
         let breadcrumb = self
             .root
@@ -939,11 +962,8 @@ impl Editor {
             .components()
             .map(|part| part.as_os_str().to_string_lossy().into_owned())
             .collect();
-        let (parents, file_name) = match parts.split_last() {
-            Some((last, rest)) => (rest.join("  ›  "), last.as_str()),
-            None => (String::new(), ""),
-        };
         let doc_path = doc.path.clone();
+        let wrap = self.preferences.word_wrap;
         egui::Frame::new()
             .inner_margin(Margin::symmetric(12, 0))
             .show(ui, |ui| {
@@ -973,36 +993,50 @@ impl Editor {
                             {
                                 open_find = true;
                             }
+                            if ui
+                                .selectable_label(wrap, RichText::new(tr("Wrap")).size(SMALL))
+                                .on_hover_text(tr("Toggle word wrap (Alt+Z)"))
+                                .clicked()
+                            {
+                                toggle_wrap = true;
+                            }
                             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                                ui.spacing_mut().item_spacing.x = 4.0;
-                                let (_, icon_rect) = ui.allocate_space(egui::vec2(14.0, 16.0));
+                                ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
+                                ui.spacing_mut().item_spacing.x = 0.0;
+                                let (_, icon_rect) = ui.allocate_space(egui::vec2(18.0, 16.0));
                                 super::assets::file(ui, icon_rect.center(), &doc_path);
-                                if !parents.is_empty() {
-                                    ui.add(
-                                        egui::Label::new(
-                                            RichText::new(format!("{parents}  ›"))
-                                                .size(SMALL)
-                                                .color(colors().muted),
-                                        )
-                                        .truncate(),
-                                    )
-                                    .on_hover_text(doc_path.display().to_string());
+                                let last = parts.len().saturating_sub(1);
+                                for (depth, part) in parts.iter().enumerate() {
+                                    if depth > 0 {
+                                        ui.label(
+                                            RichText::new("›").size(SMALL).color(colors().muted),
+                                        );
+                                    }
+                                    let response = crumb(ui, part, depth == last);
+                                    if response.clicked() {
+                                        reveal = Some(depth);
+                                    }
+                                    response.on_hover_text(if depth == last {
+                                        doc_path.display().to_string()
+                                    } else {
+                                        tr("Reveal in Explorer").to_owned()
+                                    });
                                 }
-                                ui.add(
-                                    egui::Label::new(
-                                        RichText::new(file_name)
-                                            .size(SMALL)
-                                            .color(colors().text)
-                                            .strong(),
-                                    )
-                                    .truncate(),
-                                )
-                                .on_hover_text(doc_path.display().to_string());
                             });
                         });
                     },
                 );
             });
+        if toggle_wrap {
+            self.preferences.word_wrap = !self.preferences.word_wrap;
+        }
+        if let Some(depth) = reveal {
+            if depth + 1 >= parts.len() {
+                self.focus_editor = true;
+            } else {
+                self.reveal_in_explorer(ui.ctx(), &doc_path);
+            }
+        }
         if open_find {
             self.show_find();
         }
@@ -1013,9 +1047,23 @@ impl Editor {
             self.detach(index);
             return;
         }
+        let id = Id::new(("document", &self.documents[index].path));
+        if ui.memory(|m| m.has_focus(id))
+            && ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::D))
+        {
+            let range = TextEdit::load_state(ui.ctx(), id)
+                .and_then(|state| state.cursor.char_range())
+                .map(|range| {
+                    let (a, b) = (range.primary.index, range.secondary.index);
+                    (a.min(b), a.max(b))
+                })
+                .unwrap_or((self.cursor, self.cursor));
+            if let Some(next) = next_occurrence(&self.documents[index].text, range) {
+                self.selection = Some(next);
+            }
+        }
         let doc = &mut self.documents[index];
         ui.add_space(4.0);
-        let id = Id::new(("document", &doc.path));
         let selection = self.selection.take();
         if let Some((start, end)) = selection {
             let mut state = TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
@@ -1032,13 +1080,18 @@ impl Editor {
             .and_then(|ext| ext.to_str())
             .unwrap_or("")
             .to_owned();
-        ScrollArea::both()
+        let wrap = self.preferences.word_wrap;
+        let use_ligatures = self.preferences.font_ligatures && !language.is_empty();
+        let suggestions = self.preferences.inline_suggestions;
+        let caret_before = self.cursor;
+        let mut laid_ligatures = Vec::new();
+        let scroll = ScrollArea::new([!wrap, true])
             .id_salt(id.with("scroll"))
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.horizontal_top(|ui| {
-                    let (_, gutter) = ui.allocate_space(egui::vec2(44.0, 1.0));
-                    let mut layouter = |ui: &Ui, buffer: &dyn egui::TextBuffer, _width: f32| {
+                    let (_, gutter) = ui.allocate_space(egui::vec2(48.0, 1.0));
+                    let mut layouter = |ui: &Ui, buffer: &dyn egui::TextBuffer, width: f32| {
                         let text = buffer.as_str();
                         let font_size = TextStyle::Monospace.resolve(ui.style()).size;
                         let line_height = font_size
@@ -1067,11 +1120,27 @@ impl Editor {
                                 line_height,
                             )
                         };
-                        job.wrap.max_width = f32::INFINITY;
+                        laid_ligatures = if use_ligatures {
+                            let mut found = super::ligatures::find(text, caret_before);
+                            super::ligatures::drawable(
+                                ui.ctx(),
+                                &TextStyle::Monospace.resolve(ui.style()),
+                                &mut found,
+                            );
+                            found
+                        } else {
+                            Vec::new()
+                        };
+                        super::ligatures::hide(&mut job, &laid_ligatures);
+                        job.wrap.max_width = if wrap { width } else { f32::INFINITY };
                         ui.fonts_mut(|fonts| fonts.layout_job(job))
                     };
                     let decorations = ui.painter().add(egui::Shape::Noop);
                     let popup_key = super::lsp::popup_keys(ui, &self.lsp, id, &doc.path);
+                    if suggestions {
+                        let popup_open = self.lsp.popup_open(&doc.path);
+                        self.ghost.keys(ui, id, &doc.path, caret_before, popup_open);
+                    }
                     let output = TextEdit::multiline(&mut doc.text)
                         .id(id)
                         .code_editor()
@@ -1096,6 +1165,19 @@ impl Editor {
                         );
                     }
                     super::lsp::after_edit(ui, &mut self.lsp, doc, id, &output, popup_key);
+                    if suggestions {
+                        let popup_open = self.lsp.popup_open(&doc.path);
+                        if self.ghost.after_edit(
+                            ui,
+                            &mut doc.text,
+                            &doc.path,
+                            id,
+                            &output,
+                            popup_open,
+                        ) {
+                            doc.update_dirty();
+                        }
+                    }
                     if focus {
                         output.response.request_focus();
                     }
@@ -1123,135 +1205,23 @@ impl Editor {
                         ui.painter()
                             .rect_filled(rect, 2, colors().accent.gamma_multiply(0.30));
                     }
-                    let clip = ui.clip_rect();
-                    let rows = &output.galley.rows;
-                    let origin = output.galley_pos;
                     let palette = super::syntax::current();
                     let font = TextStyle::Monospace.resolve(ui.style());
-                    let space = ui.fonts_mut(|f| f.glyph_width(&font, ' ')).max(1.0);
-                    let caret = output.galley.pos_from_cursor(CCursor::new(self.cursor));
-                    let active_row = rows
-                        .iter()
-                        .position(|row| {
-                            caret.center().y >= row.pos.y
-                                && caret.center().y < row.pos.y + row.size.y
-                        })
-                        .unwrap_or(0);
-                    let first =
-                        rows.partition_point(|row| origin.y + row.pos.y + row.size.y < clip.top());
-                    let last = rows
-                        .partition_point(|row| origin.y + row.pos.y < clip.bottom())
-                        .min(rows.len());
-                    let mut shapes = Vec::new();
-                    // Active line band across gutter and text.
-                    if let Some(row) = rows.get(active_row) {
-                        let y = origin.y + row.pos.y;
-                        shapes.push(egui::Shape::rect_filled(
-                            egui::Rect::from_min_max(
-                                egui::pos2(gutter.left(), y),
-                                egui::pos2(clip.right(), y + row.size.y),
-                            ),
-                            0,
-                            palette.active_line,
-                        ));
-                    }
-                    // Indent guides at columns 0, 4, 8… inside leading whitespace. Blank
-                    // lines inherit the indentation of the next non-blank line.
-                    let scan_end = (last + 200).min(rows.len());
-                    let scan_start = first.min(active_row);
-                    let mut levels = vec![0usize; scan_end.saturating_sub(scan_start)];
-                    let mut carry = 0;
-                    for i in (scan_start..scan_end).rev() {
-                        let level = leading_indent(&rows[i]).unwrap_or(carry);
-                        carry = level;
-                        levels[i - scan_start] = level;
-                    }
-                    // Guide spacing follows the file: the smallest indentation in view.
-                    let unit = levels
-                        .iter()
-                        .copied()
-                        .filter(|l| *l > 0)
-                        .min()
-                        .unwrap_or(4)
-                        .clamp(2, 8);
-                    let level_at = |i: usize| levels.get(i.wrapping_sub(scan_start)).copied();
-                    let active_col = level_at(active_row)
-                        .unwrap_or(0)
-                        .checked_sub(1)
-                        .map(|c| c - c % unit);
-                    let in_block = |i: usize| -> bool {
-                        let Some(col) = active_col else { return false };
-                        let (lo, hi) = if i <= active_row {
-                            (i, active_row)
-                        } else {
-                            (active_row, i)
-                        };
-                        (lo..=hi).all(|r| level_at(r).is_none_or(|l| l > col))
-                    };
-                    for (i, row) in rows.iter().enumerate().take(last).skip(first) {
-                        let level = level_at(i).unwrap_or(0);
-                        let y = origin.y + row.pos.y;
-                        let mut col = 0;
-                        while col < level {
-                            let x = (origin.x + col as f32 * space + space * 0.5).round() + 0.5;
-                            let lit = Some(col) == active_col && in_block(i);
-                            shapes.push(egui::Shape::line_segment(
-                                [egui::pos2(x, y), egui::pos2(x, y + row.size.y)],
-                                egui::Stroke::new(
-                                    1.0_f32,
-                                    if lit {
-                                        palette.guide_active
-                                    } else {
-                                        palette.guide
-                                    },
-                                ),
-                            ));
-                            col += unit;
-                        }
-                    }
-                    // Bracket matching around the caret.
-                    if let Some((a, b)) = matching_bracket(&doc.text, self.cursor) {
-                        for index in [a, b] {
-                            let r = output
-                                .galley
-                                .pos_from_cursor(CCursor::new(index))
-                                .translate(origin.to_vec2());
-                            let rect =
-                                egui::Rect::from_min_size(r.min, egui::vec2(space, r.height()));
-                            shapes.push(egui::Shape::rect_filled(
-                                rect,
-                                2,
-                                palette.bracket.gamma_multiply(0.16),
-                            ));
-                            shapes.push(egui::Shape::rect_stroke(
-                                rect,
-                                2,
-                                egui::Stroke::new(1.0_f32, palette.bracket.gamma_multiply(0.7)),
-                                egui::StrokeKind::Inside,
-                            ));
-                        }
-                    }
-                    ui.painter().set(decorations, egui::Shape::Vec(shapes));
-                    ui.painter().vline(
-                        gutter.right() + 2.0,
-                        clip.y_range(),
-                        egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.5)),
+                    super::ligatures::paint(
+                        ui.painter(),
+                        &output,
+                        &laid_ligatures,
+                        &font,
+                        palette.operator(),
                     );
-                    for (index, row) in rows.iter().enumerate().take(last).skip(first) {
-                        ui.painter().text(
-                            egui::pos2(gutter.right() - 5.0, origin.y + row.pos.y),
-                            egui::Align2::RIGHT_TOP,
-                            (index + 1).to_string(),
-                            font.clone(),
-                            if index == active_row {
-                                colors().secondary
-                            } else {
-                                colors().disabled
-                            },
-                        );
-                    }
+                    let marks =
+                        self.git_gutter
+                            .marks(ui.ctx(), self.root.as_deref(), &doc.path, &doc.text);
+                    let shapes = decorate(ui, &output, gutter, &doc.text, self.cursor, marks);
+                    ui.painter().set(decorations, egui::Shape::Vec(shapes));
                 });
             });
+        self.overview_ruler(ui, scroll.inner_rect, index);
         if let Some(action) = context_action {
             self.tree_action(action, ui.ctx());
         }
@@ -1719,6 +1689,391 @@ fn matching_bracket(text: &str, cursor: usize) -> Option<(usize, usize)> {
     None
 }
 
+/// Logical line index of every laid-out row; wrapped continuation rows share their
+/// line's index.
+fn row_lines(rows: &[egui::epaint::text::PlacedRow]) -> Vec<usize> {
+    let mut line = 0;
+    let mut out = Vec::with_capacity(rows.len());
+    for (i, _) in rows.iter().enumerate() {
+        if i > 0 && rows[i - 1].ends_with_newline {
+            line += 1;
+        }
+        out.push(line);
+    }
+    out
+}
+
+/// Editor decorations for one frame. Returns the shapes drawn under the text (active line,
+/// indent guides, bracket pair) and paints the gutter directly: line numbers with the
+/// active one highlighted and Git change bars.
+fn decorate(
+    ui: &Ui,
+    output: &egui::text_edit::TextEditOutput,
+    gutter: egui::Rect,
+    text: &str,
+    cursor: usize,
+    marks: Option<&[Option<super::git_gutter::Mark>]>,
+) -> Vec<egui::Shape> {
+    let clip = ui.clip_rect();
+    let rows = &output.galley.rows;
+    let origin = output.galley_pos;
+    let palette = super::syntax::current();
+    let font = TextStyle::Monospace.resolve(ui.style());
+    let space = ui.fonts_mut(|f| f.glyph_width(&font, ' ')).max(1.0);
+    let caret = output.galley.pos_from_cursor(CCursor::new(cursor));
+    let active_row = rows
+        .iter()
+        .position(|row| caret.center().y >= row.pos.y && caret.center().y < row.pos.y + row.size.y)
+        .unwrap_or(0);
+    let first = rows.partition_point(|row| origin.y + row.pos.y + row.size.y < clip.top());
+    let last = rows
+        .partition_point(|row| origin.y + row.pos.y < clip.bottom())
+        .min(rows.len());
+    let lines = row_lines(rows);
+    let active_line = lines.get(active_row).copied().unwrap_or(0);
+    let mut shapes = Vec::new();
+    // Active line band across gutter and text, covering every wrapped row of the line.
+    for (i, row) in rows.iter().enumerate().take(last).skip(first) {
+        if lines[i] == active_line {
+            let y = origin.y + row.pos.y;
+            shapes.push(egui::Shape::rect_filled(
+                egui::Rect::from_min_max(
+                    egui::pos2(gutter.left(), y),
+                    egui::pos2(clip.right(), y + row.size.y),
+                ),
+                0,
+                palette.active_line,
+            ));
+        }
+    }
+    let view = Viewport {
+        rows,
+        lines: &lines,
+        origin,
+        space,
+        active_row,
+        first,
+        last,
+    };
+    indent_guides(&mut shapes, &view);
+    // Bracket matching around the caret.
+    if let Some((a, b)) = matching_bracket(text, cursor) {
+        for index in [a, b] {
+            let r = output
+                .galley
+                .pos_from_cursor(CCursor::new(index))
+                .translate(origin.to_vec2());
+            let rect = egui::Rect::from_min_size(r.min, egui::vec2(space, r.height()));
+            shapes.push(egui::Shape::rect_filled(
+                rect,
+                2,
+                palette.bracket.gamma_multiply(0.16),
+            ));
+            shapes.push(egui::Shape::rect_stroke(
+                rect,
+                2,
+                egui::Stroke::new(1.0_f32, palette.bracket.gamma_multiply(0.7)),
+                egui::StrokeKind::Inside,
+            ));
+        }
+    }
+    ui.painter().vline(
+        gutter.right() + 2.0,
+        clip.y_range(),
+        egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.5)),
+    );
+    for (i, row) in rows.iter().enumerate().take(last).skip(first) {
+        let y = origin.y + row.pos.y;
+        let line = lines[i];
+        let starts_line = i == 0 || lines[i - 1] != line;
+        if starts_line {
+            ui.painter().text(
+                egui::pos2(gutter.right() - 9.0, y),
+                egui::Align2::RIGHT_TOP,
+                (line + 1).to_string(),
+                font.clone(),
+                if line == active_line {
+                    colors().text
+                } else {
+                    colors().disabled
+                },
+            );
+        }
+        if let Some(mark) = marks.and_then(|m| m.get(line).copied().flatten()) {
+            git_mark(
+                ui.painter(),
+                egui::pos2(gutter.right() - 4.0, y),
+                row.size.y,
+                mark,
+                starts_line,
+            );
+        }
+    }
+    shapes
+}
+
+/// The visible slice of the laid-out document, shared by the decoration passes.
+struct Viewport<'a> {
+    rows: &'a [egui::epaint::text::PlacedRow],
+    lines: &'a [usize],
+    origin: egui::Pos2,
+    space: f32,
+    active_row: usize,
+    first: usize,
+    last: usize,
+}
+
+/// Thin Git change bar in the gutter; deletions show a small wedge at the line's top edge.
+fn git_mark(
+    painter: &egui::Painter,
+    at: egui::Pos2,
+    height: f32,
+    mark: super::git_gutter::Mark,
+    starts_line: bool,
+) {
+    use super::git_gutter::Mark;
+    match mark {
+        Mark::Added | Mark::Modified => {
+            let color = if mark == Mark::Added {
+                colors().success
+            } else {
+                colors().accent
+            };
+            painter.rect_filled(
+                egui::Rect::from_min_size(at, egui::vec2(3.0, height)),
+                1,
+                color,
+            );
+        }
+        Mark::Deleted if starts_line => {
+            painter.add(egui::Shape::convex_polygon(
+                vec![
+                    at + egui::vec2(0.0, -3.0),
+                    at + egui::vec2(5.0, 0.0),
+                    at + egui::vec2(0.0, 3.0),
+                ],
+                colors().error,
+                egui::Stroke::NONE,
+            ));
+        }
+        Mark::Deleted => {}
+    }
+}
+
+/// Indent guides at each indentation level inside leading whitespace, the active block's
+/// guide brighter. Blank lines inherit the indentation of the next non-blank line and
+/// wrapped continuation rows keep their line's guides.
+fn indent_guides(shapes: &mut Vec<egui::Shape>, view: &Viewport<'_>) {
+    let Viewport {
+        rows,
+        lines,
+        origin,
+        space,
+        active_row,
+        first,
+        last,
+    } = *view;
+    let palette = super::syntax::current();
+    let scan_end = (last + 200).min(rows.len());
+    let scan_start = first.min(active_row);
+    let starts = |i: usize| i == 0 || lines[i - 1] != lines[i];
+    let mut levels = vec![0usize; scan_end.saturating_sub(scan_start)];
+    let mut carry = 0;
+    for i in (scan_start..scan_end).rev() {
+        if starts(i) {
+            carry = leading_indent(&rows[i]).unwrap_or(carry);
+            levels[i - scan_start] = carry;
+        }
+    }
+    for i in scan_start + 1..scan_end {
+        if !starts(i) {
+            levels[i - scan_start] = levels[i - scan_start - 1];
+        }
+    }
+    // Guide spacing follows the file: the smallest indentation in view.
+    let unit = levels
+        .iter()
+        .copied()
+        .filter(|l| *l > 0)
+        .min()
+        .unwrap_or(4)
+        .clamp(2, 8);
+    let level_at = |i: usize| levels.get(i.wrapping_sub(scan_start)).copied();
+    let active_col = level_at(active_row)
+        .unwrap_or(0)
+        .checked_sub(1)
+        .map(|c| c - c % unit);
+    let in_block = |i: usize| -> bool {
+        let Some(col) = active_col else { return false };
+        let (lo, hi) = if i <= active_row {
+            (i, active_row)
+        } else {
+            (active_row, i)
+        };
+        (lo..=hi).all(|r| level_at(r).is_none_or(|l| l > col))
+    };
+    for (i, row) in rows.iter().enumerate().take(last).skip(first) {
+        let level = level_at(i).unwrap_or(0);
+        let y = origin.y + row.pos.y;
+        let mut col = 0;
+        while col < level {
+            let x = (origin.x + col as f32 * space + space * 0.5).round() + 0.5;
+            let lit = Some(col) == active_col && in_block(i);
+            shapes.push(egui::Shape::line_segment(
+                [egui::pos2(x, y), egui::pos2(x, y + row.size.y)],
+                egui::Stroke::new(
+                    1.0_f32,
+                    if lit {
+                        palette.guide_active
+                    } else {
+                        palette.guide
+                    },
+                ),
+            ));
+            col += unit;
+        }
+    }
+}
+
+/// The selection Ctrl+D moves to: the word under the caret when nothing is selected,
+/// otherwise the next occurrence of the selected text after it, wrapping to the top.
+fn next_occurrence(text: &str, (start, end): (usize, usize)) -> Option<(usize, usize)> {
+    let byte = |chars: usize| {
+        text.char_indices()
+            .nth(chars)
+            .map_or(text.len(), |(b, _)| b)
+    };
+    let is_word = |c: char| c.is_alphanumeric() || c == '_' || c == '$';
+    if start == end {
+        let chars: Vec<char> = text.chars().collect();
+        let mut a = start.min(chars.len());
+        while a > 0 && is_word(chars[a - 1]) {
+            a -= 1;
+        }
+        let mut b = start.min(chars.len());
+        while b < chars.len() && is_word(chars[b]) {
+            b += 1;
+        }
+        return (a < b).then_some((a, b));
+    }
+    let needle = &text[byte(start)..byte(end)];
+    let after = byte(end);
+    let found = text[after..]
+        .find(needle)
+        .map(|i| after + i)
+        .or_else(|| text.find(needle))?;
+    let first = text[..found].chars().count();
+    Some((first, first + needle.chars().count()))
+}
+
+/// A breadcrumb segment with a soft hover fill.
+fn crumb(ui: &mut Ui, text: &str, current: bool) -> egui::Response {
+    let galley = ui.painter().layout_no_wrap(
+        text.to_owned(),
+        egui::FontId::proportional(SMALL),
+        colors().text,
+    );
+    let size = galley.size() + egui::vec2(10.0, 6.0);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    let hover = super::motion::state(
+        ui,
+        response.id.with("crumb-hover"),
+        response.hovered(),
+        super::motion::HOVER,
+    );
+    if hover > 0.01 {
+        ui.painter()
+            .rect_filled(rect, 5, colors().hover.gamma_multiply(hover));
+    }
+    let color = if current {
+        colors().text
+    } else {
+        super::motion::blend(colors().muted, colors().text, hover)
+    };
+    ui.painter()
+        .galley(rect.min + egui::vec2(5.0, 3.0), galley, color);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, text));
+    pointer(response)
+}
+
+impl Editor {
+    /// Opens the Explorer on the active file, expanding each folder above it.
+    fn reveal_in_explorer(&mut self, ctx: &Context, path: &Path) {
+        self.studio_open = false;
+        self.sidebar = Sidebar::Files;
+        self.sidebar_open = true;
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        for folder in path.ancestors().skip(1) {
+            if folder == root || !folder.starts_with(&root) {
+                break;
+            }
+            let id = Id::new(("explorer-dir", folder));
+            let mut state =
+                egui::collapsing_header::CollapsingState::load_with_default_open(ctx, id, false);
+            state.set_open(true);
+            state.store(ctx);
+        }
+    }
+
+    /// Colour marks along the right edge of the editor: diagnostics, find matches and the
+    /// caret line, placed by their position in the file.
+    fn overview_ruler(&self, ui: &Ui, rect: egui::Rect, index: usize) {
+        let Some(doc) = self.documents.get(index) else {
+            return;
+        };
+        let total = doc.text.matches('\n').count() + 1;
+        if total < 2 || rect.height() < 40.0 {
+            return;
+        }
+        let lane = egui::Rect::from_min_max(
+            egui::pos2(rect.right() - 9.0, rect.top()),
+            egui::pos2(rect.right() - 5.0, rect.bottom()),
+        );
+        let painter = ui.painter().with_clip_rect(lane.expand(1.0));
+        let y = |line: usize| lane.top() + lane.height() * (line as f32 + 0.5) / total as f32;
+        let tick = |line: usize, color: egui::Color32, height: f32| {
+            painter.rect_filled(
+                egui::Rect::from_center_size(
+                    egui::pos2(lane.center().x, y(line)),
+                    egui::vec2(lane.width(), height),
+                ),
+                1,
+                color,
+            );
+        };
+        if self.find_open && !self.find_query.is_empty() {
+            let matcher = workspace::literal_query(&self.find_query);
+            let mut line = 0;
+            let mut scanned = 0;
+            for found in matcher.find_iter(&doc.text).take(2000) {
+                line += doc.text[scanned..found.start()].matches('\n').count();
+                scanned = found.start();
+                tick(line, colors().accent.gamma_multiply(0.8), 2.0);
+            }
+        }
+        let diagnostics = self
+            .lsp
+            .diagnostics
+            .get(&crate::agents_runtime::plain(&doc.path));
+        for diag in diagnostics.into_iter().flatten().take(500) {
+            let color = match diag.severity {
+                1 => colors().error,
+                2 => colors().warning,
+                _ => continue,
+            };
+            tick(diag.start.0 as usize, color, 3.0);
+        }
+        let (line, _) = workspace::cursor_position(&doc.text, self.cursor);
+        tick(
+            line.saturating_sub(1),
+            colors().text.gamma_multiply(0.8),
+            2.0,
+        );
+    }
+}
+
 const TREE_INDENT: f32 = 13.0;
 const TREE_ROW: f32 = 24.0;
 
@@ -2022,4 +2377,18 @@ pub(super) fn parse_shortcut(text: &str) -> Option<(Modifiers, Key)> {
         }
     }
     key.map(|k| (modifiers, k))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ctrl_d_selects_the_word_then_its_next_occurrence() {
+        let text = "let total = 1;\ntotal += 2;\nprint(total)";
+        assert_eq!(next_occurrence(text, (6, 6)), Some((4, 9)));
+        assert_eq!(next_occurrence(text, (4, 9)), Some((15, 20)));
+        assert_eq!(next_occurrence(text, (33, 38)), Some((4, 9)));
+        assert_eq!(next_occurrence("a + b", (2, 2)), None);
+    }
 }

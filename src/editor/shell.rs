@@ -1709,6 +1709,15 @@ impl Editor {
                                             ui.selectable_value(&mut self.preferences.hack_editor,true,"Hack");
                                         });
                                     });
+                                    setting_row(ui, "Font ligatures", "Draw =>, !=, ->, <= and similar sequences as single symbols.", |ui| {
+                                        checkbox(ui, &mut self.preferences.font_ligatures, tr("Enabled"));
+                                    });
+                                    setting_row(ui, "Word wrap", "Wrap long lines at the editor width (Alt+Z).", |ui| {
+                                        checkbox(ui, &mut self.preferences.word_wrap, tr("Enabled"));
+                                    });
+                                    setting_row(ui, "Inline suggestions", "Dimmed completion after the caret. Tab accepts, Ctrl+Right accepts a word, Esc dismisses.", |ui| {
+                                        checkbox(ui, &mut self.preferences.inline_suggestions, tr("Enabled"));
+                                    });
                                     setting_row(
                                         ui,
                                         "Code colors",

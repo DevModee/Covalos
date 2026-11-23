@@ -1540,6 +1540,116 @@ const SPANISH: &[(&str, &str)] = &[
     ("Delete conversation", "Eliminar conversación"),
     ("Go back (Alt+Left)", "Atrás (Alt+Izquierda)"),
     ("Go forward (Alt+Right)", "Adelante (Alt+Derecha)"),
+    // Editor fundamentals and Guided Mode detail
+    (
+        "Show or hide the Guided Mode window",
+        "Mostrar u ocultar la ventana de Modo Guiado",
+    ),
+    ("Wrap", "Ajuste"),
+    (
+        "Toggle word wrap (Alt+Z)",
+        "Alternar ajuste de línea (Alt+Z)",
+    ),
+    ("Reveal in Explorer", "Mostrar en el Explorador"),
+    ("Font ligatures", "Ligaduras tipográficas"),
+    (
+        "Draw =>, !=, ->, <= and similar sequences as single symbols.",
+        "Dibuja =>, !=, ->, <= y secuencias similares como un único símbolo.",
+    ),
+    ("Word wrap", "Ajuste de línea"),
+    (
+        "Wrap long lines at the editor width (Alt+Z).",
+        "Ajusta las líneas largas al ancho del editor (Alt+Z).",
+    ),
+    ("Inline suggestions", "Sugerencias en línea"),
+    (
+        "Dimmed completion after the caret. Tab accepts, Ctrl+Right accepts a word, Esc dismisses.",
+        "Autocompletado atenuado tras el cursor. Tab acepta, Ctrl+Derecha acepta una palabra, Esc descarta.",
+    ),
+    ("Detail", "Detalle"),
+    (
+        "Explain what each line of the active block does",
+        "Explicar qué hace cada línea del bloque activo",
+    ),
+    (
+        "Switch between flexible and strict line matching",
+        "Alternar entre coincidencia de líneas flexible y estricta",
+    ),
+    (
+        "Show why this block is written now",
+        "Mostrar por qué se escribe este bloque ahora",
+    ),
+    ("This line", "Esta línea"),
+    ("This block", "Este bloque"),
+    (
+        "Mark the current line as typed and move on",
+        "Marcar la línea actual como escrita y continuar",
+    ),
+    ("End this guided session", "Terminar esta sesión guiada"),
+    (
+        "Blank line that separates blocks for readability.",
+        "Línea en blanco que separa bloques para facilitar la lectura.",
+    ),
+    (
+        "Comment for readers; it does not run.",
+        "Comentario para quien lee; no se ejecuta.",
+    ),
+    (
+        "Imports a dependency so this file can use it.",
+        "Importa una dependencia para que este archivo pueda usarla.",
+    ),
+    (
+        "Directive or decorator that configures the code that follows.",
+        "Directiva o decorador que configura el código que sigue.",
+    ),
+    (
+        "Declares a type that describes the shape of data.",
+        "Declara un tipo que describe la forma de los datos.",
+    ),
+    (
+        "Declares a function: a named, reusable block of logic.",
+        "Declara una función: un bloque de lógica con nombre y reutilizable.",
+    ),
+    (
+        "Returns a value to whoever called this code.",
+        "Devuelve un valor a quien llamó a este código.",
+    ),
+    (
+        "Branches: runs code only when a condition holds.",
+        "Bifurca: ejecuta código solo si se cumple una condición.",
+    ),
+    (
+        "Loops over items, repeating the block for each one.",
+        "Recorre elementos y repite el bloque para cada uno.",
+    ),
+    (
+        "Closes the block opened above.",
+        "Cierra el bloque abierto arriba.",
+    ),
+    (
+        "Markup: describes an element rendered on screen.",
+        "Marcado: describe un elemento que se muestra en pantalla.",
+    ),
+    (
+        "Sets a style property or design token value.",
+        "Define una propiedad de estilo o el valor de un token de diseño.",
+    ),
+    (
+        "Exports a value so other files can import it.",
+        "Exporta un valor para que otros archivos puedan importarlo.",
+    ),
+    (
+        "Stores a value in a named variable.",
+        "Guarda un valor en una variable con nombre.",
+    ),
+    (
+        "Opens a block; the lines below belong to it.",
+        "Abre un bloque; las líneas de abajo le pertenecen.",
+    ),
+    (
+        "Statement that runs as part of this step.",
+        "Instrucción que se ejecuta como parte de este paso.",
+    ),
 ];
 
 #[cfg(test)]
@@ -1574,6 +1684,7 @@ mod tests {
             include_str!("terminal.rs"),
             include_str!("preview.rs"),
             include_str!("lsp.rs"),
+            include_str!("guided.rs"),
             include_str!("../editor.rs"),
         ];
         let table = spanish();

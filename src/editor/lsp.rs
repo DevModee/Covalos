@@ -825,6 +825,13 @@ impl Lsp {
         });
     }
 
+    /// Whether the completion popup is showing items for `path`.
+    pub(super) fn popup_open(&self, path: &Path) -> bool {
+        self.popup
+            .as_ref()
+            .is_some_and(|p| p.path == path && !p.items.is_empty())
+    }
+
     /// The ready server for a document, if any.
     fn server_for(&mut self, path: &Path) -> Option<&mut Server> {
         let (lang, _) = language(path)?;

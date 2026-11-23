@@ -37,6 +37,8 @@ pub(super) struct GuidedPreferences {
     pub(super) flow_order: FlowOrder,
     pub(super) match_mode: MatchMode,
     pub(super) show_why: bool,
+    /// Expanded explanation of what the active line or block does; off by default.
+    pub(super) show_detail: bool,
     pub(super) floating: bool,
 }
 
@@ -46,6 +48,7 @@ impl Default for GuidedPreferences {
             flow_order: FlowOrder::Natural,
             match_mode: MatchMode::Flexible,
             show_why: true,
+            show_detail: false,
             floating: true,
         }
     }
@@ -72,6 +75,129 @@ pub(super) struct GuidedStep {
     pub(super) requires: Vec<String>,
     #[serde(default)]
     pub(super) why: Option<String>,
+    /// Longer explanation of the whole block, shown on demand.
+    #[serde(default)]
+    pub(super) detail: Option<String>,
+    /// One explanation per line, aligned with `lines`; missing entries fall back to a
+    /// description inferred from the line itself.
+    #[serde(default)]
+    pub(super) notes: Vec<String>,
+}
+
+impl GuidedStep {
+    /// Splits the step at `at`, keeping per-line notes aligned with their lines.
+    fn split_at(&self, at: usize) -> (Self, Self) {
+        let note_split = at.min(self.notes.len());
+        let head = Self {
+            lines: self.lines[..at].to_vec(),
+            notes: self.notes[..note_split].to_vec(),
+            requires: Vec::new(),
+            ..self.clone()
+        };
+        let tail = Self {
+            lines: self.lines[at..].to_vec(),
+            notes: self.notes[note_split..].to_vec(),
+            ..self.clone()
+        };
+        (head, tail)
+    }
+
+    /// The explanation for one line: the plan's note when present, otherwise inferred.
+    pub(super) fn line_note(&self, index: usize) -> String {
+        self.notes
+            .get(index)
+            .map(|note| note.trim())
+            .filter(|note| !note.is_empty())
+            .map_or_else(
+                || describe_line(self.lines.get(index).map_or("", String::as_str)).to_owned(),
+                str::to_owned,
+            )
+    }
+}
+
+/// Plain-language description of what a code line does, for steps without notes.
+pub(super) fn describe_line(line: &str) -> &'static str {
+    let line = line.trim();
+    let starts = |prefixes: &[&str]| prefixes.iter().any(|p| line.starts_with(p));
+    let key = if line.is_empty() {
+        "Blank line that separates blocks for readability."
+    } else if starts(&["//", "#!", "/*", "*", "<!--"])
+        || (line.starts_with('#') && !line.starts_with("#[") && !line.starts_with("#include"))
+    {
+        "Comment for readers; it does not run."
+    } else if starts(&[
+        "import ",
+        "use ",
+        "from ",
+        "#include",
+        "extern crate",
+        "@import",
+        "@use",
+    ]) || line.contains("require(")
+    {
+        "Imports a dependency so this file can use it."
+    } else if starts(&["@", "#["]) {
+        "Directive or decorator that configures the code that follows."
+    } else if starts(&[
+        "class ",
+        "struct ",
+        "interface ",
+        "type ",
+        "enum ",
+        "pub struct ",
+        "pub enum ",
+        "export interface ",
+        "export type ",
+    ]) {
+        "Declares a type that describes the shape of data."
+    } else if starts(&[
+        "function ",
+        "fn ",
+        "def ",
+        "pub fn ",
+        "async ",
+        "export function ",
+        "export default function ",
+        "export async function ",
+    ]) || (line.contains("=>") && line.ends_with('{'))
+    {
+        "Declares a function: a named, reusable block of logic."
+    } else if starts(&["return", "yield"]) {
+        "Returns a value to whoever called this code."
+    } else if starts(&[
+        "if ", "if(", "else", "} else", "match ", "switch", "case ", "elif ",
+    ]) {
+        "Branches: runs code only when a condition holds."
+    } else if starts(&["for ", "for(", "while ", "loop", "do "])
+        || line.contains(".map(")
+        || line.contains(".forEach(")
+    {
+        "Loops over items, repeating the block for each one."
+    } else if starts(&["}", ")", "]", "</"]) {
+        "Closes the block opened above."
+    } else if line.starts_with('<') {
+        "Markup: describes an element rendered on screen."
+    } else if line.starts_with("--")
+        || (line.contains(':') && line.ends_with(';') && !line.contains('('))
+    {
+        "Sets a style property or design token value."
+    } else if line.starts_with("export ") {
+        "Exports a value so other files can import it."
+    } else if starts(&[
+        "let ",
+        "const ",
+        "var ",
+        "static ",
+        "pub const ",
+        "pub static ",
+    ]) {
+        "Stores a value in a named variable."
+    } else if line.ends_with('{') {
+        "Opens a block; the lines below belong to it."
+    } else {
+        "Statement that runs as part of this step."
+    };
+    tr(key)
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -356,7 +482,9 @@ pub(super) fn build_guided_prompt(user_request: &str, flow: FlowOrder) -> String
                \"action\": \"create_file\",\n\
                \"requires\": [],\n\
                \"why\": \"One short sentence explaining why we write this block now\",\n\
-               \"lines\": [\"line 1\", \"line 2\"]\n\
+               \"detail\": \"Two to four sentences on what this block does and how it fits\",\n\
+               \"lines\": [\"line 1\", \"line 2\"],\n\
+               \"notes\": [\"What line 1 does\", \"What line 2 does\"]\n\
              }}\n\
            ]\n\
          }}\n\
@@ -364,7 +492,8 @@ pub(super) fn build_guided_prompt(user_request: &str, flow: FlowOrder) -> String
          Rules:\n\
          1. {order_rule}\n\
          2. NEVER import or reference a local file before an earlier step has created it.\n\
-         3. Keep each step focused (4 to 20 lines) and use relative paths only."
+         3. Keep each step focused (4 to 20 lines) and use relative paths only.\n\
+         4. `notes` holds exactly one short plain-language explanation per entry in `lines`."
     )
 }
 
@@ -526,18 +655,10 @@ fn emit_natural(
 
     if let Some((split_at, missing_dep)) = first_missing {
         // 1. Emit lines before the missing import (if any) so the user starts naturally.
-        if split_at > 0 {
-            let prefix_lines = step.lines[..split_at].to_vec();
-            if prefix_lines.iter().any(|l| !l.trim().is_empty()) {
-                out.push(GuidedStep {
-                    path: step.path.clone(),
-                    action: step.action,
-                    lines: prefix_lines,
-                    requires: Vec::new(),
-                    why: step.why.clone(),
-                });
-                created.insert(step.path.clone());
-            }
+        let (prefix, mut remainder) = step.split_at(split_at);
+        if split_at > 0 && prefix.lines.iter().any(|l| !l.trim().is_empty()) {
+            out.push(prefix);
+            created.insert(step.path.clone());
         }
 
         // 2. Pull forward and emit all pending steps that create `missing_dep`.
@@ -557,17 +678,9 @@ fn emit_natural(
         visiting.remove(&step.path);
 
         // 3. Resume the rest of the original step (starting at the import line).
-        let remainder = GuidedStep {
-            path: step.path,
-            action: if split_at > 0 {
-                StepAction::InsertImport
-            } else {
-                step.action
-            },
-            lines: step.lines[split_at..].to_vec(),
-            requires: step.requires,
-            why: step.why,
-        };
+        if split_at > 0 {
+            remainder.action = StepAction::InsertImport;
+        }
         emit_natural(remainder, pending, known_files, created, visiting, out);
         return;
     }
@@ -904,102 +1017,91 @@ impl super::Editor {
         let mut clear_now = false;
         let mut toggle_mode = false;
         let mut toggle_why = false;
+        let mut toggle_detail = false;
 
         let show_why = self.preferences.guided.show_why;
+        let show_detail = self.preferences.guided.show_detail;
         let match_mode = self.preferences.guided.match_mode;
+        let (anchor, pivot) = self.guided_anchor(ctx);
 
         egui::Window::new(tr("Guided Mode"))
             .id(Id::new("covalos-guided-lyrics"))
             .open(&mut open)
             .resizable(true)
             .collapsible(true)
+            .constrain(true)
             .default_width(440.0)
-            .default_pos(egui::pos2(
-                (ctx.content_rect().width() - 480.0).max(40.0),
-                68.0,
-            ))
+            .min_width(320.0)
+            .pivot(pivot)
+            .default_pos(anchor)
             .frame(
                 Frame::new()
-                    .fill(colors().surface.gamma_multiply(0.97))
-                    .stroke(egui::Stroke::new(1.0_f32, colors().border))
+                    .fill(colors().elevated)
+                    .stroke(egui::Stroke::new(1.0_f32, colors().control_border))
                     .corner_radius(14)
                     .inner_margin(Margin::same(14))
-                    .shadow(egui::epaint::Shadow {
-                        offset: [0, 10],
-                        blur: 28,
-                        spread: 0,
-                        color: Color32::from_black_alpha(120),
-                    }),
+                    .shadow(super::theme::floating_shadow(super::theme::active(), 28)),
             )
             .show(ctx, |ui| {
-                // Header: Title, step counter & quick pills
-                ui.horizontal(|ui| {
-                    ui.label(
+                ui.add(
+                    egui::Label::new(
                         RichText::new(&session_clone.plan.title)
                             .size(LEAD)
                             .strong()
                             .color(colors().text),
-                    );
+                    )
+                    .wrap(),
+                );
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let mode_lbl = match match_mode {
                             MatchMode::Flexible => tr("Flexible"),
                             MatchMode::Strict => tr("Strict"),
                         };
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    RichText::new(mode_lbl).size(11.0).color(colors().secondary),
-                                )
-                                .corner_radius(6),
-                            )
+                        if pill(ui, mode_lbl, false)
+                            .on_hover_text(tr("Switch between flexible and strict line matching"))
                             .clicked()
                         {
                             toggle_mode = true;
                         }
-                        if ui
-                            .add(
-                                egui::Button::new(RichText::new(tr("Why?")).size(11.0).color(
-                                    if show_why {
-                                        colors().accent
-                                    } else {
-                                        colors().muted
-                                    },
-                                ))
-                                .fill(if show_why {
-                                    colors().accent_bg
-                                } else {
-                                    Color32::TRANSPARENT
-                                })
-                                .corner_radius(6),
-                            )
+                        if pill(ui, tr("Detail"), show_detail)
+                            .on_hover_text(tr("Explain what each line of the active block does"))
+                            .clicked()
+                        {
+                            toggle_detail = true;
+                        }
+                        if pill(ui, tr("Why?"), show_why)
+                            .on_hover_text(tr("Show why this block is written now"))
                             .clicked()
                         {
                             toggle_why = true;
                         }
+                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(format!(
+                                        "{} {}/{} · {}",
+                                        tr("Step"),
+                                        step_idx + 1,
+                                        total_steps,
+                                        step.path
+                                    ))
+                                    .size(SMALL)
+                                    .color(colors().secondary),
+                                )
+                                .truncate(),
+                            )
+                            .on_hover_text(&step.path);
+                        });
                     });
-                });
-
-                // Step & file progress bar
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(format!(
-                            "{} {}/{} · {}",
-                            tr("Step"),
-                            step_idx + 1,
-                            total_steps,
-                            step.path
-                        ))
-                        .size(SMALL)
-                        .color(colors().secondary),
-                    );
                 });
                 ui.add_space(4.0);
                 let (prog_rect, _) = ui.allocate_exact_size(
                     egui::vec2(ui.available_width(), 3.0),
                     egui::Sense::hover(),
                 );
-                ui.painter().rect_filled(prog_rect, 2, colors().elevated);
+                ui.painter().rect_filled(prog_rect, 2, colors().hover);
                 let step_ratio = (done_steps as f32 / total_steps.max(1) as f32).clamp(0.0, 1.0);
                 if step_ratio > 0.0 {
                     let fill = egui::Rect::from_min_size(
@@ -1018,29 +1120,28 @@ impl super::Editor {
                         .inner_margin(Margin::symmetric(10, 8))
                         .show(ui, |ui| {
                             ui.set_width(ui.available_width());
-                            ui.horizontal(|ui| {
+                            ui.horizontal_wrapped(|ui| {
                                 ui.label(
                                     RichText::new(format!("{}: {}", tr("Target file"), step.path))
                                         .size(SMALL)
                                         .color(colors().text),
                                 );
-                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    if ui
-                                        .add(
-                                            egui::Button::new(
-                                                RichText::new(tr("Open file →"))
-                                                    .size(SMALL)
-                                                    .strong()
-                                                    .color(colors().canvas),
-                                            )
-                                            .fill(colors().accent)
-                                            .corner_radius(7),
+                                if super::theme::pointer(
+                                    ui.add(
+                                        egui::Button::new(
+                                            RichText::new(tr("Open file →"))
+                                                .size(SMALL)
+                                                .strong()
+                                                .color(colors().canvas),
                                         )
-                                        .clicked()
-                                    {
-                                        open_path = Some(step.path.clone());
-                                    }
-                                });
+                                        .fill(colors().accent)
+                                        .corner_radius(7),
+                                    ),
+                                )
+                                .clicked()
+                                {
+                                    open_path = Some(step.path.clone());
+                                }
                             });
                         });
                 }
@@ -1049,18 +1150,21 @@ impl super::Editor {
                 if show_why && let Some(why) = step.why.as_deref().filter(|w| !w.trim().is_empty())
                 {
                     ui.add_space(8.0);
-                    ui.label(
-                        RichText::new(why)
-                            .size(SMALL)
-                            .italics()
-                            .color(colors().secondary),
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(why)
+                                .size(SMALL)
+                                .italics()
+                                .color(colors().secondary),
+                        )
+                        .wrap(),
                     );
                 }
 
                 // Lyrics-style synced code block
                 ui.add_space(10.0);
                 Frame::new()
-                    .fill(colors().canvas.gamma_multiply(0.85))
+                    .fill(colors().inset)
                     .corner_radius(10)
                     .stroke(egui::Stroke::new(1.0_f32, colors().border))
                     .inner_margin(Margin::symmetric(12, 10))
@@ -1079,36 +1183,7 @@ impl super::Editor {
                                 );
                             } else if idx == line_idx && !sync.step_complete {
                                 ui.add_space(4.0);
-                                Frame::new()
-                                    .fill(colors().accent_bg)
-                                    .corner_radius(7)
-                                    .inner_margin(Margin::symmetric(8, 6))
-                                    .show(ui, |ui| {
-                                        ui.set_width(ui.available_width());
-                                        ui.label(
-                                            RichText::new(code_line)
-                                                .monospace()
-                                                .size(BODY + 1.0)
-                                                .strong()
-                                                .color(colors().text),
-                                        );
-                                        ui.add_space(4.0);
-                                        let (bar, _) = ui.allocate_exact_size(
-                                            egui::vec2(ui.available_width(), 3.0),
-                                            egui::Sense::hover(),
-                                        );
-                                        ui.painter().rect_filled(bar, 2, colors().elevated);
-                                        if sync.line_progress > 0.01 {
-                                            let filled = egui::Rect::from_min_size(
-                                                bar.min,
-                                                egui::vec2(
-                                                    bar.width() * sync.line_progress,
-                                                    bar.height(),
-                                                ),
-                                            );
-                                            ui.painter().rect_filled(filled, 2, colors().accent);
-                                        }
-                                    });
+                                active_line_card(ui, code_line, sync.line_progress);
                                 ui.add_space(4.0);
                             } else {
                                 ui.label(
@@ -1134,67 +1209,33 @@ impl super::Editor {
                         }
                     });
 
-                // Footer controls
+                if show_detail {
+                    ui.add_space(8.0);
+                    detail_card(ui, step, line_idx, sync.step_complete);
+                }
+
                 ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    if ui
-                        .add_enabled(
-                            step_idx > 0,
-                            egui::Button::new(RichText::new(tr("← Prev")).size(SMALL)),
-                        )
-                        .clicked()
-                    {
-                        prev_now = true;
+                let next_label = next_step_path.as_ref().map(|next_path| {
+                    if next_path == &step.path {
+                        tr("Next step →").to_owned()
+                    } else {
+                        format!("{}: {} →", tr("Next file"), next_path)
                     }
-                    if !sync.step_complete
-                        && ui
-                            .add(egui::Button::new(
-                                RichText::new(tr("Skip line")).size(SMALL),
-                            ))
-                            .clicked()
-                    {
-                        skip_line_now = true;
-                    }
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                RichText::new(tr("Finish"))
-                                    .size(SMALL)
-                                    .color(colors().muted),
-                            )
-                            .frame(false),
-                        )
-                        .clicked()
-                    {
-                        clear_now = true;
-                    }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if let Some(next_path) = &next_step_path {
-                            let label = if next_path == &step.path {
-                                tr("Next step →").to_owned()
-                            } else {
-                                format!("{}: {} →", tr("Next file"), next_path)
-                            };
-                            let btn =
-                                egui::Button::new(RichText::new(label).size(SMALL).strong().color(
-                                    if sync.step_complete {
-                                        colors().canvas
-                                    } else {
-                                        colors().text
-                                    },
-                                ))
-                                .fill(if sync.step_complete {
-                                    colors().accent
-                                } else {
-                                    colors().elevated
-                                })
-                                .corner_radius(7);
-                            if ui.add(btn).clicked() {
-                                advance_now = true;
-                            }
-                        }
-                    });
                 });
+                let action = footer(
+                    ui,
+                    step_idx > 0,
+                    !sync.step_complete,
+                    next_label.as_deref(),
+                    sync.step_complete,
+                );
+                match action {
+                    Some(FooterAction::Prev) => prev_now = true,
+                    Some(FooterAction::SkipLine) => skip_line_now = true,
+                    Some(FooterAction::Finish) => clear_now = true,
+                    Some(FooterAction::Next) => advance_now = true,
+                    None => {}
+                }
             });
 
         let prev_open = self.guided.open;
@@ -1204,6 +1245,9 @@ impl super::Editor {
         }
         if toggle_why {
             self.preferences.guided.show_why = !self.preferences.guided.show_why;
+        }
+        if toggle_detail {
+            self.preferences.guided.show_detail = !self.preferences.guided.show_detail;
         }
         if toggle_mode {
             self.preferences.guided.match_mode = match self.preferences.guided.match_mode {
@@ -1227,6 +1271,231 @@ impl super::Editor {
             self.guided.clear(self.root.as_deref());
         }
     }
+
+    /// Default spot for the Guided window: the bottom-right corner of the editor area,
+    /// clear of the title bar controls and of the agent dock on the right.
+    fn guided_anchor(&self, ctx: &egui::Context) -> (egui::Pos2, egui::Align2) {
+        let screen = ctx.content_rect();
+        let dock = if self.preferences.assistant_open {
+            self.preferences.assistant_width + 8.0
+        } else {
+            0.0
+        };
+        let right = (screen.right() - dock - 16.0).max(screen.left() + 360.0);
+        let bottom = screen.bottom() - super::theme::STATUS_HEIGHT - 16.0;
+        (egui::pos2(right, bottom), egui::Align2::RIGHT_BOTTOM)
+    }
+}
+
+/// Footer buttons of the Guided window.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FooterAction {
+    Prev,
+    SkipLine,
+    Finish,
+    Next,
+}
+
+/// Compact toggle pill used in the Guided header.
+fn pill(ui: &mut egui::Ui, label: &str, active: bool) -> egui::Response {
+    let response = ui.add(
+        egui::Button::new(RichText::new(label).size(11.0).color(if active {
+            colors().accent
+        } else {
+            colors().secondary
+        }))
+        .fill(if active {
+            colors().accent_bg
+        } else {
+            Color32::TRANSPARENT
+        })
+        .stroke(egui::Stroke::new(1.0_f32, colors().border))
+        .corner_radius(6),
+    );
+    super::theme::pointer(response)
+}
+
+/// The line being typed now, large, with its live match progress underneath.
+fn active_line_card(ui: &mut egui::Ui, code_line: &str, progress: f32) {
+    Frame::new()
+        .fill(colors().accent_bg)
+        .corner_radius(7)
+        .inner_margin(Margin::symmetric(8, 6))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.add(
+                egui::Label::new(
+                    RichText::new(code_line)
+                        .monospace()
+                        .size(BODY + 1.0)
+                        .strong()
+                        .color(colors().text),
+                )
+                .wrap(),
+            );
+            ui.add_space(4.0);
+            let (bar, _) =
+                ui.allocate_exact_size(egui::vec2(ui.available_width(), 3.0), egui::Sense::hover());
+            ui.painter().rect_filled(bar, 2, colors().hover);
+            if progress > 0.01 {
+                let filled = egui::Rect::from_min_size(
+                    bar.min,
+                    egui::vec2(bar.width() * progress.clamp(0.0, 1.0), bar.height()),
+                );
+                ui.painter().rect_filled(filled, 2, colors().accent);
+            }
+        });
+}
+
+/// On-demand explanation: what the active line does and, when the plan has one, the
+/// longer description of the whole block.
+fn detail_card(ui: &mut egui::Ui, step: &GuidedStep, line_idx: usize, complete: bool) {
+    Frame::new()
+        .fill(colors().surface)
+        .stroke(egui::Stroke::new(1.0_f32, colors().border))
+        .corner_radius(9)
+        .inner_margin(Margin::symmetric(10, 8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            if !complete && line_idx < step.lines.len() {
+                ui.label(
+                    RichText::new(tr("This line"))
+                        .size(SMALL)
+                        .strong()
+                        .color(colors().secondary),
+                );
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(step.line_note(line_idx))
+                            .size(SMALL)
+                            .color(colors().text),
+                    )
+                    .wrap(),
+                );
+            }
+            if let Some(detail) = step.detail.as_deref().filter(|d| !d.trim().is_empty()) {
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(tr("This block"))
+                        .size(SMALL)
+                        .strong()
+                        .color(colors().secondary),
+                );
+                ui.add(
+                    egui::Label::new(RichText::new(detail).size(SMALL).color(colors().text)).wrap(),
+                );
+            }
+        });
+}
+
+/// Width a footer button needs for `text` at the footer size, padding included.
+fn button_width(ui: &egui::Ui, text: &str, strong: bool) -> f32 {
+    let mut rich = RichText::new(text).size(SMALL);
+    if strong {
+        rich = rich.strong();
+    }
+    let galley = egui::WidgetText::from(rich).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Button,
+    );
+    galley.size().x + 2.0 * ui.spacing().button_padding.x
+}
+
+/// Prev / Skip line / Finish on the left and the next-step button on the right. When the
+/// window is too narrow for one row, the next-step button moves to its own full-width row
+/// and wraps its label instead of clipping any button.
+fn footer(
+    ui: &mut egui::Ui,
+    can_prev: bool,
+    can_skip: bool,
+    next: Option<&str>,
+    step_complete: bool,
+) -> Option<FooterAction> {
+    let mut action = None;
+    let spacing = ui.spacing().item_spacing.x;
+    let left: Vec<(&str, bool)> = [
+        (tr("← Prev"), true),
+        (tr("Skip line"), can_skip),
+        (tr("Finish"), true),
+    ]
+    .into_iter()
+    .filter(|(_, shown)| *shown)
+    .collect();
+    let left_width: f32 = left
+        .iter()
+        .map(|(text, _)| button_width(ui, text, false) + spacing)
+        .sum();
+    let next_width = next.map_or(0.0, |text| button_width(ui, text, true));
+    let one_row = left_width + next_width <= ui.available_width();
+    ui.horizontal_wrapped(|ui| {
+        if super::theme::pointer(ui.add_enabled(
+            can_prev,
+            egui::Button::new(RichText::new(tr("← Prev")).size(SMALL)),
+        ))
+        .clicked()
+        {
+            action = Some(FooterAction::Prev);
+        }
+        if can_skip
+            && super::theme::pointer(ui.add(egui::Button::new(
+                RichText::new(tr("Skip line")).size(SMALL),
+            )))
+            .on_hover_text(tr("Mark the current line as typed and move on"))
+            .clicked()
+        {
+            action = Some(FooterAction::SkipLine);
+        }
+        if super::theme::pointer(
+            ui.add(egui::Button::new(
+                RichText::new(tr("Finish"))
+                    .size(SMALL)
+                    .color(colors().muted),
+            )),
+        )
+        .on_hover_text(tr("End this guided session"))
+        .clicked()
+        {
+            action = Some(FooterAction::Finish);
+        }
+        if one_row && let Some(text) = next {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if next_button(ui, text, step_complete, false).clicked() {
+                    action = Some(FooterAction::Next);
+                }
+            });
+        }
+    });
+    if !one_row && let Some(text) = next {
+        ui.add_space(4.0);
+        if next_button(ui, text, step_complete, true).clicked() {
+            action = Some(FooterAction::Next);
+        }
+    }
+    action
+}
+
+fn next_button(ui: &mut egui::Ui, text: &str, step_complete: bool, full: bool) -> egui::Response {
+    let mut button = egui::Button::new(RichText::new(text).size(SMALL).strong().color(
+        if step_complete {
+            colors().canvas
+        } else {
+            colors().text
+        },
+    ))
+    .fill(if step_complete {
+        colors().accent
+    } else {
+        colors().hover
+    })
+    .corner_radius(7);
+    if full {
+        button = button
+            .wrap()
+            .min_size(egui::vec2(ui.available_width(), 0.0));
+    }
+    super::theme::pointer(ui.add(button))
 }
 
 #[cfg(test)]
@@ -1258,6 +1527,8 @@ mod tests {
                 ],
                 requires: vec![],
                 why: Some("Start entry file".into()),
+                detail: None,
+                notes: Vec::new(),
             },
             GuidedStep {
                 path: "src/routes/home.tsx".into(),
@@ -1265,6 +1536,8 @@ mod tests {
                 lines: vec!["export function Home() { return 'Hi'; }".into()],
                 requires: vec![],
                 why: Some("Create home route".into()),
+                detail: None,
+                notes: Vec::new(),
             },
         ];
 
@@ -1286,6 +1559,8 @@ mod tests {
                 lines: vec!["import { sum } from './math';".into()],
                 requires: vec![],
                 why: None,
+                detail: None,
+                notes: Vec::new(),
             },
             GuidedStep {
                 path: "src/math.ts".into(),
@@ -1293,6 +1568,8 @@ mod tests {
                 lines: vec!["export const sum = (a: number, b: number) => a + b;".into()],
                 requires: vec![],
                 why: None,
+                detail: None,
+                notes: Vec::new(),
             },
         ];
         let ordered = normalize_plan_order(steps, FlowOrder::BottomUp);
@@ -1344,5 +1621,34 @@ mod tests {
         );
         assert!(snap2.step_complete);
         assert!(snap2.all_complete);
+    }
+
+    #[test]
+    fn splitting_a_step_keeps_line_notes_aligned() {
+        let step = GuidedStep {
+            path: "app/page.tsx".into(),
+            action: StepAction::CreateFile,
+            lines: vec!["const a = 1;".into(), "import X from './x';".into()],
+            requires: Vec::new(),
+            why: None,
+            detail: Some("Entry".into()),
+            notes: vec!["first".into(), "second".into()],
+        };
+        let (head, tail) = step.split_at(1);
+        assert_eq!(head.notes, vec!["first".to_owned()]);
+        assert_eq!(tail.notes, vec!["second".to_owned()]);
+        assert_eq!(tail.line_note(0), "second");
+        assert_eq!(
+            describe_line("import X from './x';"),
+            "Imports a dependency so this file can use it."
+        );
+        assert_eq!(
+            GuidedStep {
+                notes: Vec::new(),
+                ..step
+            }
+            .line_note(0),
+            "Stores a value in a named variable."
+        );
     }
 }

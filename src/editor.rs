@@ -12,11 +12,14 @@ mod companion;
 mod discord;
 mod dither;
 mod files;
+mod ghost;
+mod git_gutter;
 mod guided;
 mod hub;
 mod i18n;
 mod icons;
 mod identity;
+mod ligatures;
 mod lsp;
 mod mascot;
 mod motion;
@@ -117,6 +120,10 @@ pub struct Editor {
     tools: tools::Tools,
     terminals: terminal::Terminals,
     lsp: lsp::Lsp,
+    /// Inline ghost-text completion in the code editor.
+    ghost: ghost::Ghost,
+    /// Added, modified and deleted line markers against `HEAD`.
+    git_gutter: git_gutter::GitGutter,
     preview: preview::Preview,
     palette: Option<shell::Palette>,
     chat: hub::Chat,
@@ -218,6 +225,8 @@ impl Editor {
             tools: tools::Tools::default(),
             terminals: terminal::Terminals::default(),
             lsp: lsp::Lsp::default(),
+            ghost: ghost::Ghost::default(),
+            git_gutter: git_gutter::GitGutter::default(),
             preview: preview::Preview::default(),
             palette: None,
             chat: hub::Chat::default(),
@@ -922,6 +931,13 @@ impl Editor {
             self.shortcuts(ctx);
         }
         self.begin_navigation(ctx);
+        // The gaps around the rounded islands are not covered by any panel; fill them with
+        // the outer chrome colour so the window clear colour never shows as black seams.
+        ctx.layer_painter(egui::LayerId::background()).rect_filled(
+            ctx.content_rect(),
+            0,
+            theme::colors().canvas,
+        );
         self.top_bar(ctx);
         self.status_bar(ctx);
         if self.studio_open && !self.hub_open {
@@ -970,6 +986,7 @@ impl Editor {
         self.file_dialogs(ctx);
         self.companion_surface(ctx);
         self.end_navigation(ctx);
+        theme::pointer_cursor(ctx);
     }
 }
 impl Editor {

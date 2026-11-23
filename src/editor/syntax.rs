@@ -80,15 +80,18 @@ pub(super) enum SyntaxStyle {
     Nocturne,
     Graphite,
     Daylight,
+    /// Dark, saturated ink for the Daylight theme under direct sunlight.
+    Sunlight,
     HighContrast,
 }
 
 impl SyntaxStyle {
-    pub(super) const ALL: [Self; 5] = [
+    pub(super) const ALL: [Self; 6] = [
         Self::Auto,
         Self::Nocturne,
         Self::Graphite,
         Self::Daylight,
+        Self::Sunlight,
         Self::HighContrast,
     ];
     pub(super) fn name(self) -> &'static str {
@@ -97,6 +100,7 @@ impl SyntaxStyle {
             Self::Nocturne => "Nocturne",
             Self::Graphite => "Graphite",
             Self::Daylight => "Daylight",
+            Self::Sunlight => "Sunlight",
             Self::HighContrast => "High Contrast",
         }
     }
@@ -104,6 +108,7 @@ impl SyntaxStyle {
         match self {
             Self::Auto => match theme {
                 Theme::Light => Self::Daylight,
+                Theme::Daylight => Self::Sunlight,
                 Theme::HighContrast => Self::HighContrast,
                 Theme::Obsidian | Theme::Dark | Theme::Midnight => Self::Graphite,
                 Theme::OledDark | Theme::Nocturne | Theme::Violet => Self::Nocturne,
@@ -187,6 +192,34 @@ pub(super) fn palette(style: SyntaxStyle) -> Palette {
             guide_active: Color32::from_rgba_unmultiplied(122, 63, 209, 110),
             bracket: hex(0x7A3FD1),
         },
+        // Sunlight: deep, saturated ink that keeps its hue under glare on warm paper.
+        SyntaxStyle::Sunlight => Palette {
+            text: hex(0x14120E),
+            keyword: hex(0x5E1FB8),
+            declaration: hex(0x3F2BA6),
+            ty: hex(0x00605A),
+            function: hex(0x0B4AA8),
+            method: hex(0x1550A8),
+            macro_: hex(0x8A3A00),
+            parameter: hex(0x7A3416),
+            property: hex(0x274573),
+            constant: hex(0x704700),
+            string: hex(0x14622A),
+            escape: hex(0x8E1666),
+            number: hex(0x8C3800),
+            operator: hex(0x005A6B),
+            punctuation: hex(0x4A463D),
+            comment: hex(0x6A6457),
+            attribute: hex(0x8E1A5C),
+            namespace: hex(0x2F4D6B),
+            tag: hex(0x9E1530),
+            lifetime: hex(0x9E1530),
+            invalid: hex(0xB00020),
+            active_line: Color32::from_rgba_unmultiplied(84, 40, 168, 20),
+            guide: Color32::from_rgba_unmultiplied(40, 36, 28, 52),
+            guide_active: Color32::from_rgba_unmultiplied(84, 40, 168, 140),
+            bracket: hex(0x5E1FB8),
+        },
         SyntaxStyle::HighContrast => Palette {
             text: hex(0xFFFFFF),
             keyword: hex(0xE3B8FF),
@@ -246,6 +279,11 @@ pub(super) fn palette(style: SyntaxStyle) -> Palette {
 }
 
 impl Palette {
+    /// Ink for operators, also used by the ligature layer.
+    pub(super) fn operator(&self) -> Color32 {
+        self.operator
+    }
+
     fn color(&self, token: Token) -> Color32 {
         match token {
             Token::Text | Token::Variable => self.text,

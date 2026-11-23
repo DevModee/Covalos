@@ -36,6 +36,12 @@ pub(super) struct Preferences {
     pub(super) font_size: f32,
     pub(super) ubuntu_interface: bool,
     pub(super) hack_editor: bool,
+    /// Draws `=>`, `!=`, `->`, `<=` and similar sequences as single symbols in the editor.
+    pub(super) font_ligatures: bool,
+    /// Wraps long lines at the editor width instead of scrolling horizontally.
+    pub(super) word_wrap: bool,
+    /// Dimmed inline completion after the caret, accepted with Tab.
+    pub(super) inline_suggestions: bool,
     pub(super) compact: bool,
     pub(super) reduce_motion: bool,
     pub(super) quiet_notifications: bool,
@@ -90,6 +96,9 @@ impl Default for Preferences {
             font_size: 15.0,
             ubuntu_interface: false,
             hack_editor: false,
+            font_ligatures: true,
+            word_wrap: false,
+            inline_suggestions: true,
             compact: false,
             reduce_motion: false,
             quiet_notifications: false,
