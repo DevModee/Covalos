@@ -1650,6 +1650,114 @@ const SPANISH: &[(&str, &str)] = &[
         "Statement that runs as part of this step.",
         "Instrucción que se ejecuta como parte de este paso.",
     ),
+    ("Cancelled", "Cancelada"),
+    ("Skipped", "Omitida"),
+    (
+        "Give Luma an order; it staffs and coordinates the agents",
+        "Dale una orden a Luma; asigna y coordina a los agentes",
+    ),
+    ("Give an order ↗", "Dar una orden ↗"),
+    ("LUMA  ·  LEAD DEVELOPER", "LUMA  ·  DESARROLLADORA LÍDER"),
+    (
+        "Luma could not start this order.",
+        "Luma no pudo iniciar esta orden.",
+    ),
+    ("Luma · lead developer", "Luma · desarrolladora líder"),
+    ("Open Luma", "Abrir Luma"),
+    ("Order cancelled.", "Orden cancelada."),
+    (
+        "Plan written. The team is starting.",
+        "Plan escrito. El equipo está arrancando.",
+    ),
+    ("Starting…", "Iniciando…"),
+    ("Team run cancelled.", "Ejecución del equipo cancelada."),
+    (
+        "Team run finished with failures.",
+        "La ejecución del equipo terminó con fallos.",
+    ),
+    (
+        "Team run finished. Every task succeeded.",
+        "La ejecución del equipo terminó. Todas las tareas salieron bien.",
+    ),
+    (
+        "Tell Luma what to build or fix",
+        "Decile a Luma qué construir o arreglar",
+    ),
+    (
+        "The agent runtime is unavailable.",
+        "El entorno de agentes no está disponible.",
+    ),
+    (
+        "The answer could not be recorded.",
+        "No se pudo registrar la respuesta.",
+    ),
+    (
+        "The team plan could not start.",
+        "El plan del equipo no pudo iniciarse.",
+    ),
+    ("Waiting for its turn", "Esperando su turno"),
+    ("Waiting for your confirmation", "Esperando tu confirmación"),
+    ("an agent", "un agente"),
+    ("provider default", "predeterminado del proveedor"),
+    ("{task} failed.", "{task} falló."),
+    (
+        "{task} hit a problem and will retry.",
+        "{task} tuvo un problema y lo va a reintentar.",
+    ),
+    (
+        "{task} needs your confirmation.",
+        "{task} necesita tu confirmación.",
+    ),
+    ("{task}: done.", "{task}: listo."),
+    (
+        "{task}: working on {account}.",
+        "{task}: trabajando en {account}.",
+    ),
+    ("The chat {title} failed.", "El chat {title} falló."),
+    ("Max effort", "Esfuerzo máximo"),
+    ("Use {effort}", "Usar {effort}"),
+    ("Keep {effort}", "Mantener {effort}"),
+    ("Rules", "Reglas"),
+    ("Skills & rules", "Skills y reglas"),
+    ("Team run", "Ejecución del equipo"),
+    ("TEAM", "EQUIPO"),
+    ("NEEDS YOUR CONFIRMATION", "NECESITA TU CONFIRMACIÓN"),
+    (
+        "Strict rules every model, agent and Luma follows.",
+        "Reglas estrictas que siguen todos los modelos, agentes y Luma.",
+    ),
+    (
+        "Goals and decisions kept with this workspace.",
+        "Objetivos y decisiones guardados con este espacio de trabajo.",
+    ),
+    (
+        "Luma never uses more effort than this. Medium suits most work.",
+        "Luma nunca usa más esfuerzo que este. Medio sirve para casi todo.",
+    ),
+    (
+        "No team run yet. Click Luma and give it an order; it picks the agents, model and effort.",
+        "Todavía no hay ejecución del equipo. Hacé clic en Luma y dale una orden; elige los agentes, el modelo y el esfuerzo.",
+    ),
+    (
+        "Luma picks the agents, model and effort within your ceiling. Your message becomes its order.",
+        "Luma elige los agentes, el modelo y el esfuerzo dentro de tu límite. Tu mensaje se convierte en su orden.",
+    ),
+    (
+        "Give Luma an order. It rates the work, picks the model and effort within your ceiling, launches the agents and reports back here.",
+        "Dale una orden a Luma. Evalúa el trabajo, elige el modelo y el esfuerzo dentro de tu límite, lanza a los agentes y te informa acá.",
+    ),
+    (
+        "This looks like {assessed} effort, above your {ceiling} ceiling. Raise it for this order, or keep {ceiling}?",
+        "Esto parece de esfuerzo {assessed}, por encima de tu límite {ceiling}. ¿Lo subís para esta orden o mantenés {ceiling}?",
+    ),
+    (
+        "Rated {rated}. {account} · {model} ({effort} effort) is planning a team of up to 3 agents, each in its own worktree.",
+        "Evaluado como {rated}. {account} · {model} (esfuerzo {effort}) está planificando un equipo de hasta 3 agentes, cada uno en su propio worktree.",
+    ),
+    (
+        "Rated {rated}. One developer on {account} · {model} ({effort} effort) is working in the project.",
+        "Evaluado como {rated}. Un desarrollador en {account} · {model} (esfuerzo {effort}) está trabajando en el proyecto.",
+    ),
 ];
 
 #[cfg(test)]
@@ -1685,6 +1793,7 @@ mod tests {
             include_str!("preview.rs"),
             include_str!("lsp.rs"),
             include_str!("guided.rs"),
+            include_str!("luma_ui.rs"),
             include_str!("../editor.rs"),
         ];
         let table = spanish();

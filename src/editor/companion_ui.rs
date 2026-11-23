@@ -177,7 +177,7 @@ impl Editor {
             ui.vertical(|ui| {
                 ui.add_space(6.0);
                 ui.label(
-                    RichText::new(tr("LUMA  ·  COMPANION"))
+                    RichText::new(tr("LUMA  ·  LEAD DEVELOPER"))
                         .size(10.0)
                         .color(colors().muted),
                 );
@@ -218,7 +218,9 @@ impl Editor {
                 }
             });
         });
-        ui.add_space(14.0);
+        ui.add_space(12.0);
+        self.luma_panel(ui);
+        ui.add_space(12.0);
         if self.companion.sessions.is_empty() {
             egui::Frame::new()
                 .fill(colors().inset)

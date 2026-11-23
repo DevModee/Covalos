@@ -21,6 +21,7 @@ mod icons;
 mod identity;
 mod ligatures;
 mod lsp;
+mod luma_ui;
 mod mascot;
 mod motion;
 mod navigation;

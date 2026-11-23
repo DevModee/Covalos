@@ -6,12 +6,13 @@ use std::{path::PathBuf, sync::Arc};
 use covalos_agents::{
     Account, AccountId, ConnectionMethod, ProviderKind, context::EntryKind, permission::Resolution,
 };
-use covalos_engine::{TaskStatus, budget::Budget, role::RoleCatalog};
+use covalos_engine::TaskStatus;
 use eframe::egui::{self, Align, Frame, Layout, Margin, RichText, ScrollArea, TextEdit, Ui};
 
 use super::{Editor, theme::*};
-use crate::agents_runtime::{PlanMode, PlanSetup, Runtime};
+use crate::agents_runtime::Runtime;
 
+#[derive(Default)]
 pub(super) struct State {
     pub(super) runtime: Option<Runtime>,
     open_error: Option<String>,
@@ -23,17 +24,8 @@ pub(super) struct State {
     status: Vec<(AccountId, String)>,
     pub(super) selected: Option<usize>,
     note: String,
-    goal: String,
-    single_role: Option<String>,
-    plan_worktrees: bool,
-    budget_minutes: u32,
-    budget_tokens: u32,
-    max_parallel: usize,
     pub(super) chat: super::agent_chat::ChatState,
-    /// 0 template, 1 one role, 2 an agent writes the plan.
-    planner: u8,
-    planner_account: Option<AccountId>,
-    pins: std::collections::BTreeMap<String, AccountId>,
+    pub(super) luma: super::luma_ui::LumaChat,
 }
 
 impl State {
@@ -43,33 +35,6 @@ impl State {
 
     pub(super) fn open_error_text(&self) -> Option<String> {
         self.open_error.clone()
-    }
-}
-
-impl Default for State {
-    fn default() -> Self {
-        Self {
-            runtime: None,
-            open_error: None,
-            provider_selection: None,
-            login: None,
-            secret: String::new(),
-            secret_for: None,
-            #[cfg(test)]
-            status: Vec::new(),
-            selected: None,
-            note: String::new(),
-            goal: String::new(),
-            single_role: Some("reviewer".into()),
-            plan_worktrees: true,
-            budget_minutes: 20,
-            budget_tokens: 0,
-            max_parallel: 2,
-            chat: super::agent_chat::ChatState::default(),
-            planner: 0,
-            planner_account: None,
-            pins: std::collections::BTreeMap::new(),
-        }
     }
 }
 
@@ -871,12 +836,42 @@ fn badge(ui: &mut Ui, text: &str, color: egui::Color32) {
         .corner_radius(5)
         .inner_margin(Margin::symmetric(7, 2))
         .show(ui, |ui| {
-            ui.label(
-                RichText::new(text)
-                    .size(LABEL)
-                    .strong()
-                    .extra_letter_spacing(0.6)
-                    .color(color),
+            // Never wraps: a squeezed badge would stack one letter per line.
+            ui.add(
+                egui::Label::new(
+                    RichText::new(text)
+                        .size(LABEL)
+                        .strong()
+                        .extra_letter_spacing(0.6)
+                        .color(color),
+                )
+                .extend(),
+            );
+        });
+}
+
+/// A real error, shown in full: wrapped, monospace and selectable so it can
+/// be read and copied.
+pub(super) fn failure_text(ui: &mut Ui, text: &str) {
+    Frame::new()
+        .fill(colors().error.gamma_multiply(0.08))
+        .stroke(egui::Stroke::new(
+            1.0_f32,
+            colors().error.gamma_multiply(0.3),
+        ))
+        .corner_radius(8)
+        .inner_margin(Margin::symmetric(10, 8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.add(
+                egui::Label::new(
+                    RichText::new(text)
+                        .monospace()
+                        .size(SMALL)
+                        .color(ink::primary()),
+                )
+                .wrap()
+                .selectable(true),
             );
         });
 }
@@ -896,6 +891,7 @@ impl Editor {
         } else if self.hub_open {
             ctx.request_repaint_after(std::time::Duration::from_millis(1000));
         }
+        self.luma_watch();
     }
 
     /// Evidence harness: refresh every account's sign-in status line.
@@ -1271,6 +1267,7 @@ impl Editor {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         self.approvals_strip(ui);
+                        self.team_run(ui);
                         self.context_panel(ui);
                     });
             });
@@ -1389,297 +1386,9 @@ impl Editor {
         });
     }
 
-    pub(super) fn autonomy_panel(&mut self, ui: &mut Ui) {
-        if self.runtime_unavailable(ui) {
-            return;
-        }
-        let root = self.root.clone();
-        let rect = ui.available_rect_before_wrap();
-        let wide = rect.width() > 900.0;
-        let setup_width = if wide {
-            (rect.width() * 0.4).clamp(340.0, 440.0)
-        } else {
-            rect.width()
-        };
-        ui.label(heading(tr("Orchestrator")));
-        ui.label(support(tr(
-            "Turn an objective into tasks, assign each role to one of your accounts, and supervise \
-             the run. Everything shown comes from the engine's live state.",
-        )));
-        ui.add_space(12.0);
-        self.agent_notice(ui);
-        let top = ui.cursor().min.y;
-        let setup = egui::Rect::from_min_max(
-            egui::pos2(rect.left(), top),
-            egui::pos2(rect.left() + setup_width, rect.bottom()),
-        );
-        ui.scope_builder(egui::UiBuilder::new().max_rect(setup), |ui| {
-            ScrollArea::vertical()
-                .id_salt("orchestrator-setup")
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui.set_max_width(setup_width - 12.0);
-                    self.orchestrator_setup(ui, root.clone());
-                    if !wide {
-                        self.orchestrator_live(ui);
-                    }
-                });
-        });
-        if wide {
-            let live = egui::Rect::from_min_max(egui::pos2(setup.right() + GUTTER, top), rect.max);
-            ui.scope_builder(egui::UiBuilder::new().max_rect(live), |ui| {
-                ScrollArea::vertical()
-                    .id_salt("orchestrator-live")
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| self.orchestrator_live(ui));
-            });
-        }
-    }
-
-    fn orchestrator_setup(&mut self, ui: &mut Ui, root: Option<PathBuf>) {
-        let state = &mut self.hub.agents;
-        let runtime = state.runtime.as_mut().expect("runtime");
-        let accounts: Vec<Account> = runtime
-            .profiles
-            .accounts()
-            .iter()
-            .filter(|a| {
-                a.enabled && matches!(a.provider, ProviderKind::ClaudeCode | ProviderKind::Codex)
-            })
-            .cloned()
-            .collect();
-        let describe = |a: &Account| {
-            format!(
-                "{} · {} · {}",
-                a.label,
-                super::agent_chat::provider_name(&a.provider),
-                a.default_model
-                    .clone()
-                    .unwrap_or_else(|| "default model".into())
-            )
-        };
-        card(ui, |ui| {
-            ui.label(label("Orchestrator"));
-            for (i, (title, detail)) in [
-                (
-                    "Template planner",
-                    "Offline and deterministic: design → build → tests → review → release.",
-                ),
-                ("One role", "A single role does the whole objective."),
-                (
-                    "An agent writes the plan",
-                    "Your chosen account plans the tasks as JSON; the engine validates it.",
-                ),
-            ]
-            .iter()
-            .enumerate()
-            {
-                ui.horizontal(|ui| {
-                    ui.radio_value(
-                        &mut state.planner,
-                        i as u8,
-                        RichText::new(tr(title)).strong(),
-                    );
-                });
-                ui.label(small(tr(detail)));
-            }
-            if state.planner == 1 {
-                ui.horizontal_wrapped(|ui| {
-                    for role in RoleCatalog::builtin().iter() {
-                        ui.selectable_value(
-                            &mut state.single_role,
-                            Some(role.id.to_string()),
-                            &role.name,
-                        );
-                    }
-                });
-            }
-            if state.planner == 2 {
-                if accounts.is_empty() {
-                    ui.label(small(tr("Add an account first.")));
-                }
-                egui::ComboBox::from_id_salt("planner-account")
-                    .width(ui.available_width())
-                    .truncate()
-                    .selected_text(
-                        accounts
-                            .iter()
-                            .find(|a| Some(&a.id) == state.planner_account.as_ref())
-                            .map_or_else(|| tr("Choose the planning account").to_owned(), describe),
-                    )
-                    .show_ui(ui, |ui| {
-                        for a in &accounts {
-                            ui.selectable_value(
-                                &mut state.planner_account,
-                                Some(a.id.clone()),
-                                describe(a),
-                            );
-                        }
-                    });
-            }
-        });
-        card(ui, |ui| {
-            ui.label(label("Roles"));
-            ui.label(small(tr(
-                "Automatic lets the engine pick a signed-in account. A pinned role only runs on that \
-                 account and uses its model.",
-            )));
-            ui.add_space(4.0);
-            for role in RoleCatalog::builtin().iter() {
-                let key = role.id.to_string();
-                ui.horizontal(|ui| {
-                    ui.add_sized(
-                        [132.0, 22.0],
-                        egui::Label::new(RichText::new(&role.name).strong()).truncate(),
-                    );
-                    let current = state.pins.get(&key).cloned();
-                    egui::ComboBox::from_id_salt(("pin", &key))
-                        .width(ui.available_width())
-                        .truncate()
-                        .selected_text(
-                            current
-                                .as_ref()
-                                .and_then(|id| accounts.iter().find(|a| &a.id == id))
-                                .map_or_else(|| tr("Automatic").to_owned(), describe),
-                        )
-                        .show_ui(ui, |ui| {
-                            if ui
-                                .selectable_label(current.is_none(), tr("Automatic"))
-                                .clicked()
-                            {
-                                state.pins.remove(&key);
-                            }
-                            for a in &accounts {
-                                if ui
-                                    .selectable_label(current.as_ref() == Some(&a.id), describe(a))
-                                    .clicked()
-                                {
-                                    state.pins.insert(key.clone(), a.id.clone());
-                                }
-                            }
-                        });
-                });
-            }
-        });
-        card(ui, |ui| {
-            ui.label(label("Budget"));
-            ui.horizontal_wrapped(|ui| {
-                ui.label(small("Minutes"));
-                ui.add(egui::DragValue::new(&mut state.budget_minutes).range(1..=240));
-                ui.label(small("Tokens (0 = none)"));
-                ui.add(
-                    egui::DragValue::new(&mut state.budget_tokens)
-                        .range(0..=5_000_000)
-                        .speed(1000),
-                );
-                ui.label(small("Parallel"));
-                ui.add(egui::DragValue::new(&mut state.max_parallel).range(1..=4));
-            });
-            checkbox(
-                ui,
-                &mut state.plan_worktrees,
-                tr("Each task in its own git worktree"),
-            );
-        });
-        let mut start = None;
-        card(ui, |ui| {
-            ui.label(label("Objective"));
-            let Some(root) = root else {
-                ui.label(secondary("Open a project folder first."));
-                return;
-            };
-            ui.add(
-                TextEdit::multiline(&mut state.goal)
-                    .hint_text(tr(
-                        "e.g. Build the landing page hero and pricing sections in React",
-                    ))
-                    .desired_rows(3)
-                    .desired_width(f32::INFINITY),
-            );
-            ui.label(small(format!(
-                "Project: {}",
-                crate::agents_runtime::plain(&root).display()
-            )));
-            let busy = runtime.planning.is_some()
-                || runtime
-                    .plan
-                    .as_ref()
-                    .is_some_and(|p| !p.engine.plan().state.is_settled());
-            if ui
-                .add_enabled(
-                    !busy && !state.goal.trim().is_empty(),
-                    primary(tr("Start objective")),
-                )
-                .clicked()
-            {
-                start = Some(std::mem::take(&mut state.goal));
-            }
-        });
-        if let Some(goal) = start {
-            self.start_objective(&goal);
-        }
-    }
-
-    /// Starts an objective with the orchestrator settings; used by the
-    /// Orchestrator page and by the universal composer.
-    pub(super) fn start_objective(&mut self, goal: &str) {
-        let Some(root) = self.root.clone() else {
-            return;
-        };
-        let state = &mut self.hub.agents;
-        let Some(runtime) = state.runtime.as_mut() else {
-            return;
-        };
-        let mut pins = std::collections::BTreeMap::new();
-        for (role, account) in &state.pins {
-            if let Ok(role) = covalos_agents::RoleId::new(role.clone()) {
-                pins.insert(role, account.clone());
-            }
-        }
-        let setup = PlanSetup {
-            worktrees: state.plan_worktrees,
-            budget: Budget {
-                wall_ms: Some(u64::from(state.budget_minutes) * 60_000),
-                tokens: (state.budget_tokens > 0).then_some(u64::from(state.budget_tokens)),
-                cost_micros: None,
-            },
-            max_parallel: state.max_parallel,
-            pins,
-        };
-        let result = match state.planner {
-            2 => match state.planner_account.clone() {
-                Some(account) => {
-                    let model = runtime
-                        .profiles
-                        .accounts()
-                        .iter()
-                        .find(|a| a.id == account)
-                        .and_then(|a| a.default_model.clone());
-                    runtime.request_plan(goal, account, model, &root, setup)
-                }
-                None => Err("Choose the account that writes the plan.".into()),
-            },
-            1 => runtime.start_plan(
-                goal,
-                PlanMode::Single {
-                    role: state
-                        .single_role
-                        .clone()
-                        .unwrap_or_else(|| "reviewer".into()),
-                },
-                &root,
-                setup,
-            ),
-            _ => runtime.start_plan(goal, PlanMode::Template, &root, setup),
-        };
-        runtime.notice = Some(match result {
-            Ok(()) if state.planner == 2 => (true, "The planner agent is writing the plan.".into()),
-            Ok(()) => (true, "Objective started.".into()),
-            Err(e) => (false, e),
-        });
-    }
-
-    fn orchestrator_live(&mut self, ui: &mut Ui) {
+    /// The run Luma launched: state, real failure reasons, approvals and
+    /// results, straight from the engine.
+    pub(super) fn team_run(&mut self, ui: &mut Ui) {
         let state = &mut self.hub.agents;
         let runtime = state.runtime.as_mut().expect("runtime");
         let mut open_session = None;
@@ -1726,10 +1435,10 @@ impl Editor {
         let Some(run) = runtime.plan.as_mut() else {
             if runtime.planning.is_none() {
                 card(ui, |ui| {
-                    ui.label(label("Live run"));
+                    ui.label(label("Team run"));
                     ui.label(support(tr(
-                        "No objective yet. Start one here or send it from any chat with \
-                         Covalos Orchestrator selected.",
+                        "No team run yet. Click Luma and give it an order; it picks the \
+                         agents, model and effort.",
                     )));
                 });
             }
@@ -1741,14 +1450,11 @@ impl Editor {
         };
         let plan = run.engine.plan().clone();
         card(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(heading(&plan.goal));
-                badge(
-                    ui,
-                    &format!("{:?}", plan.state).to_uppercase(),
-                    plan_color(&plan.state),
-                );
-            });
+            badge(ui, plan_label(&plan.state), plan_color(&plan.state));
+            ui.add(egui::Label::new(heading(&plan.goal)).wrap());
+            if let covalos_engine::PlanState::Failed { reason } = &plan.state {
+                failure_text(ui, reason);
+            }
             ui.label(small(format!(
                 "spent {:.1} min · {} tokens{}",
                 plan.spend.wall_ms as f64 / 60_000.0,
@@ -1837,16 +1543,23 @@ impl Editor {
                                     .color(ink::primary()),
                             );
                         });
-                        ui.label(small(format!(
-                            "{} · {} · attempt {} · {} tokens · {}",
-                            task.spec.role,
-                            task.account
-                                .as_ref()
-                                .map_or_else(|| "unassigned".into(), ToString::to_string),
-                            task.attempts,
-                            task.spend.tokens,
-                            status
-                        )));
+                        ui.add(
+                            egui::Label::new(small(format!(
+                                "{} · {} · attempt {} · {} tokens",
+                                task.spec.role,
+                                task.account
+                                    .as_ref()
+                                    .map_or_else(|| "unassigned".into(), ToString::to_string),
+                                task.attempts,
+                                task.spend.tokens,
+                            )))
+                            .wrap(),
+                        );
+                        if matches!(task.status, TaskStatus::Failed { .. }) {
+                            failure_text(ui, &status);
+                        } else {
+                            ui.add(egui::Label::new(small(status)).wrap());
+                        }
                     });
                 ui.add_space(4.0);
             }
@@ -1907,6 +1620,17 @@ fn task_label(status: &TaskStatus) -> String {
         TaskStatus::Skipped { because } => format!("Skipped (needs {because})"),
         TaskStatus::Cancelled => "Cancelled".into(),
         TaskStatus::Pending => "Pending".into(),
+    }
+}
+
+pub(super) fn plan_label(state: &covalos_engine::PlanState) -> &'static str {
+    use covalos_engine::PlanState;
+    match state {
+        PlanState::Running => "RUNNING",
+        PlanState::Paused => "PAUSED",
+        PlanState::Cancelled => "CANCELLED",
+        PlanState::Succeeded => "SUCCEEDED",
+        PlanState::Failed { .. } => "FAILED",
     }
 }
 

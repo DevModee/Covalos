@@ -1141,10 +1141,9 @@ impl Editor {
         let skill = self.skills.selected_input(&self.preferences.skills);
         let (runtime, chat) = self.hub.agents.runtime_and_chat();
         if chat.target == Target::Orchestrator {
-            let goal = trimmed.to_owned();
-            self.start_objective(&goal);
-            self.preferences.assistant_open = true;
-            self.hub_open = false;
+            let order = trimmed.to_owned();
+            self.luma_order(&order);
+            self.companion.open = true;
             return None;
         }
         let accounts = chat_accounts(runtime);
@@ -1296,10 +1295,13 @@ impl Editor {
                         }
                     }
                 }
-                Action::Objective(goal) => self.start_objective(&goal),
+                Action::Objective(order) => {
+                    self.luma_order(&order);
+                    self.companion.open = true;
+                }
                 Action::OpenOrchestrator => {
-                    self.hub_open = true;
-                    self.hub.focus_agents("orchestrator");
+                    self.companion.open = true;
+                    self.hub.agents.luma.focus = true;
                 }
                 Action::AddAi => self.open_providers(),
             }
@@ -2352,7 +2354,7 @@ fn new_conversation(
     }
     let mut open_providers = false;
     let hint = if chat.target == Target::Orchestrator {
-        tr("Describe an objective; the orchestrator plans and assigns it")
+        tr("Give Luma an order; it staffs and coordinates the agents")
     } else {
         tr("Message the agent")
     };
@@ -2368,7 +2370,7 @@ fn new_conversation(
         active,
         |ui, composing| {
             if chat.target == Target::Orchestrator {
-                ui.label(meta_text(tr("Covalos Orchestrator")));
+                ui.label(meta_text(tr("Luma · lead developer")));
             } else {
                 open_providers = draft_picker(ui, runtime, chat, root.as_deref(), composing);
             }
@@ -2437,7 +2439,7 @@ fn target_picker(ui: &mut Ui, chat: &mut ChatState) {
     if ui
         .selectable_label(
             chat.target == Target::Orchestrator,
-            tr("Covalos Orchestrator"),
+            tr("Luma · lead developer"),
         )
         .clicked()
     {
@@ -2458,9 +2460,9 @@ fn target_picker(ui: &mut Ui, chat: &mut ChatState) {
 fn plan_card(ui: &mut Ui, runtime: &Runtime, actions: &mut Vec<Action>) {
     let Some(run) = runtime.plan.as_ref() else {
         ui.label(meta_text(tr(
-            "Roles, accounts and budgets are set in the Orchestrator page. Your message becomes the objective.",
+            "Luma picks the agents, model and effort within your ceiling. Your message becomes its order.",
         )));
-        if ui.small_button(tr("Open Orchestrator")).clicked() {
+        if ui.small_button(tr("Open Luma")).clicked() {
             actions.push(Action::OpenOrchestrator);
         }
         return;
@@ -2473,20 +2475,20 @@ fn plan_card(ui: &mut Ui, runtime: &Runtime, actions: &mut Vec<Action>) {
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.label(RichText::new(&plan.goal).size(BODY).strong());
-            ui.label(meta_text(format!("{:?}", plan.state)));
+            ui.label(meta_text(super::agent_hub::plan_label(&plan.state)));
             for task in plan.tasks() {
                 ui.horizontal(|ui| {
                     dot(ui, super::agent_hub::task_color(&task.status));
                     ui.add(
                         egui::Label::new(meta_text(format!(
-                            "{} Â· {}",
+                            "{} · {}",
                             task.spec.role, task.spec.title
                         )))
                         .truncate(),
                     );
                 });
             }
-            if ui.small_button(tr("Open Orchestrator")).clicked() {
+            if ui.small_button(tr("Open Luma")).clicked() {
                 actions.push(Action::OpenOrchestrator);
             }
         });

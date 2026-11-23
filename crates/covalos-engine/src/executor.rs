@@ -42,6 +42,8 @@ pub struct Assignment {
     pub context: String,
     pub attempt: u32,
     pub session: SessionId,
+    /// Reasoning effort for this attempt; `None` keeps the provider default.
+    pub effort: Option<String>,
 }
 
 impl Assignment {

@@ -614,21 +614,29 @@ impl Editor {
                         mood,
                         self.preferences.reduce_motion,
                     ) {
-                        self.companion.open = true;
+                        self.open_luma();
                     }
                     dock.vertical(|ui| {
                         ui.add_space(6.0);
                         ui.label(RichText::new(tr("Luma")).strong().color(colors().secondary));
                         ui.add(egui::Label::new(muted(mood.name())).truncate());
-                        if ui
-                            .add(egui::Button::new(muted(tr("Companion ↗"))).frame(false))
-                            .clicked()
-                        {
-                            self.companion.open = true;
+                        let order =
+                            ui.add(egui::Button::new(muted(tr("Give an order ↗"))).frame(false));
+                        if order.hovered() {
+                            pointer_cursor(ui.ctx());
+                        }
+                        if order.clicked() {
+                            self.open_luma();
                         }
                     });
                 });
             });
+    }
+
+    /// Opens Luma's chat with the order box focused.
+    pub(super) fn open_luma(&mut self) {
+        self.companion.open = true;
+        self.hub.agents.luma.focus = true;
     }
 
     pub(super) fn sidebar_visible(&self) -> bool {

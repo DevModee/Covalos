@@ -807,6 +807,9 @@ impl Identity {
         #[cfg(test)]
         super::motion::record(ui, "Luma", rect);
         self.mascot_hover = response.hovered();
+        if prefs.interactive && response.hovered() {
+            theme::pointer_cursor(ui.ctx());
+        }
         if response.clicked() {
             self.mascot_click = self.now;
             ui.ctx().request_repaint();

@@ -1292,6 +1292,8 @@ fn agent_steps() -> Vec<Step> {
                         budget,
                         max_parallel: 1,
                         pins: Default::default(),
+                        effort: None,
+                        models: Vec::new(),
                     },
                 )
                 .unwrap();
@@ -1569,6 +1571,8 @@ fn engine_steps() -> Vec<Step> {
                         budget,
                         max_parallel: 1,
                         pins: Default::default(),
+                        effort: None,
+                        models: Vec::new(),
                     },
                 )
                 .unwrap();

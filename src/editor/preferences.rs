@@ -62,6 +62,8 @@ pub(super) struct Preferences {
     pub(super) agent_model: Option<String>,
     pub(super) agent_account: Option<covalos_agents::AccountId>,
     pub(super) agent_effort: String,
+    /// The most effort Luma may use for an order; it asks before going above.
+    pub(super) luma_effort: crate::luma::Effort,
     pub(super) agent_favorites: std::collections::BTreeSet<(covalos_agents::AccountId, String)>,
     /// Conversations pinned to the top of the sidebar, by runtime session id.
     pub(super) agent_pinned: std::collections::BTreeSet<String>,
@@ -116,6 +118,7 @@ impl Default for Preferences {
             agent_model: None,
             agent_account: None,
             agent_effort: String::new(),
+            luma_effort: crate::luma::Effort::Medium,
             agent_favorites: Default::default(),
             agent_pinned: Default::default(),
             agent_archived: Default::default(),

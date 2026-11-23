@@ -47,6 +47,19 @@ fn fail(reason: impl Into<String>, retryable: bool) -> Outcome {
     }
 }
 
+/// Explains a run that ended without a completed turn, keeping the CLI's own
+/// words (stderr, else its last message) so the user sees the real cause.
+fn no_result(status: &str, stderr: &str, last_message: &str) -> String {
+    let detail = if !stderr.is_empty() {
+        stderr
+    } else if !last_message.trim().is_empty() {
+        last_message.trim()
+    } else {
+        "the CLI printed nothing on stderr"
+    };
+    format!("provider ended without a result ({status}): {detail}")
+}
+
 impl Executor for CliExecutor {
     fn execute(&self, assignment: &Assignment, channel: &Channel) -> Outcome {
         let Ok(account) = self.profiles.get(&assignment.account) else {
@@ -78,7 +91,7 @@ impl Executor for CliExecutor {
         let purpose = Purpose::Turn(Turn {
             resume: None,
             model: assignment.model.clone(),
-            effort: None,
+            effort: assignment.effort.clone(),
             sandbox: assignment.role.autonomy.sandbox(),
             settings: self
                 .claude_settings
@@ -135,7 +148,7 @@ impl Executor for CliExecutor {
         thread::spawn(move || {
             let _ = stdin.write_all(prompt.as_bytes());
         });
-        let stderr = bounded_reader(child.stderr.take().expect("piped"), 4096);
+        let stderr = bounded_reader(child.stderr.take().expect("piped"), 16 * 1024);
         let stdout = child.stdout.take().expect("piped");
         let (lines_tx, lines) = mpsc::channel();
         thread::spawn(move || {
@@ -210,10 +223,7 @@ impl Executor for CliExecutor {
                     summary: last_message.chars().take(2_000).collect(),
                 }
             }
-            None => fail(
-                format!("provider ended without a result ({status}) {stderr}"),
-                true,
-            ),
+            None => fail(no_result(&status.to_string(), &stderr, &last_message), true),
         }
     }
 }

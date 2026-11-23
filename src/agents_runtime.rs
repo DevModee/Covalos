@@ -8,6 +8,7 @@
 use crate::{
     agent_gate::{self, GatePolicy, GateRequest},
     agent_provider::{self, Catalog, Identity, Model},
+    luma,
     runtime_install::{self, Install},
 };
 use covalos_agents::{
@@ -23,7 +24,7 @@ use covalos_agents::{
     worktree::WorktreeManager,
 };
 use covalos_engine::{
-    Deps, Engine, EngineConfig, PlanSpec, Planner, TaskSpec, TemplatePlanner, Workspace,
+    Deps, Engine, EngineConfig, PlanSpec, TaskSpec, Workspace,
     agent::{AgentProfile, Preferences},
     budget::Budget,
     cli::CliExecutor,
@@ -418,6 +419,40 @@ pub(crate) struct PlanSetup {
     pub max_parallel: usize,
     /// Roles that must run on a specific account (engine `Preferences::pinned`).
     pub pins: BTreeMap<RoleId, AccountId>,
+    /// Reasoning effort passed to every agent; `None` keeps provider defaults.
+    pub effort: Option<String>,
+    /// Models to request, most preferred first (engine `Preferences::models`).
+    pub models: Vec<String>,
+}
+
+/// What Luma launched for an order, for its report in the chat.
+#[derive(Clone, Debug)]
+pub(crate) struct Staffing {
+    pub account: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub team: bool,
+}
+
+/// The built-in roles plus the generalist Luma gives single orders to: it
+/// works in the project and has no completion check a plain answer could
+/// fail (questions and reviews change no files).
+fn luma_roles() -> RoleCatalog {
+    let mut roles = RoleCatalog::builtin();
+    let backend = RoleId::new("backend").expect("static id");
+    if let Ok(base) = roles.get(&backend) {
+        let mut developer = base.clone();
+        developer.id = RoleId::new("developer").expect("static id");
+        developer.name = "Developer".into();
+        developer.responsibilities = vec![
+            "Carry out the order end to end in the project".into(),
+            "Explain what changed, or answer the question directly".into(),
+        ];
+        developer.done_when.clear();
+        developer.max_attempts = 2;
+        let _ = roles.register(developer);
+    }
+    roles
 }
 
 /// An agent is writing the plan; the engine starts when it answers.
@@ -434,7 +469,6 @@ pub(crate) struct AutoRun {
 }
 
 pub(crate) enum PlanMode {
-    Template,
     Single {
         role: String,
     },
@@ -1566,7 +1600,7 @@ impl Runtime {
         max_parallel: usize,
         pins: &BTreeMap<RoleId, AccountId>,
     ) -> Result<Deps, String> {
-        let roles = RoleCatalog::builtin();
+        let roles = luma_roles();
         let all: std::collections::BTreeSet<Capability> = roles
             .iter()
             .flat_map(|r| r.requires.iter().cloned())
@@ -1704,6 +1738,8 @@ impl Runtime {
             budget,
             max_parallel,
             pins,
+            effort,
+            models,
         } = setup;
         if self
             .plan
@@ -1717,12 +1753,11 @@ impl Runtime {
             return Err("Describe the goal first.".into());
         }
         let root = &plain(root);
-        let deps = self.deps(root, worktrees, max_parallel, &pins)?;
+        let mut deps = self.deps(root, worktrees, max_parallel, &pins)?;
+        deps.config.effort = effort;
+        deps.prefs.models = models;
         let spec = match mode {
             PlanMode::Spec(spec) => spec,
-            PlanMode::Template => TemplatePlanner
-                .plan(goal, &deps.roles)
-                .map_err(|e| e.to_string())?,
             PlanMode::Single { role } => PlanSpec {
                 goal: goal.to_owned(),
                 tasks: vec![TaskSpec {
@@ -1780,17 +1815,18 @@ impl Runtime {
         if goal.is_empty() {
             return Err("Describe the goal first.".into());
         }
-        let roles: Vec<String> = RoleCatalog::builtin()
+        let roles: Vec<String> = luma_roles()
             .iter()
             .map(|r| format!("- {}: {}", r.id, r.responsibilities.join("; ")))
             .collect();
         let prompt = format!(
-            "You are the Covalos orchestrator. Do not edit files and do not run commands. \
-             Break the objective below into a small plan for these roles:\n{}\n\n\
+            "You are Luma, the Covalos lead developer. Do not edit files and do not run \
+             commands. Break the objective below into a small plan for these roles:\n{}\n\n\
+             Prefer the developer role; add a reviewer task only for a final review.\n\
              Answer with ONLY one JSON object, no prose, shaped like:\n\
              {{\"goal\": \"...\", \"tasks\": [{{\"id\": \"task-1\", \"title\": \"...\", \
-             \"instructions\": \"...\", \"role\": \"frontend\", \"depends_on\": []}}]}}\n\
-             Use at most 6 tasks, lowercase ids, and only the role ids listed.\n\n\
+             \"instructions\": \"...\", \"role\": \"developer\", \"depends_on\": []}}]}}\n\
+             Use at most 4 tasks, lowercase ids, and only the role ids listed.\n\n\
              Objective: {goal}",
             roles.join("\n")
         );
@@ -1798,7 +1834,7 @@ impl Runtime {
             title: format!("Plan: {}", goal.chars().take(40).collect::<String>()),
             account,
             model,
-            effort: None,
+            effort: setup.effort.clone(),
             claude_modes: ClaudeModes::default(),
             root: root.to_path_buf(),
             worktree: false,
@@ -1814,6 +1850,115 @@ impl Runtime {
             setup,
         });
         Ok(())
+    }
+
+    /// The account Luma leads with: enabled, signed in and able to run
+    /// headless, preferring Claude Code, then Codex, then the rest.
+    pub(crate) fn lead_account(&self) -> Option<Account> {
+        let rank = |p: &ProviderKind| match p {
+            ProviderKind::ClaudeCode => 0,
+            ProviderKind::Codex => 1,
+            _ => 2,
+        };
+        self.ready_accounts()
+            .into_iter()
+            .min_by_key(|a| rank(&a.provider))
+    }
+
+    fn ready_accounts(&self) -> Vec<Account> {
+        self.profiles
+            .accounts()
+            .iter()
+            .filter(|a| a.enabled && self.connection_ready(&a.id))
+            .filter(|a| {
+                self.registry
+                    .get(&a.provider)
+                    .is_ok_and(|spec| spec.headless != Headless::Unsupported)
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// The model Luma requests from an account for an effort level, and the
+    /// effort flag when that model lists it.
+    fn staff(&self, id: &AccountId, effort: luma::Effort) -> (Option<String>, Option<String>) {
+        let models = self.models(id);
+        let offers: Vec<luma::Offer<'_>> = models
+            .iter()
+            .map(|m| luma::Offer {
+                id: &m.id,
+                efforts: &m.efforts,
+                is_default: m.is_default,
+            })
+            .collect();
+        let model = luma::pick_model(&offers, effort).map(str::to_owned);
+        let flag = luma::effort_flag(&offers, model.as_deref(), effort);
+        (model, flag)
+    }
+
+    /// Carries out an order the way Luma decided: one developer in the
+    /// project, or (high effort) a planned team in separate worktrees.
+    pub(crate) fn luma_dispatch(
+        &mut self,
+        order: &str,
+        root: &Path,
+        decision: luma::Decision,
+    ) -> Result<Staffing, String> {
+        let lead = self.lead_account().ok_or_else(|| {
+            "No agent account is ready. Connect and sign in to Claude Code or Codex in Providers."
+                .to_owned()
+        })?;
+        let effort = decision.effort;
+        let team = decision.team();
+        let (model, flag) = self.staff(&lead.id, effort);
+        let mut models: Vec<String> = model.iter().cloned().collect();
+        if team {
+            for account in self.ready_accounts() {
+                if let (Some(pick), _) = self.staff(&account.id, effort)
+                    && !models.contains(&pick)
+                {
+                    models.push(pick);
+                }
+            }
+        }
+        let minutes = match effort {
+            luma::Effort::Low => 15,
+            luma::Effort::Medium => 30,
+            luma::Effort::High => 90,
+        };
+        let mut pins = BTreeMap::new();
+        if !team {
+            pins.insert(
+                RoleId::new("developer").expect("static id"),
+                lead.id.clone(),
+            );
+        }
+        let setup = PlanSetup {
+            worktrees: team,
+            budget: Budget {
+                wall_ms: Some(minutes * 60_000),
+                tokens: None,
+                cost_micros: None,
+            },
+            max_parallel: if team { 3 } else { 1 },
+            pins,
+            effort: flag.clone(),
+            models,
+        };
+        if team {
+            self.request_plan(order, lead.id.clone(), model.clone(), root, setup)?;
+        } else {
+            let single = PlanMode::Single {
+                role: "developer".into(),
+            };
+            self.start_plan(order, single, root, setup)?;
+        }
+        Ok(Staffing {
+            account: lead.label.clone(),
+            model,
+            effort: flag,
+            team,
+        })
     }
 
     /// Starts the engine from the planner agent's answer, once it finished.
@@ -1836,6 +1981,16 @@ impl Runtime {
             .find(|l| l.kind == "agent")
             .map(|l| l.text.clone());
         let ok = session.meta.status == Status::Completed;
+        let cause = session
+            .meta
+            .log
+            .iter()
+            .rev()
+            .find(|l| l.kind == "error")
+            .map_or_else(
+                || format!("it ended as {}", session.meta.status.label()),
+                |l| l.text.clone(),
+            );
         let planning = self.planning.take().expect("checked");
         let result = match (ok, answer) {
             (true, Some(text)) => extract_json(&text)
@@ -1849,7 +2004,8 @@ impl Runtime {
                         planning.setup,
                     )
                 }),
-            _ => Err("The planner agent did not finish; see its conversation.".into()),
+            (true, None) => Err("The planner agent finished without an answer.".into()),
+            _ => Err(format!("The planner agent did not finish: {cause}")),
         };
         self.notice = Some(match result {
             Ok(()) => (true, "The orchestrator's plan is running.".into()),

@@ -43,6 +43,9 @@ pub struct EngineConfig {
     pub context_digest_chars: usize,
     /// Limits for completion-criteria commands the engine runs itself.
     pub command_limits: ProcessLimits,
+    /// Reasoning effort requested from every agent (`low`, `medium`, `high`).
+    /// `None` keeps each provider's default.
+    pub effort: Option<String>,
 }
 
 impl Default for EngineConfig {
@@ -59,6 +62,7 @@ impl Default for EngineConfig {
                 wall: Duration::from_secs(10 * 60),
                 max_output_bytes: 256 * 1024,
             },
+            effort: None,
         }
     }
 }
@@ -963,6 +967,7 @@ impl Engine {
                 .digest(Some(&session), self.config.context_digest_chars),
             attempt,
             session: session.clone(),
+            effort: self.config.effort.clone(),
         };
         let cancel = CancelToken::default();
         let channel = Channel::new(self.tx.clone(), id.clone(), attempt, cancel.clone());
@@ -1001,16 +1006,15 @@ impl Engine {
         {
             return Ok(());
         }
-        let unsuccessful = self
-            .plan
-            .tasks()
-            .filter(|t| t.status != TaskStatus::Succeeded)
-            .count();
-        let state = if unsuccessful == 0 {
+        let failures = failure_lines(&self.plan);
+        let state = if failures.is_empty() {
             PlanState::Succeeded
         } else {
             PlanState::Failed {
-                reason: format!("{unsuccessful} task(s) did not succeed"),
+                reason: failures.join(
+                    "
+",
+                ),
             }
         };
         self.commit(Record::Settled { state })
@@ -1052,6 +1056,32 @@ impl Drop for Engine {
             live.cancel.cancel();
         }
     }
+}
+
+/// One line per task that did not succeed, naming the task and the real
+/// reason, so a failed plan never reports only a count.
+fn failure_lines(plan: &Plan) -> Vec<String> {
+    let total = plan.tasks().count();
+    let mut lines: Vec<String> = plan
+        .tasks()
+        .filter_map(|task| {
+            let why = match &task.status {
+                TaskStatus::Succeeded => return None,
+                TaskStatus::Failed { reason } => reason.clone(),
+                TaskStatus::Skipped { because } => format!("skipped because {because} failed"),
+                TaskStatus::Cancelled => "cancelled".to_owned(),
+                other => format!("{other:?}"),
+            };
+            Some(format!("{} ({}): {why}", task.spec.title, task.spec.id))
+        })
+        .collect();
+    if !lines.is_empty() {
+        lines.insert(
+            0,
+            format!("{} of {total} task(s) did not succeed:", lines.len()),
+        );
+    }
+    lines
 }
 
 fn tail(text: &str, max: usize) -> String {

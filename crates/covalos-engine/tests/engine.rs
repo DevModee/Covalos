@@ -335,10 +335,15 @@ fn permanent_failures_skip_dependents() {
         task("d", "qa", &[]),
     ];
     let mut engine = start(spec(tasks), Budget::default(), executor.clone(), dir.path());
-    assert!(matches!(
-        engine.run_until(LONG).unwrap(),
-        Progress::Settled(PlanState::Failed { .. })
-    ));
+    let Progress::Settled(PlanState::Failed { reason }) = engine.run_until(LONG).unwrap() else {
+        panic!("the plan should fail");
+    };
+    assert!(
+        reason.starts_with("3 of 4 task(s) did not succeed"),
+        "{reason}"
+    );
+    assert!(reason.contains("(a): spec is contradictory"), "{reason}");
+    assert!(reason.contains("(b): skipped because a failed"), "{reason}");
     assert_eq!(executor.runs_of("a"), 1);
     assert!(matches!(status(&engine, "b"), TaskStatus::Skipped { .. }));
     assert!(matches!(status(&engine, "c"), TaskStatus::Skipped { .. }));

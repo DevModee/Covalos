@@ -8,6 +8,7 @@ mod assistant;
 mod brand;
 mod editor;
 mod library;
+mod luma;
 mod paths;
 mod process;
 mod runtime_install;

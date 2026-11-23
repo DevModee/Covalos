@@ -184,13 +184,10 @@ pub(super) struct Hub {
 #[derive(Default, PartialEq, Eq)]
 enum HubTab {
     Conversations,
-    Companion,
     Accounts,
     #[default]
     Sessions,
-    Autonomy,
     Tasks,
-    Memory,
     Skills,
 }
 
@@ -274,8 +271,8 @@ impl Hub {
     pub(super) fn focus_agents(&mut self, page: &str) {
         self.tab = match page {
             "accounts" => HubTab::Accounts,
-            "sessions" | "agents" => HubTab::Sessions,
-            _ => HubTab::Autonomy,
+            "skills" | "rules" => HubTab::Skills,
+            _ => HubTab::Sessions,
         };
     }
     pub(super) fn snapshots(
@@ -447,22 +444,8 @@ impl Editor {
                 ui.add_space(24.0);
                 for (tab, label) in [
                     (HubTab::Sessions, "Agents"),
-                    (HubTab::Autonomy, "Orchestrator"),
                     (HubTab::Accounts, "Providers"),
-                ] {
-                    if row(ui, label, "", self.hub.tab == tab).clicked() {
-                        self.hub.tab = tab;
-                    }
-                }
-                ui.add_space(14.0);
-                ui.label(muted(tr("Workspace")).size(SMALL));
-                ui.add_space(4.0);
-                for (tab, label) in [
-                    (HubTab::Companion, "Live agents"),
-                    (HubTab::Conversations, "Quick chat"),
-                    (HubTab::Tasks, "Tasks"),
-                    (HubTab::Memory, "Project memory"),
-                    (HubTab::Skills, "Skills"),
+                    (HubTab::Skills, "Skills & rules"),
                 ] {
                     if row(ui, label, "", self.hub.tab == tab).clicked() {
                         self.hub.tab = tab;
@@ -487,10 +470,6 @@ impl Editor {
                 match self.hub.tab {
                     HubTab::Accounts => self.accounts_panel(ui),
                     HubTab::Sessions => self.sessions_panel(ui),
-                    HubTab::Autonomy => self.autonomy_panel(ui),
-                    HubTab::Companion => {
-                        egui::ScrollArea::vertical().show(ui, |ui| self.companion_panel(ui));
-                    }
                     HubTab::Tasks => {
                         section(
                             ui,
@@ -499,21 +478,32 @@ impl Editor {
                         );
                         self.task_panel(ui);
                     }
-                    HubTab::Memory => {
-                        section(
-                            ui,
-                            "Project memory",
-                            "Keep goals and decisions with this workspace.",
-                        );
-                        self.memory_panel(ui);
-                    }
                     HubTab::Skills => {
-                        section(
-                            ui,
-                            "Skills",
-                            "Review reusable instructions and choose them for tasks.",
-                        );
-                        self.skills_panel(ui);
+                        egui::ScrollArea::vertical()
+                            .id_salt("skills-rules")
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                section(
+                                    ui,
+                                    "Skills",
+                                    "Review reusable instructions and choose them for tasks.",
+                                );
+                                self.skills_panel(ui);
+                                ui.add_space(18.0);
+                                section(
+                                    ui,
+                                    "Rules",
+                                    "Strict rules every model, agent and Luma follows.",
+                                );
+                                self.rules_panel(ui);
+                                ui.add_space(18.0);
+                                section(
+                                    ui,
+                                    "Project notes",
+                                    "Goals and decisions kept with this workspace.",
+                                );
+                                self.memory_panel(ui);
+                            });
                     }
                     HubTab::Conversations => {
                         let providers_width = (body.width() * 0.28).clamp(200.0, 260.0);
@@ -878,6 +868,38 @@ impl Editor {
                 }
             }
         });
+    }
+
+    /// Edits the same local rules file as Settings, sharing its draft.
+    fn rules_panel(&mut self, ui: &mut Ui) {
+        let draft_id = egui::Id::new("settings-agent-rules-draft");
+        let loaded_id = egui::Id::new("settings-agent-rules-loaded");
+        let ctx = ui.ctx().clone();
+        if !ctx.data(|d| d.get_temp::<bool>(loaded_id)).unwrap_or(false) {
+            let loaded = super::preferences::Preferences::load_agent_rules();
+            ctx.data_mut(|d| {
+                d.insert_temp(loaded_id, true);
+                d.insert_temp(draft_id, loaded);
+            });
+        }
+        let mut draft: String = ctx.data(|d| d.get_temp(draft_id)).unwrap_or_default();
+        ui.add(
+            egui::TextEdit::multiline(&mut draft)
+                .hint_text(tr(
+                    "Write strict rules for all AI models, Agent Hub, and Luma…",
+                ))
+                .desired_rows(5)
+                .desired_width(f32::INFINITY)
+                .char_limit(24_000),
+        );
+        ui.add_space(6.0);
+        if ui.add(primary(tr("Save rules"))).clicked() {
+            match super::preferences::Preferences::save_agent_rules(&draft) {
+                Ok(_) => self.notice = Some((false, tr("Saved local agent rules.").to_owned())),
+                Err(err) => self.error(format!("Could not save agent rules. {err}")),
+            }
+        }
+        ctx.data_mut(|d| d.insert_temp(draft_id, draft));
     }
 
     fn memory_panel(&mut self, ui: &mut Ui) {
@@ -1890,7 +1912,7 @@ impl Editor {
     pub(super) fn review_fixture(&mut self, screen: &str) {
         self.hub.tab = match screen {
             "tasks" => HubTab::Tasks,
-            "memory" => HubTab::Memory,
+            "memory" => HubTab::Skills,
             "skills" => HubTab::Skills,
             _ => HubTab::Conversations,
         };
