@@ -448,7 +448,7 @@ impl Editor {
                 for (tab, label) in [
                     (HubTab::Sessions, "Agents"),
                     (HubTab::Autonomy, "Orchestrator"),
-                    (HubTab::Accounts, "Accounts"),
+                    (HubTab::Accounts, "Providers"),
                 ] {
                     if row(ui, label, "", self.hub.tab == tab).clicked() {
                         self.hub.tab = tab;
@@ -485,14 +485,7 @@ impl Editor {
             ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
                 ui.set_width(body.width());
                 match self.hub.tab {
-                    HubTab::Accounts => {
-                        section(
-                            ui,
-                            "Providers & accounts",
-                            "Connect Claude Code, Codex and Gemini with their official sign-in or an API key.",
-                        );
-                        self.accounts_panel(ui);
-                    }
+                    HubTab::Accounts => self.accounts_panel(ui),
                     HubTab::Sessions => self.sessions_panel(ui),
                     HubTab::Autonomy => self.autonomy_panel(ui),
                     HubTab::Companion => {
@@ -1622,6 +1615,23 @@ fn round_button(ui: &mut Ui, send: bool, enabled: bool, label: &str) -> egui::Re
 }
 
 pub(super) fn markdown(ui: &mut Ui, text: &str) {
+    render_markdown(ui, text, None);
+}
+
+pub(super) fn markdown_in_project(
+    ui: &mut Ui,
+    text: &str,
+    root: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    render_markdown(ui, text, Some(root))
+}
+
+fn render_markdown(
+    ui: &mut Ui,
+    text: &str,
+    root: Option<&std::path::Path>,
+) -> Option<std::path::PathBuf> {
+    let mut opened = None;
     let fence = char::from(96u8).to_string().repeat(3);
     let mut body = Vec::new();
     let mut language = None;
@@ -1656,21 +1666,77 @@ pub(super) fn markdown(ui: &mut Ui, text: &str) {
                 let (dot, _) = ui.allocate_exact_size(egui::vec2(12.0, 18.0), egui::Sense::hover());
                 ui.painter()
                     .circle_filled(dot.center(), 2.0, colors().accent);
-                ui.add(egui::Label::new(inline(item)).wrap().selectable(true));
+                opened = prose(ui, item, root).or(opened.take());
             });
         } else if line.trim().is_empty() {
             ui.add_space(6.0);
         } else {
-            ui.add(egui::Label::new(inline(line)).wrap().selectable(true));
+            opened = prose(ui, line, root).or(opened);
         }
     }
     if let Some(language) = language {
         code_block(ui, &body.join("\n"), language);
     }
+    opened
+}
+
+fn prose(ui: &mut Ui, line: &str, root: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
+    static LINK: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"\[([^\]\r\n]+)\]\(([^)\r\n]+)\)").expect("Markdown link regex")
+    });
+    let mut paths = Vec::new();
+    let mut shown = String::new();
+    let mut previous = 0;
+    for link in LINK.captures_iter(line) {
+        let token = link.get(0).expect("match");
+        shown.push_str(&line[previous..token.start()]);
+        previous = token.end();
+        if let Some(path) = root.and_then(|root| project_link(&link[2], root)) {
+            shown.push_str(&link[1]);
+            paths.push((link[1].to_owned(), path));
+        } else {
+            shown.push_str(token.as_str());
+        }
+    }
+    shown.push_str(&line[previous..]);
+    ui.add(egui::Label::new(inline(&shown)).wrap().selectable(true));
+    if paths.is_empty() {
+        return None;
+    }
+    ui.horizontal_wrapped(|ui| {
+        paths.into_iter().find_map(|(label, path)| {
+            ui.link(RichText::new(label).monospace())
+                .on_hover_text(path.display().to_string())
+                .clicked()
+                .then_some(path)
+        })
+    })
+    .inner
+}
+
+fn project_link(target: &str, root: &std::path::Path) -> Option<std::path::PathBuf> {
+    let target = target.split('#').next()?;
+    let file_url = target.strip_prefix("file:///");
+    if file_url.is_none() && target.contains("://") {
+        return None;
+    }
+    let path = if let Some(path) = file_url {
+        if cfg!(windows) {
+            std::path::PathBuf::from(path)
+        } else {
+            std::path::Path::new("/").join(path)
+        }
+    } else {
+        std::path::PathBuf::from(target)
+    };
+    let root = root.canonicalize().ok()?;
+    let path = root.join(path).canonicalize().ok()?;
+    (path.starts_with(&root) && path.is_file()).then_some(path)
 }
 
 /// Inline code spans rendered in the monospace face with a soft background.
 fn inline(line: &str) -> egui::text::LayoutJob {
+    let body_size = BODY + 1.0;
     let tick = char::from(96u8);
     let mut job = egui::text::LayoutJob::default();
     for (i, part) in line.split(tick).enumerate() {
@@ -1678,14 +1744,37 @@ fn inline(line: &str) -> egui::text::LayoutJob {
             continue;
         }
         let code = i % 2 == 1;
+        if !code {
+            let mut bold = false;
+            for (index, span) in part.split("**").enumerate() {
+                if index > 0 {
+                    bold = !bold;
+                }
+                job.append(
+                    span,
+                    0.0,
+                    egui::TextFormat {
+                        font_id: egui::FontId::proportional(body_size),
+                        color: if bold {
+                            colors().accent_hover
+                        } else {
+                            colors().text
+                        },
+                        line_height: Some(body_size * 1.5),
+                        ..Default::default()
+                    },
+                );
+            }
+            continue;
+        }
         job.append(
             part,
             0.0,
             egui::TextFormat {
                 font_id: if code {
-                    egui::FontId::monospace(BODY - 0.5)
+                    egui::FontId::monospace(body_size - 0.5)
                 } else {
-                    egui::FontId::proportional(BODY)
+                    egui::FontId::proportional(body_size)
                 },
                 color: if code {
                     colors().accent_hover
@@ -1697,7 +1786,7 @@ fn inline(line: &str) -> egui::text::LayoutJob {
                 } else {
                     egui::Color32::TRANSPARENT
                 },
-                line_height: Some(BODY * 1.5),
+                line_height: Some(body_size * 1.5),
                 ..Default::default()
             },
         );

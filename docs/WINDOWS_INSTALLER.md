@@ -1,6 +1,6 @@
 # COVALOS Windows installer
 
-The distributable is `dist/Covalos-0.4.0-Windows-x64-Setup.exe` (about 6 MB). Run it normally. It installs for the current Windows user without administrator access.
+The distributable is `dist/Covalos-0.8.3-Windows-x64-Setup.exe` (about 6 MB). Run it normally. It installs for the current Windows user without administrator access.
 
 - Default location: `%LOCALAPPDATA%\Programs\Covalos`.
 - Registered in Windows Settings > Apps > Installed apps, with an uninstaller.
@@ -8,7 +8,7 @@ The distributable is `dist/Covalos-0.4.0-Windows-x64-Setup.exe` (about 6 MB). Ru
 - Spanish and English wizard. No file extension defaults or user PATH changes.
 - Re-running the setup updates the existing installation using a stable application ID.
 - Uninstallation removes installed files and registrations, preserving preferences, projects, legacy AEROS profiles and files the installer did not create.
-- Windows 10/11 x64; the editor needs an OpenGL-capable graphics driver. Only Windows system DLLs are imported by the packaged binary. Rust, Node.js and Git are not needed to start the editor; developer integrations still need their respective tools.
+- Windows 10/11 x64; the editor needs an OpenGL-capable graphics driver. The installer includes the x64 WebView2 loader required by the Windows GNU build. The embedded web preview uses the Microsoft Edge WebView2 Runtime. Rust, Node.js and Git are not needed to start the editor; developer integrations still need their respective tools.
 - This build is **unsigned**. Production Authenticode signing requires a code-signing certificate; no certificate was available for this build.
 
 ## Rebuild
@@ -30,7 +30,7 @@ The script checks the executable's COVALOS identity, version and x64 PE architec
 ## Validation
 
 ~~~powershell
-node .\tools\verify-windows-installer.cjs --installer .\dist\Covalos-0.4.0-Windows-x64-Setup.exe --binary E:\workspace\covalos-build\release\covalos.exe
+node .\tools\verify-windows-installer.cjs --installer .\dist\Covalos-0.8.3-Windows-x64-Setup.exe --binary E:\workspace\covalos-build\release\covalos.exe
 ~~~
 
 This verifier refuses an existing COVALOS installation/integration. It installs into a temporary directory containing spaces and Unicode, checks the installed binary hash, Windows registration, App Paths, quoted file/folder context commands and the installed Library Studio CLI; then reinstalls and uninstalls. It checks that settings and untracked user files survive and all application registry entries are removed. It uses `/NOICONS` to keep the user's real desktop and Start menu untouched; shortcut definitions were compiled and reviewed, not exercised by this automatic test.

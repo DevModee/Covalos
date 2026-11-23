@@ -106,7 +106,7 @@ impl Editor {
             } else if shortcut(Modifiers::NONE, Key::F3) {
                 self.find(false);
             }
-            if shortcut(Modifiers::NONE, Key::Escape) {
+            if self.entry_draft.is_none() && shortcut(Modifiers::NONE, Key::Escape) {
                 self.find_open = false;
                 self.focus_editor = true;
             }
@@ -114,11 +114,17 @@ impl Editor {
     }
 
     fn show_new_file(&mut self) {
-        if self.root.is_some() {
-            self.notice = None;
-            self.new_file = Some(String::new());
-            self.focus_new_file = true;
+        if let Some(dir) = self.editor_directory() {
+            self.begin_entry(super::files::EntryKind::File, dir, None);
         }
+    }
+
+    pub(super) fn editor_directory(&self) -> Option<std::path::PathBuf> {
+        self.active
+            .and_then(|i| self.documents.get(i))
+            .and_then(|doc| doc.path.parent())
+            .or(self.root.as_deref())
+            .map(Path::to_owned)
     }
 
     pub(super) fn toggle_sidebar(&mut self) {
@@ -172,8 +178,11 @@ impl Editor {
                         let (_, mark) = ui.allocate_space(egui::vec2(22.0, 28.0));
                         draw_icon(ui.painter(), mark.center(), Icon::Brand, colors().accent);
                         ui.label(RichText::new(BRAND).size(LEAD).strong());
-                        ui.label(RichText::new("Alpha").size(SMALL).color(colors().muted))
-                            .on_hover_text(crate::brand::RELEASE);
+                        ui.label(
+                            RichText::new(crate::brand::RELEASE)
+                                .size(SMALL)
+                                .color(colors().muted),
+                        );
                         ui.add_space(8.0);
                         ui.menu_button(tr("File"), |ui| {
                             if ui.button(tr("Library Studio")).clicked() {
@@ -245,10 +254,13 @@ impl Editor {
                 // side zones are, and shrinks before it would touch them.
                 let side = left_width.max(right_width) + 16.0;
                 let command_width = (rect.width() - 2.0 * side).min(520.0);
-                let command = egui::Rect::from_center_size(
+                let mut command = egui::Rect::from_center_size(
                     rect.center(),
                     egui::vec2(command_width.max(0.0), 30.0),
                 );
+                // Keep room for the back/forward arrows between the left zone and the field.
+                command.min.x = command.min.x.max(rect.left() + left_width + 68.0);
+                let command_width = command.width();
                 if command_width >= 140.0 {
                     ui.scope_builder(egui::UiBuilder::new().max_rect(command), |ui| {
                         let response = ui.add_sized(
@@ -296,6 +308,39 @@ impl Editor {
                             self.open_palette(ctx);
                         }
                     });
+                    // Back and forward sit just left of the command field, like a browser.
+                    let arrows = egui::Rect::from_min_max(
+                        egui::pos2(command.left() - 64.0, rect.top()),
+                        egui::pos2(command.left() - 4.0, rect.bottom()),
+                    );
+                    ui.scope_builder(
+                        egui::UiBuilder::new()
+                            .max_rect(arrows)
+                            .layout(Layout::left_to_right(Align::Center)),
+                        |ui| {
+                            ui.spacing_mut().item_spacing.x = 2.0;
+                            let back = ui
+                                .add_enabled_ui(self.nav.can_go_back(), |ui| {
+                                    icon_button(ui, Icon::Back, tr("Go back (Alt+Left)"), false)
+                                })
+                                .inner;
+                            let forward = ui
+                                .add_enabled_ui(self.nav.can_go_forward(), |ui| {
+                                    icon_button(
+                                        ui,
+                                        Icon::ChevronRight,
+                                        tr("Go forward (Alt+Right)"),
+                                        false,
+                                    )
+                                })
+                                .inner;
+                            if back.clicked() {
+                                self.go_back();
+                            } else if forward.clicked() {
+                                self.go_forward();
+                            }
+                        },
+                    );
                 }
                 let right = egui::Rect::from_min_max(
                     egui::pos2(rect.right() - right_width, rect.top()),
@@ -442,6 +487,7 @@ impl Editor {
                         (Sidebar::Files, Icon::Explorer, "Explorer"),
                         (Sidebar::Search, Icon::Search, "Search"),
                         (Sidebar::Git, Icon::Git, "Source control"),
+                        (Sidebar::Chats, Icon::History, "Conversations"),
                     ] {
                         let shown =
                             !self.studio_open && self.sidebar_visible() && self.sidebar == tab;
@@ -483,12 +529,8 @@ impl Editor {
                     if icon_button(ui, Icon::Settings, "Settings", self.settings_open).clicked() {
                         self.settings_open = !self.settings_open;
                     }
-                    let bell = icon_button(
-                        ui,
-                        Icon::Bell,
-                        "Notifications",
-                        self.notifications_open,
-                    );
+                    let bell =
+                        icon_button(ui, Icon::Bell, "Notifications", self.notifications_open);
                     if self.notifications.iter().any(|n| n.unread) {
                         ui.painter().circle_filled(
                             bell.rect.right_top() + egui::vec2(-6.0, 6.0),
@@ -576,7 +618,7 @@ impl Editor {
         let zoom = self.preferences.explorer_zoom;
         EXPLORER_ZOOM.with(|z| z.set(zoom));
         // Bounds: never squeeze the editor below its minimum, never collapse the tree.
-        let assistant = if self.preferences.assistant_open {
+        let assistant = if self.preferences.assistant_open && !self.in_session_home() {
             self.preferences.assistant_width
         } else {
             0.0
@@ -596,12 +638,14 @@ impl Editor {
                 // Integrated compact header: collapse toggle, workspace pill, and view actions.
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
-                    if icon_button(ui, Icon::PanelLeft, "Toggle sidebar", false).clicked() {
+                    if icon_button_sized(ui, Icon::PanelLeft, "Toggle sidebar", false, 24.0)
+                        .clicked()
+                    {
                         collapse_sidebar = true;
                     }
                     if let Some(root) = self.root.clone() {
                         let actions_w = if self.sidebar == Sidebar::Files {
-                            68.0
+                            50.0
                         } else {
                             0.0
                         };
@@ -612,8 +656,8 @@ impl Editor {
                                 Layout::left_to_right(Align::Center),
                                 |ui| {
                                     ui.set_min_width(ui.available_width());
-                                    let (_, icon_rect) =
-                                        ui.allocate_space(egui::vec2(16.0, 18.0));
+                                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                                    let (_, icon_rect) = ui.allocate_space(egui::vec2(16.0, 18.0));
                                     draw_icon_sized(
                                         ui.painter(),
                                         icon_rect.center(),
@@ -632,12 +676,25 @@ impl Editor {
                         if self.sidebar == Sidebar::Files {
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 ui.spacing_mut().item_spacing.x = 2.0;
-                                if icon_button(ui, Icon::Refresh, "Refresh files", false).clicked()
+                                if icon_button_sized(
+                                    ui,
+                                    Icon::Refresh,
+                                    "Refresh files",
+                                    false,
+                                    24.0,
+                                )
+                                .clicked()
                                 {
                                     self.directories.clear();
                                 }
-                                if icon_button(ui, Icon::FilePlus, "New file", false).clicked() {
-                                    self.show_new_file();
+                                if icon_button_sized(ui, Icon::FilePlus, "New file", false, 24.0)
+                                    .clicked()
+                                {
+                                    self.begin_entry(
+                                        super::files::EntryKind::File,
+                                        root.clone(),
+                                        None,
+                                    );
                                 }
                             });
                         }
@@ -646,6 +703,7 @@ impl Editor {
                             Sidebar::Files => "Explorer",
                             Sidebar::Search => "Search",
                             Sidebar::Git => "Git",
+                            Sidebar::Chats => "Conversations",
                         };
                         ui.add(
                             egui::Label::new(
@@ -656,36 +714,32 @@ impl Editor {
                     }
                 });
                 ui.add_space(6.0);
+                if self.sidebar == Sidebar::Chats {
+                    self.conversations_sidebar(ui);
+                    return;
+                }
                 let Some(root) = self.root.clone() else {
-                    ui.label(muted(tr("Open a folder to browse files.")));
+                    if self.entry_draft.is_some() && self.sidebar == Sidebar::Files {
+                        self.entry_row(ui);
+                    } else {
+                        ui.label(muted(tr("Open a folder to browse files.")));
+                    }
                     return;
                 };
                 match self.sidebar {
                     Sidebar::Files => {
-                        // Compact live filter for quickly narrowing visible files in the tree.
-                        ui.horizontal(|ui| {
-                            let clear_w = if self.explorer_filter.is_empty() {
-                                0.0
-                            } else {
-                                24.0
-                            };
-                            ui.add(
-                                TextEdit::singleline(&mut self.explorer_filter)
-                                    .hint_text(tr("Filter files…"))
-                                    .margin(Margin::symmetric(8, 4))
-                                    .desired_width((ui.available_width() - clear_w).max(60.0))
-                                    .char_limit(120),
+                        if self.entry_draft.is_some() {
+                            self.entry_row(ui);
+                        } else {
+                            search_field(
+                                ui,
+                                "explorer-filter",
+                                &mut self.explorer_filter,
+                                "Filter files\u{2026}",
+                                120,
                             );
-                            if !self.explorer_filter.is_empty()
-                                && ui
-                                    .small_button("×")
-                                    .on_hover_text(tr("Clear filter"))
-                                    .clicked()
-                            {
-                                self.explorer_filter.clear();
-                            }
-                        });
-                        ui.add_space(6.0);
+                            ui.add_space(5.0);
+                        }
                         let filter = self.explorer_filter.trim().to_ascii_lowercase();
                         let active = self
                             .active
@@ -693,29 +747,27 @@ impl Editor {
                         let from_tree = ScrollArea::vertical()
                             .id_salt("files")
                             .show(ui, |ui| {
-                                tree(
-                                    ui,
-                                    &root,
-                                    &root,
-                                    active,
-                                    &filter,
-                                    &mut self.directories,
-                                    0,
-                                )
+                                tree(ui, &root, &root, active, &filter, &mut self.directories, 0)
                             })
                             .inner;
-                        if let Some(action) = selected.or(from_tree) {
-                            self.tree_action(action);
+                        let background = ui.allocate_response(
+                            ui.available_size().max(egui::Vec2::ZERO),
+                            egui::Sense::click(),
+                        );
+                        #[cfg(test)]
+                        super::motion::record(ui, "Explorer background", background.rect);
+                        let blank = super::files::creation_context(&background, &root);
+                        if let Some(action) = selected.or(from_tree).or(blank) {
+                            self.tree_action(action, ui.ctx());
                         }
                     }
                     Sidebar::Search => self.search_panel(ui, &root),
                     Sidebar::Git => self.git_panel(ui),
+                    Sidebar::Chats => unreachable!(),
                 }
             });
         let width = panel.response.rect.width();
-        if collapse_sidebar
-            || (width < 140.0 * zoom && !ctx.input(|i| i.pointer.any_down()))
-        {
+        if collapse_sidebar || (width < 140.0 * zoom && !ctx.input(|i| i.pointer.any_down())) {
             self.toggle_sidebar();
             self.preferences.sidebar_width = 240.0;
         } else {
@@ -725,11 +777,12 @@ impl Editor {
     }
 
     fn search_panel(&mut self, ui: &mut Ui, root: &Path) {
-        let response = ui.add(
-            TextEdit::singleline(&mut self.workspace_query)
-                .hint_text(tr("Find text in files"))
-                .desired_width(f32::INFINITY)
-                .char_limit(200),
+        let response = search_field(
+            ui,
+            "workspace-search",
+            &mut self.workspace_query,
+            "Find text in files",
+            200,
         );
         if std::mem::take(&mut self.search_focus) {
             response.request_focus();
@@ -823,6 +876,26 @@ impl Editor {
 
     pub(super) fn editor_panel(&mut self, ui: &mut Ui) {
         self.clean.dock_target = Some(ui.max_rect());
+        let directory = self.editor_directory();
+        if let Some(dir) = &directory {
+            let backdrop = ui.interact(
+                ui.max_rect(),
+                ui.id().with("editor-background"),
+                egui::Sense::click(),
+            );
+            #[cfg(test)]
+            super::motion::record(
+                ui,
+                "Home background",
+                egui::Rect::from_min_size(
+                    ui.max_rect().min + egui::vec2(24.0, 38.0),
+                    egui::Vec2::splat(8.0),
+                ),
+            );
+            if let Some(action) = super::files::creation_context(&backdrop, dir) {
+                self.tree_action(action, ui.ctx());
+            }
+        }
         if self.sidebar == Sidebar::Git && self.tools.showing_diff() {
             self.git_diff_surface(ui);
             return;
@@ -852,6 +925,7 @@ impl Editor {
             ui.separator();
         }
         let Some(index) = self.active else { return };
+        let mut context_action = None;
         let mut detach_active = false;
         let mut open_find = false;
         let mut toggle_terminal = false;
@@ -1007,6 +1081,20 @@ impl Editor {
                         .desired_width(ui.available_width())
                         .layouter(&mut layouter)
                         .show(ui);
+                    if let Some(dir) = &directory {
+                        #[cfg(test)]
+                        super::motion::record(
+                            ui,
+                            "Document text",
+                            output.response.rect.intersect(ui.clip_rect()),
+                        );
+                        context_action = super::files::document_context(
+                            &output.response,
+                            dir,
+                            &doc.path,
+                            self.root.as_deref(),
+                        );
+                    }
                     super::lsp::after_edit(ui, &mut self.lsp, doc, id, &output, popup_key);
                     if focus {
                         output.response.request_focus();
@@ -1164,6 +1252,9 @@ impl Editor {
                     }
                 });
             });
+        if let Some(action) = context_action {
+            self.tree_action(action, ui.ctx());
+        }
     }
 
     fn tabs(&mut self, ui: &mut Ui) {
@@ -1252,8 +1343,7 @@ impl Editor {
                                             }
                                             super::assets::file(
                                                 ui,
-                                                response.rect.left_center()
-                                                    + egui::vec2(16.0, 0.0),
+                                                response.rect.left_center() + egui::vec2(16.0, 0.0),
                                                 &document.path,
                                             );
                                             let text_rect = egui::Rect::from_min_max(
@@ -1334,9 +1424,8 @@ impl Editor {
                                                     ui.close();
                                                 }
                                             });
-                                            response.on_hover_text(
-                                                document.path.display().to_string(),
-                                            );
+                                            response
+                                                .on_hover_text(document.path.display().to_string());
                                             close_response.on_hover_text(tr("Close tab"));
                                         }
                                         if let Some(rect) = indicator {
@@ -1359,10 +1448,7 @@ impl Editor {
                                                     egui::Shape::rect_stroke(
                                                         pill,
                                                         12,
-                                                        egui::Stroke::new(
-                                                            1.0_f32,
-                                                            colors().border,
-                                                        ),
+                                                        egui::Stroke::new(1.0_f32, colors().border),
                                                         egui::StrokeKind::Inside,
                                                     ),
                                                 ]),
@@ -1451,6 +1537,13 @@ impl Editor {
         });
     }
 
+    pub(super) fn in_session_home(&self) -> bool {
+        self.root.is_some()
+            && !self.hub_open
+            && !(self.sidebar == Sidebar::Git && self.tools.showing_diff())
+            && (self.documents.is_empty() || self.active.is_none())
+    }
+
     pub(super) fn assistant_panel(&mut self, ctx: &Context) {
         let max_width = (ctx.content_rect().width() * 0.30)
             .min(
@@ -1461,14 +1554,14 @@ impl Editor {
             )
             .clamp(240.0, 520.0);
         let id = Id::new("assistant-panel-motion");
+        if self.in_session_home() {
+            return;
+        }
+        let show_right_dock = self.preferences.assistant_open;
         let progress = super::motion::spring(
             ctx,
             id,
-            if self.preferences.assistant_open {
-                1.0
-            } else {
-                0.0
-            },
+            if show_right_dock { 1.0 } else { 0.0 },
             super::motion::Spring::SMOOTH,
         )
         .clamp(0.0, 1.0);
@@ -1497,10 +1590,8 @@ impl Editor {
             let avail_w = ui.available_width().max(1.0);
             ui.set_min_width(avail_w);
             let origin = ui.available_rect_before_wrap().min;
-            let rect = egui::Rect::from_min_size(
-                origin,
-                egui::vec2(avail_w, ui.available_height()),
-            );
+            let rect =
+                egui::Rect::from_min_size(origin, egui::vec2(avail_w, ui.available_height()));
             let mut content = ui.new_child(
                 egui::UiBuilder::new()
                     .id_salt("assistant-content")
@@ -1570,47 +1661,6 @@ impl Editor {
                 }
                 None if !modal.should_close() => self.pending = Some(action),
                 None => {}
-            }
-        }
-        if let Some(mut name) = self.new_file.take() {
-            let modal = egui::Modal::new(Id::new("new_file"))
-                .frame(modal_frame())
-                .show(ctx, |ui| {
-                    ui.heading(tr("New file"));
-                    if let Some((true, message)) = &self.notice {
-                        ui.label(RichText::new(message).color(colors().error));
-                    }
-                    let input = ui.add(
-                        TextEdit::singleline(&mut name)
-                            .hint_text(tr("Path relative to the workspace"))
-                            .desired_width(310.0)
-                            .char_limit(260),
-                    );
-                    if std::mem::take(&mut self.focus_new_file) {
-                        input.request_focus();
-                    }
-                    let enter =
-                        input.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
-                    ui.add_space(5.0);
-                    ui.horizontal(|ui| {
-                        if ui.button(tr("Cancel")).clicked() {
-                            return Some(false);
-                        }
-                        if ui
-                            .add_enabled(!name.trim().is_empty(), primary(tr("Create")))
-                            .clicked()
-                            || (enter && !name.trim().is_empty())
-                        {
-                            return Some(true);
-                        }
-                        None
-                    })
-                    .inner
-                });
-            match modal.inner {
-                Some(true) if !self.create_file(&name) => self.new_file = Some(name),
-                None if !modal.should_close() => self.new_file = Some(name),
-                _ => {}
             }
         }
     }
@@ -1873,7 +1923,7 @@ fn tree(
                 let name = workspace::filename(&entry.path);
                 let matches = filter.is_empty() || name.to_ascii_lowercase().contains(filter);
                 if entry.directory {
-                    let id = ui.make_persistent_id(("tree", &entry.path));
+                    let id = Id::new(("explorer-dir", &entry.path));
                     let mut state =
                         egui::collapsing_header::CollapsingState::load_with_default_open(
                             ui.ctx(),

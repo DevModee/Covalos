@@ -1,6 +1,7 @@
 //! Agent conversations: one chat surface backed by real runtime sessions, used
 //! by the editor's right dock, the Agents page (with an optional split) and
 //! detached windows. Everything shown comes from the session's own state.
+use crate::agents_runtime::ClaudeModes;
 use std::path::PathBuf;
 
 use covalos_agents::{Account, AccountId, ConnectionMethod, ProviderKind, permission::Preset};
@@ -41,13 +42,13 @@ pub(super) struct ChatState {
     pub(super) detached: Vec<String>,
     pub(super) target: Target,
     pub(super) model: Option<String>,
-    pub(super) effort: String,
-    custom_model: String,
+    pub(super) effort: Option<String>,
+    claude_modes: ClaudeModes,
+    picker: ModelPicker,
     preset: usize,
     worktree: bool,
     draft: String,
     attach: bool,
-    pub(super) add_ai: Option<AddAi>,
     changes: Vec<(String, Result<String, String>)>,
     diff: Option<(String, String, String)>,
     pub(super) restored: bool,
@@ -62,13 +63,13 @@ impl Default for ChatState {
             detached: Vec::new(),
             target: Target::Auto,
             model: None,
-            effort: "Medium".into(),
-            custom_model: String::new(),
+            effort: None,
+            claude_modes: ClaudeModes::default(),
+            picker: ModelPicker::default(),
             preset: 1,
             worktree: false,
             draft: String::new(),
             attach: true,
-            add_ai: None,
             changes: Vec::new(),
             diff: None,
             restored: false,
@@ -100,124 +101,585 @@ impl ChatState {
     }
 }
 
-#[derive(Default)]
-pub(super) struct AddAi {
-    provider: usize,
-    method: usize,
-    label: String,
-    model: String,
-    key: String,
-    created: Option<AccountId>,
-    error: Option<String>,
-    install: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
-}
-
-fn cli_npm_package(provider: usize) -> Option<&'static str> {
-    match provider {
-        0 => Some("@anthropic-ai/claude-code"),
-        1 => Some("@openai/codex"),
-        2 => Some("@google/gemini-cli"),
-        _ => None,
-    }
-}
-
-fn spawn_cli_install(
-    package: &'static str,
-    ctx: egui::Context,
-) -> std::sync::mpsc::Receiver<Result<(), String>> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let mut command = std::process::Command::new(if cfg!(windows) { "npm.cmd" } else { "npm" });
-        crate::process::configure(&mut command);
-        let result = command
-            .args(["install", "-g", package])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped())
-            .output()
-            .map_err(|e| format!("Could not run npm (install Node.js first): {e}"))
-            .and_then(|out| {
-                if out.status.success() {
-                    Ok(())
-                } else {
-                    let stderr = String::from_utf8_lossy(&out.stderr);
-                    let line = stderr
-                        .lines()
-                        .rev()
-                        .find(|l| !l.trim().is_empty())
-                        .unwrap_or("npm install failed");
-                    Err(line.trim().to_owned())
-                }
-            });
-        let _ = tx.send(result);
-        ctx.request_repaint();
-    });
-    rx
-}
-
 enum Action {
     Select(Slot, Option<String>),
     Detach(String),
     Open(PathBuf),
     OpenGuided(String),
+    Fork(covalos_agents::SessionId, usize),
     Objective(String),
     OpenOrchestrator,
     AddAi,
 }
 
-pub(super) fn curated_cli_models(kind: &ProviderKind) -> &'static [(&'static str, &'static str)] {
-    match kind {
-        ProviderKind::ClaudeCode => &[
-            ("claude-opus-5-5", "Opus 5.5"),
-            ("claude-sonnet-5-5", "Sonnet 5.5"),
-            ("claude-haiku-5-5", "Haiku 5.5"),
-        ],
-        ProviderKind::Gemini => &[
-            ("gemini-4-argon", "Gemini 4 Argon"),
-            ("gemini-4-neon", "Gemini 4 Neon"),
-            ("gemini-4-hydrogen", "Gemini 4 Hydrogen"),
-            ("gemini-3.8-flash", "Gemini 3.8 Flash"),
-        ],
-        ProviderKind::Codex => &[
-            ("gpt-5.4", "GPT-5.4"),
-            ("gpt-5.3-codex", "GPT-5.3 Codex"),
-            ("gpt-5.2-codex", "GPT-5.2 Codex"),
-            ("o4-mini", "o4-mini"),
-        ],
-        _ => &[],
-    }
+pub(super) fn provider_mark(ui: &mut Ui, kind: &ProviderKind, side: f32) {
+    let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(side), egui::Sense::hover());
+    draw_provider_mark(ui, rect, kind);
 }
 
-pub(super) fn curated_model_label(id: &str) -> Option<&'static str> {
-    [
-        ProviderKind::ClaudeCode,
-        ProviderKind::Gemini,
-        ProviderKind::Codex,
-    ]
-    .iter()
-    .flat_map(curated_cli_models)
-    .find(|(m_id, _)| *m_id == id)
-    .map(|(_, label)| *label)
-}
-
-pub(super) fn model_belongs_to_provider(model: &str, provider: &ProviderKind) -> bool {
-    let lower = model.trim().to_ascii_lowercase();
-    if lower.is_empty() {
-        return false;
-    }
-    match provider {
-        ProviderKind::ClaudeCode => {
-            !lower.starts_with("gemini")
-                && !lower.starts_with("gpt-")
-                && !lower.starts_with("o1")
-                && !lower.starts_with("o3")
-                && !lower.starts_with("o4")
-                && !lower.contains("codex")
+fn draw_provider_mark(ui: &Ui, rect: egui::Rect, kind: &ProviderKind) {
+    use crate::assistant::Provider;
+    let provider = match kind {
+        ProviderKind::ClaudeCode => Provider::Claude,
+        ProviderKind::Codex => Provider::Codex,
+        ProviderKind::Gemini => Provider::Gemini,
+        ProviderKind::Antigravity => Provider::Antigravity,
+        _ => {
+            draw_icon_sized(
+                ui.painter(),
+                rect.center(),
+                Icon::Terminal,
+                colors().secondary,
+                rect.width().min(rect.height()),
+            );
+            return;
         }
-        ProviderKind::Codex => !lower.starts_with("claude") && !lower.starts_with("gemini"),
-        ProviderKind::Gemini => lower.starts_with("gemini"),
-        _ => true,
+    };
+    super::brands::mark(ui.painter(), rect, provider);
+}
+
+fn effort_label(value: &str) -> &str {
+    tr(match value {
+        "none" => "None",
+        "minimal" => "Minimal",
+        "low" => "Low",
+        "medium" => "Medium",
+        "high" => "High",
+        "xhigh" => "Extra High",
+        "max" => "Max",
+        "ultra" => "Ultra",
+        _ => value,
+    })
+}
+
+#[derive(Default)]
+struct PickerState {
+    search: String,
+    favorites_only: bool,
+    show_more: bool,
+}
+
+type Favorite = (AccountId, String);
+
+#[derive(Clone, Default, PartialEq)]
+pub(super) struct ModelChoice {
+    account: Option<AccountId>,
+    model: Option<String>,
+    effort: Option<String>,
+    claude_modes: ClaudeModes,
+}
+
+impl ModelChoice {
+    fn select(&mut self, account: &AccountId, model: &crate::agent_provider::Model) {
+        if self.account.as_ref() != Some(account) || self.model.as_ref() != Some(&model.id) {
+            self.claude_modes = ClaudeModes::default();
+            self.account = Some(account.clone());
+            self.model = Some(model.id.clone());
+            self.effort = model
+                .default_effort
+                .clone()
+                .filter(|level| model.efforts.contains(level));
+        }
     }
+}
+
+#[derive(Default)]
+pub(super) struct ModelPicker {
+    pub(super) favorites: std::collections::BTreeSet<Favorite>,
+    state: PickerState,
+}
+
+fn picker_divider(ui: &mut Ui, height: f32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(1.0, height), egui::Sense::hover());
+    ui.painter().vline(
+        rect.center().x,
+        rect.y_range(),
+        egui::Stroke::new(1.0_f32, colors().border),
+    );
+}
+
+pub(super) fn model_picker(
+    ui: &mut Ui,
+    runtime: &Runtime,
+    choice: &mut ModelChoice,
+    picker: &mut ModelPicker,
+    locked_account: Option<&AccountId>,
+) -> bool {
+    let accounts: Vec<_> = chat_accounts(runtime)
+        .into_iter()
+        .filter(|a| locked_account.is_none_or(|id| id == &a.id))
+        .collect();
+    let account = choice
+        .account
+        .as_ref()
+        .and_then(|id| accounts.iter().find(|a| &a.id == id));
+    if let Some(account) = account {
+        let models = runtime.models(&account.id);
+        let legacy_default = account.provider == ProviderKind::ClaudeCode
+            && choice.model.as_deref() == Some("default");
+        if (choice.model.is_none() || legacy_default)
+            && let Some(model) = models
+                .iter()
+                .find(|m| m.is_default)
+                .or_else(|| models.first())
+        {
+            choice.select(&account.id, model);
+        }
+    }
+    let model = account.and_then(|a| {
+        let models = runtime.models(&a.id);
+        choice
+            .model
+            .as_ref()
+            .and_then(|id| models.iter().find(|m| &m.id == id))
+            .or_else(|| {
+                choice
+                    .model
+                    .is_none()
+                    .then(|| models.iter().find(|m| m.is_default))
+                    .flatten()
+            })
+    });
+    if let Some(model) = model
+        && let Some(stored) = &choice.effort
+        && !model.efforts.contains(stored)
+    {
+        choice.effort = model
+            .efforts
+            .iter()
+            .find(|e| e.eq_ignore_ascii_case(stored))
+            .cloned();
+    }
+    let name = model.map_or_else(
+        || {
+            if accounts.is_empty() {
+                tr("Connect account")
+            } else if choice.model.is_some() {
+                tr("Model unavailable")
+            } else {
+                tr("Select model")
+            }
+        },
+        |model| &model.name,
+    );
+    let effort = model.and_then(|m| {
+        choice
+            .effort
+            .as_ref()
+            .filter(|level| m.efforts.contains(level))
+            .or(m.default_effort.as_ref())
+    });
+    let mut label = effort.map_or_else(
+        || name.to_owned(),
+        |effort| format!("{name} {}", effort_label(effort)),
+    );
+    if choice.claude_modes.fast {
+        label.push_str(" \u{26a1}");
+    }
+    if choice.claude_modes.ultracode {
+        label.push_str(" \u{00b7} Ultra");
+    }
+    let response = ui
+        .horizontal(|ui| {
+            let text = RichText::new(&label).size(SMALL).color(colors().text);
+            let padding = if account.is_some() { 28.0 } else { 0.0 };
+            ui.spacing_mut().button_padding.x += padding * 0.5;
+            let response = ui.add(
+                egui::Button::new(text)
+                    .truncate()
+                    .stroke(egui::Stroke::NONE)
+                    .fill(if super::theme::active() == super::theme::Theme::OledDark {
+                        egui::Color32::from_gray(26)
+                    } else {
+                        colors().elevated
+                    })
+                    .corner_radius(CONTROL_RADIUS),
+            );
+            if let Some(account) = account {
+                let mark_rect = egui::Rect::from_center_size(
+                    response.rect.left_center() + egui::vec2(12.0, 0.0),
+                    egui::Vec2::splat(13.0),
+                );
+                draw_provider_mark(ui, mark_rect, &account.provider);
+            }
+            response.on_hover_text(if choice.claude_modes.fast {
+                format!(
+                    "{label}\n{}",
+                    tr("Request Fast from Claude. Uses separately billed credits when available.")
+                )
+            } else {
+                label
+            })
+        })
+        .inner;
+    #[cfg(test)]
+    super::motion::record(ui, "Model picker", response.rect);
+    if accounts.is_empty() {
+        return response.clicked();
+    }
+    let width = (ui.ctx().content_rect().width() - 32.0).clamp(330.0, 430.0);
+    let mut open_providers = false;
+    egui::Popup::menu(&response)
+        .align(egui::RectAlign::BOTTOM_END)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .width(width)
+        .frame(
+            Frame::new()
+                .fill(colors().surface)
+                .stroke(egui::Stroke::new(1.0_f32, colors().control_border))
+                .corner_radius(ISLAND_RADIUS)
+                .inner_margin(Margin::same(6)),
+        )
+        .show(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(5.0, 2.0);
+            ui.spacing_mut().interact_size.y = 22.0;
+            ui.spacing_mut().button_padding = egui::vec2(5.0, 2.0);
+            let rail_width = 42.0;
+            let effort_width = 99.0;
+            let model_width = width - rail_width - effort_width - 22.0;
+            let height = (ui.ctx().content_rect().height() * 0.30).clamp(145.0, 195.0);
+            let state = &mut picker.state;
+            ui.horizontal_top(|ui| {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(rail_width, height),
+                    Layout::top_down(Align::Center),
+                    |ui| {
+                        if icon_button_sized(
+                            ui,
+                            Icon::Star,
+                            "Favorites",
+                            state.favorites_only,
+                            24.0,
+                        )
+                        .clicked()
+                        {
+                            state.favorites_only = true;
+                            state.show_more = false;
+                        }
+                        ScrollArea::vertical()
+                            .id_salt("accounts")
+                            .max_height(height - 26.0)
+                            .show(ui, |ui| {
+                                for account in &accounts {
+                                    let selected = !state.favorites_only
+                                        && choice.account.as_ref() == Some(&account.id);
+                                    let tip = match runtime.connection.get(&account.id) {
+                                        Some(Connection::SignedIn(identity)) => {
+                                            identity.email.as_ref().map_or_else(
+                                                || account.label.clone(),
+                                                |email| {
+                                                    format!("{} \u{00b7} {email}", account.label)
+                                                },
+                                            )
+                                        }
+                                        _ => account.label.clone(),
+                                    };
+                                    let response = ui
+                                        .add(
+                                            egui::Button::new("")
+                                                .selected(selected)
+                                                .min_size(egui::vec2(27.0, 24.0)),
+                                        )
+                                        .on_hover_text(&tip);
+                                    response.widget_info(|| {
+                                        egui::WidgetInfo::selected(
+                                            egui::WidgetType::SelectableLabel,
+                                            true,
+                                            selected,
+                                            &tip,
+                                        )
+                                    });
+                                    draw_provider_mark(
+                                        ui,
+                                        egui::Rect::from_center_size(
+                                            response.rect.center(),
+                                            egui::Vec2::splat(16.0),
+                                        ),
+                                        &account.provider,
+                                    );
+                                    if response.clicked() {
+                                        if choice.account.as_ref() != Some(&account.id) {
+                                            choice.account = Some(account.id.clone());
+                                            choice.model = None;
+                                            choice.effort = None;
+        choice.claude_modes = ClaudeModes::default();
+                                            let models = runtime.models(&account.id);
+                                            if let Some(m) = models
+                                                .iter()
+                                                .find(|m| m.is_default)
+                                                .or_else(|| models.first())
+                                            {
+                                                choice.select(&account.id, m);
+                                            }
+                                        }
+                                        state.favorites_only = false;
+                                        state.show_more = false;
+                                    }
+                                    if accounts
+                                        .iter()
+                                        .filter(|a| a.provider == account.provider)
+                                        .count()
+                                        > 1
+                                    {
+                                        ui.add_sized(
+                                            [rail_width, 14.0],
+                                            egui::Label::new(muted(&account.label)).truncate(),
+                                        )
+                                        .on_hover_text(tip);
+                                    }
+                                }
+                            });
+                    },
+                );
+                picker_divider(ui, height);
+                ui.allocate_ui_with_layout(
+                    egui::vec2(model_width, height),
+                    Layout::top_down(Align::Min),
+                    |ui| {
+                        ui.set_width(model_width);
+                        ui.set_max_width(model_width);
+                        let search = ui.add(
+                            TextEdit::singleline(&mut state.search)
+                                .hint_text(tr("Search models..."))
+                                .desired_width(model_width),
+                        );
+                        if response.clicked() {
+                            search.request_focus();
+                        }
+                        let query = state.search.trim().to_lowercase();
+                        let mut models = Vec::new();
+                        for account in &accounts {
+                            if !state.favorites_only && choice.account.as_ref() != Some(&account.id)
+                            {
+                                continue;
+                            }
+                            for model in runtime.models(&account.id) {
+                                if state.favorites_only
+                                    && !picker
+                                        .favorites
+                                        .contains(&(account.id.clone(), model.id.clone()))
+                                {
+                                    continue;
+                                }
+                                if model.name.to_lowercase().contains(&query)
+                                    || model.id.to_lowercase().contains(&query)
+                                {
+                                    models.push((account, model));
+                                }
+                            }
+                        }
+                        if models.is_empty() {
+                            ui.label(muted(if state.favorites_only {
+                                "No favorite models"
+                            } else {
+                                "No matching models"
+                            }));
+                        }
+                        let expanded = state.show_more || !query.is_empty();
+                        let limit = if expanded {
+                            models.len()
+                        } else {
+                            models.len().min(4)
+                        };
+                        ScrollArea::vertical()
+                            .id_salt("models")
+                            .max_height(height - 24.0)
+                            .show(ui, |ui| {
+                                for (i, (account, model)) in models.iter().take(limit).enumerate() {
+                                    ui.push_id((&account.id, &model.id), |ui| {
+                                        ui.horizontal(|ui| {
+                                            let favorite = (account.id.clone(), model.id.clone());
+                                            let starred = picker.favorites.contains(&favorite);
+                                            provider_mark(ui, &account.provider, 13.0);
+                                            let current = choice.account.as_ref()
+                                                == Some(&account.id)
+                                                && choice
+                                                    .model
+                                                    .as_ref()
+                                                    .map_or(model.is_default, |id| id == &model.id);
+                                            let shortcut = [
+                                                Key::Num1,
+                                                Key::Num2,
+                                                Key::Num3,
+                                                Key::Num4,
+                                                Key::Num5,
+                                                Key::Num6,
+                                                Key::Num7,
+                                                Key::Num8,
+                                                Key::Num9,
+                                            ]
+                                            .get(i)
+                                            .copied();
+                                            let name = if state.favorites_only {
+                                                format!("{} \u{00b7} {}", model.name, account.label)
+                                            } else {
+                                                model.name.clone()
+                                            };
+                                            let mut button =
+                                                egui::Button::new(RichText::new(name).size(SMALL))
+                                                    .selected(current)
+                                                    .truncate();
+                                            if shortcut.is_some() {
+                                                button = button.shortcut_text(
+                                                    RichText::new(format!("Ctrl+{}", i + 1))
+                                                        .size(10.5),
+                                                );
+                                            }
+                                            let mut row = ui.add_sized(
+                                                [(model_width - 49.0).max(50.0), 22.0],
+                                                button,
+                                            );
+                                            if let Some(key) = shortcut {
+                                                row = row.on_hover_text(format!(
+                                                    "{}\nCtrl+{}",
+                                                    model.id,
+                                                    i + 1
+                                                ));
+                                                if ui.input_mut(|input| {
+                                                    input.consume_key(egui::Modifiers::CTRL, key)
+                                                }) {
+                                                    choice.select(&account.id, model);
+                                                }
+                                            }
+                                            if row.clicked() {
+                                                choice.select(&account.id, model);
+                                            }
+                                            if icon_button_sized(
+                                                ui,
+                                                Icon::Star,
+                                                if starred {
+                                                    "Remove favorite"
+                                                } else {
+                                                    "Add favorite"
+                                                },
+                                                starred,
+                                                22.0,
+                                            )
+                                            .clicked()
+                                                && !picker.favorites.remove(&favorite)
+                                            {
+                                                picker.favorites.insert(favorite);
+                                            }
+                                        });
+                                    });
+                                }
+                                if models.len() > limit && ui.button(tr("Show more")).clicked() {
+                                    state.show_more = true;
+                                }
+                            });
+                    },
+                );
+                picker_divider(ui, height);
+                ui.allocate_ui_with_layout(
+                    egui::vec2(effort_width, height),
+                    Layout::top_down(Align::Min),
+                    |ui| {
+                        ui.set_width(effort_width);
+                        ui.set_max_width(effort_width);
+                        ui.label(RichText::new(tr("Reasoning")).size(SMALL).strong());
+                        let current = choice.account.as_ref().and_then(|id| {
+                            let models = runtime.models(id);
+                            choice
+                                .model
+                                .as_ref()
+                                .and_then(|selected| {
+                                    models.iter().find(|model| &model.id == selected)
+                                })
+                                .or_else(|| models.iter().find(|model| model.is_default))
+                        });
+                        if let Some(model) = current.filter(|model| !model.efforts.is_empty()) {
+                            ScrollArea::vertical()
+                                .id_salt("effort")
+                                .max_height(height - 19.0)
+                                .show(ui, |ui| {
+                                    for effort in &model.efforts {
+                                        let active = choice
+                                            .effort
+                                            .as_ref()
+                                            .or(model.default_effort.as_ref())
+                                            == Some(effort);
+                                        if ui
+                                            .selectable_label(active, effort_label(effort))
+                                            .clicked()
+                                        {
+                                            choice.model = Some(model.id.clone());
+                                            choice.effort = Some(effort.clone());
+                                        }
+                                    }
+                                });
+                        } else {
+                            ui.label(muted("Provider controlled"));
+                        }
+                    },
+                );
+            });
+            if let Some(account) = &choice.account {
+                let support=runtime.claude_mode_support(account, choice.model.as_deref());
+                if support.fast || support.ultracode {
+                    ui.separator();
+                    ui.horizontal_wrapped(|ui| {
+                        if support.fast {
+                            ui.selectable_value(&mut choice.claude_modes.fast,false,tr("Standard"));
+                            ui.selectable_value(&mut choice.claude_modes.fast,true,"\u{26a1} Fast")
+                                .on_hover_text(tr("Request Fast from Claude. Uses separately billed credits when available."));
+                        }
+                        if support.ultracode && ui.selectable_label(choice.claude_modes.ultracode,"Ultracode")
+                            .on_hover_text(tr("Let Claude use dynamic workflows for larger tasks.")).clicked() {
+                            choice.claude_modes.ultracode = !choice.claude_modes.ultracode;
+                        }
+                    });
+                }
+            }
+            if locked_account.is_none() && ui.small_button(tr("Manage providers")).clicked() {
+                open_providers = true;
+                ui.close();
+            }
+        });
+    open_providers
+}
+
+pub(super) fn draft_picker(
+    ui: &mut Ui,
+    runtime: &mut Runtime,
+    chat: &mut ChatState,
+    root: Option<&std::path::Path>,
+    composing: bool,
+) -> bool {
+    let mut choice = ModelChoice {
+        account: match &chat.target {
+            Target::Account(id) => Some(id.clone()),
+            _ => None,
+        },
+        model: chat.model.clone(),
+        effort: chat.effort.clone(),
+        claude_modes: chat.claude_modes,
+    };
+    if choice.account.is_none() {
+        choice.account = chat_accounts(runtime).first().map(|a| a.id.clone());
+        choice.model = None;
+        choice.effort = None;
+        choice.claude_modes = ClaudeModes::default();
+    }
+    let open = model_picker(ui, runtime, &mut choice, &mut chat.picker, None);
+    let selection_changed = choice.model != chat.model
+        || choice
+            .account
+            .as_ref()
+            .is_some_and(|id| chat.target != Target::Account(id.clone()));
+    if chat.target != Target::Orchestrator {
+        chat.target = choice.account.map_or(Target::Auto, Target::Account);
+        chat.model = choice.model;
+        chat.effort = choice.effort;
+        chat.claude_modes = choice.claude_modes;
+    }
+    if (composing || selection_changed)
+        && !chat.worktree
+        && let Target::Account(account) = &chat.target
+        && let Some(root) = root
+    {
+        runtime.prepare_draft(account, root, PRESETS[chat.preset].0);
+    }
+    open
 }
 
 pub(super) fn provider_name(kind: &ProviderKind) -> &'static str {
@@ -225,6 +687,8 @@ pub(super) fn provider_name(kind: &ProviderKind) -> &'static str {
         ProviderKind::ClaudeCode => "Claude Code",
         ProviderKind::Codex => "Codex",
         ProviderKind::Gemini => "Gemini CLI",
+        ProviderKind::Antigravity => "Antigravity",
+        ProviderKind::OpenCode => "OpenCode",
         _ => "Custom",
     }
 }
@@ -253,40 +717,19 @@ fn chat_accounts(runtime: &Runtime) -> Vec<Account> {
         .accounts()
         .iter()
         .filter(|a| {
-            a.enabled && matches!(a.provider, ProviderKind::ClaudeCode | ProviderKind::Codex)
+            a.enabled
+                && runtime.connection_ready(&a.id)
+                && matches!(
+                    a.provider,
+                    ProviderKind::ClaudeCode
+                        | ProviderKind::Codex
+                        | ProviderKind::Gemini
+                        | ProviderKind::Antigravity
+                        | ProviderKind::OpenCode
+                )
         })
         .cloned()
         .collect()
-}
-
-/// Models offered for an account: only what the account declares, what its
-/// sessions already ran, and the model aliases the provider's CLI documents.
-fn model_options(runtime: &Runtime, account: &Account) -> Vec<String> {
-    let mut models: Vec<String> = Vec::new();
-    let mut push = |m: &str| {
-        if !m.trim().is_empty() && !models.iter().any(|x| x == m) {
-            models.push(m.to_owned());
-        }
-    };
-    if let Some(m) = &account.default_model {
-        push(m);
-    }
-    for m in &account.declared_models {
-        push(m);
-    }
-    for s in &runtime.sessions {
-        if s.meta.account == account.id
-            && let Some(m) = &s.meta.model
-        {
-            push(m);
-        }
-    }
-    if account.provider == ProviderKind::ClaudeCode {
-        for alias in ["sonnet", "opus", "haiku"] {
-            push(alias);
-        }
-    }
-    models
 }
 
 /// Dot color and words for an account's sign-in, from the provider's answer.
@@ -296,9 +739,12 @@ fn connection_view(runtime: &Runtime, account: &Account) -> (egui::Color32, Stri
         return (colors().error, "Not installed".into());
     }
     match runtime.connection.get(&account.id) {
-        None | Some(Connection::Checking) => (colors().muted, "Checking…".into()),
-        Some(Connection::SignedIn(_)) => (colors().success, "Connected".into()),
+        None | Some(Connection::Checking) => (colors().muted, "Checkingâ€¦".into()),
+        Some(Connection::SignedIn(_)) => (colors().success, "Authenticated".into()),
         Some(Connection::SignedOut(_)) => (colors().warning, "Signed out".into()),
+        Some(Connection::GeminiMigrationRequired) => {
+            (colors().warning, "Migration required".into())
+        }
         Some(Connection::Key(true)) => (colors().success, "API key stored".into()),
         Some(Connection::Key(false)) => (colors().warning, "No API key".into()),
         Some(Connection::Unknown(_)) => (colors().muted, "Status unknown".into()),
@@ -346,7 +792,7 @@ fn fact(ui: &mut Ui, text: impl Into<String>) {
 }
 
 fn separator_dot(ui: &mut Ui) {
-    ui.label(RichText::new("·").size(SMALL).color(colors().muted));
+    ui.label(RichText::new("Â·").size(SMALL).color(colors().muted));
 }
 
 /// Opaque reading surface used behind every chat block.
@@ -363,7 +809,7 @@ impl Editor {
     }
 
     /// Restores the dock layout saved in preferences once the runtime is open.
-    fn restore_chat_layout(&mut self) {
+    pub(super) fn restore_chat_layout(&mut self) {
         let chat = &mut self.hub.agents.chat;
         if chat.restored {
             return;
@@ -371,13 +817,33 @@ impl Editor {
         chat.restored = true;
         chat.dock = self.preferences.agent_session.clone();
         chat.detached = self.preferences.agent_detached.clone();
+        chat.picker
+            .favorites
+            .clone_from(&self.preferences.agent_favorites);
+        if let Some(id) = &self.preferences.agent_account {
+            chat.target = Target::Account(id.clone());
+            chat.model.clone_from(&self.preferences.agent_model);
+            chat.effort =
+                Some(self.preferences.agent_effort.clone()).filter(|level| !level.is_empty());
+        }
     }
 
-    fn remember_chat_layout(&mut self) {
+    pub(super) fn remember_chat_layout(&mut self) {
         let chat = &self.hub.agents.chat;
         if !chat.restored {
             return;
         }
+        self.preferences.agent_account = match &chat.target {
+            Target::Account(id) => Some(id.clone()),
+            _ => None,
+        };
+        if self.preferences.agent_favorites != chat.picker.favorites {
+            self.preferences
+                .agent_favorites
+                .clone_from(&chat.picker.favorites);
+        }
+        self.preferences.agent_model.clone_from(&chat.model);
+        self.preferences.agent_effort = chat.effort.clone().unwrap_or_default();
         if self.preferences.agent_session != chat.dock {
             self.preferences.agent_session = chat.dock.clone();
         }
@@ -386,8 +852,196 @@ impl Editor {
         }
     }
 
+    pub(super) fn conversations_sidebar(&mut self, ui: &mut Ui) {
+        if !self.ensure_runtime(ui.ctx()) {
+            ui.label(muted(tr("Agents are unavailable.")));
+            return;
+        }
+        self.restore_chat_layout();
+        let (runtime, chat) = self.hub.agents.runtime_and_chat();
+        let mut select = None;
+        let mut sessions: Vec<_> = runtime.sessions.iter().collect();
+        sessions.sort_by_key(|session| {
+            std::cmp::Reverse(
+                session
+                    .meta
+                    .log
+                    .last()
+                    .map_or(session.meta.created_ms, |line| line.at_ms),
+            )
+        });
+        let working = sessions.iter().filter(|session| session.running()).count();
+        let pinned = &self.preferences.agent_pinned;
+        let archived = &self.preferences.agent_archived;
+        let mut row_actions: Vec<(String, RowAction)> = Vec::new();
+        let idle: Vec<_> = sessions
+            .iter()
+            .filter(|session| !session.running())
+            .copied()
+            .collect();
+        let pinned_rows: Vec<_> = idle
+            .iter()
+            .filter(|s| {
+                pinned.contains(s.meta.id.as_str()) && !archived.contains(s.meta.id.as_str())
+            })
+            .copied()
+            .collect();
+        let archived_rows: Vec<_> = idle
+            .iter()
+            .filter(|s| archived.contains(s.meta.id.as_str()))
+            .copied()
+            .collect();
+        // Remaining conversations grouped by project, keeping the most recent project first.
+        let mut groups: Vec<(String, Vec<&LiveSession>)> = Vec::new();
+        for session in idle.iter().filter(|s| {
+            !pinned.contains(s.meta.id.as_str()) && !archived.contains(s.meta.id.as_str())
+        }) {
+            let project = project_name(session);
+            match groups.iter_mut().find(|(name, _)| *name == project) {
+                Some((_, rows)) => rows.push(session),
+                None => groups.push((project, vec![session])),
+            }
+        }
+        ScrollArea::vertical()
+            .id_salt("saved-threads")
+            .max_height(
+                (ui.available_height()
+                    - 94.0
+                    - if working > 0 {
+                        working.min(3) as f32 * 43.0 + 40.0
+                    } else {
+                        0.0
+                    })
+                .max(75.0),
+            )
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                if sessions.is_empty() {
+                    ui.label(muted(tr("No conversations yet")));
+                }
+                let selected = chat.dock.as_deref();
+                let mut section = |ui: &mut Ui, title: &str, rows: &[&LiveSession]| {
+                    if rows.is_empty() {
+                        return;
+                    }
+                    ui.add_space(6.0);
+                    if !title.is_empty() {
+                        ui.add(egui::Label::new(meta_text(title.to_owned())).truncate());
+                    }
+                    ui.indent(Id::new(("thread-group", title)), |ui| {
+                        for session in rows {
+                            let id = session.meta.id.as_str();
+                            let (clicked, action) = thread_row(
+                                ui,
+                                session,
+                                selected,
+                                pinned.contains(id),
+                                archived.contains(id),
+                            );
+                            if clicked {
+                                select = Some(id.to_owned());
+                            }
+                            if let Some(action) = action {
+                                row_actions.push((id.to_owned(), action));
+                            }
+                        }
+                    });
+                };
+                section(ui, tr("Pinned"), &pinned_rows);
+                for (project, rows) in &groups {
+                    section(ui, project, rows);
+                }
+                if !archived_rows.is_empty() {
+                    ui.add_space(6.0);
+                    egui::CollapsingHeader::new(meta_text(format!(
+                        "{} ({})",
+                        tr("Archived"),
+                        archived_rows.len()
+                    )))
+                    .id_salt("archived-threads")
+                    .default_open(false)
+                    .show(ui, |ui| section(ui, "", &archived_rows));
+                }
+            });
+        if working > 0 {
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), (working.min(3) as f32 * 43.0) + 33.0),
+                Layout::bottom_up(Align::Min),
+                |ui| {
+                    ScrollArea::vertical()
+                        .id_salt("working-threads")
+                        .max_height(working.min(3) as f32 * 43.0)
+                        .show(ui, |ui| {
+                            for session in sessions.iter().filter(|session| session.running()) {
+                                let (clicked, _) =
+                                    thread_row(ui, session, chat.dock.as_deref(), false, false);
+                                if clicked {
+                                    select = Some(session.meta.id.to_string());
+                                }
+                            }
+                        });
+                    ui.label(meta_text(format!("{} ({working})", tr("Working"))));
+                },
+            );
+            ui.separator();
+        }
+        for (id, action) in row_actions {
+            match action {
+                RowAction::Pin => {
+                    self.preferences.agent_pinned.insert(id.clone());
+                    self.preferences.agent_archived.remove(&id);
+                }
+                RowAction::Unpin => {
+                    self.preferences.agent_pinned.remove(&id);
+                }
+                RowAction::Archive => {
+                    self.preferences.agent_archived.insert(id.clone());
+                    self.preferences.agent_pinned.remove(&id);
+                }
+                RowAction::Unarchive => {
+                    self.preferences.agent_archived.remove(&id);
+                }
+                RowAction::Delete => {
+                    let (runtime, chat) = self.hub.agents.runtime_and_chat();
+                    if let Some(index) = runtime
+                        .sessions
+                        .iter()
+                        .position(|s| s.meta.id.as_str() == id)
+                    {
+                        match runtime.close(index) {
+                            Ok(note) => {
+                                runtime.notice = Some((true, note));
+                                for slot in [&mut chat.dock, &mut chat.page, &mut chat.split] {
+                                    if slot.as_deref() == Some(id.as_str()) {
+                                        *slot = None;
+                                    }
+                                }
+                                chat.detached.retain(|d| d != &id);
+                                self.preferences.agent_pinned.remove(&id);
+                                self.preferences.agent_archived.remove(&id);
+                            }
+                            Err(error) => runtime.notice = Some((false, error)),
+                        }
+                    }
+                    self.remember_chat_layout();
+                }
+            }
+        }
+        if let Some(id) = select {
+            self.hub.agents.chat.dock = Some(id);
+            self.preferences.assistant_open = true;
+            self.remember_chat_layout();
+        }
+    }
+
     /// The editor's right dock.
     pub(super) fn agent_dock(&mut self, ui: &mut Ui) {
+        self.conversation(ui, Slot::Dock);
+    }
+
+    /// The Session Home floating chat island (shares `Slot::Dock` so switching
+    /// to the editor moves the active conversation seamlessly to the right).
+    pub(super) fn home_dock(&mut self, ui: &mut Ui) {
         self.conversation(ui, Slot::Dock);
     }
 
@@ -425,7 +1079,7 @@ impl Editor {
                 .runtime
                 .as_ref()
                 .and_then(|r| r.sessions.iter().find(|s| s.meta.id.as_str() == id))
-                .map(|s| s.meta.title.clone());
+                .map(|_| tr("Conversation"));
             let Some(title) = title else {
                 self.hub.agents.chat.detached.retain(|d| d != &id);
                 continue;
@@ -466,7 +1120,11 @@ impl Editor {
 
     /// Start a real Agent Hub conversation from the Session Home composer and
     /// immediately select it in the right-hand dock so the user sees the reply.
-    pub(super) fn start_chat_from_home(&mut self, ctx: &egui::Context, text: &str) -> Option<String> {
+    pub(super) fn start_chat_from_home(
+        &mut self,
+        ctx: &egui::Context,
+        text: &str,
+    ) -> Option<String> {
         let trimmed = text.trim();
         if trimmed.is_empty() {
             return None;
@@ -480,6 +1138,7 @@ impl Editor {
             return None;
         };
         let active = self.active_file();
+        let skill = self.skills.selected_input(&self.preferences.skills);
         let (runtime, chat) = self.hub.agents.runtime_and_chat();
         if chat.target == Target::Orchestrator {
             let goal = trimmed.to_owned();
@@ -490,32 +1149,30 @@ impl Editor {
         }
         let accounts = chat_accounts(runtime);
         if accounts.is_empty() {
-            chat.add_ai = Some(AddAi::default());
+            self.open_providers();
             self.notice = Some((true, tr("Connect an AI to start").to_owned()));
             return None;
         }
         let chosen = match &chat.target {
             Target::Account(id) => accounts.iter().find(|a| &a.id == id),
-            Target::Auto | Target::Orchestrator => None,
-        }
-        .or_else(|| {
-            accounts.iter().find(|a| {
-                matches!(
-                    runtime.connection.get(&a.id),
-                    Some(Connection::SignedIn(_) | Connection::Key(true))
-                )
-            })
-        })
-        .unwrap_or(&accounts[0])
-        .clone();
-        chat.target = Target::Account(chosen.id.clone());
-        let model = chat
-            .model
-            .clone()
-            .filter(|m| model_belongs_to_provider(m, &chosen.provider));
-        if chat.model.is_some() && model.is_none() {
+            Target::Auto => accounts.first(),
+            Target::Orchestrator => None,
+        };
+        let Some(chosen) = chosen.cloned() else {
+            self.notice = Some((
+                true,
+                tr("The selected account is unavailable. Choose an account before sending.")
+                    .to_owned(),
+            ));
+            return None;
+        };
+        if chat.target != Target::Account(chosen.id.clone()) {
             chat.model = None;
+            chat.effort = None;
+            chat.claude_modes = ClaudeModes::default();
         }
+        chat.target = Target::Account(chosen.id.clone());
+        let model = chat.model.clone();
         let title: String = trimmed
             .lines()
             .next()
@@ -527,6 +1184,8 @@ impl Editor {
             title,
             account: chosen.id.clone(),
             model,
+            effort: chat.effort.clone(),
+            claude_modes: chat.claude_modes,
             root,
             worktree: chat.worktree,
             preset: PRESETS[chat.preset].0,
@@ -535,10 +1194,11 @@ impl Editor {
         });
         match created {
             Ok(index) => {
-                let prompt = with_file(trimmed, chat.attach.then_some(active.as_deref()).flatten());
-                if let Err(e) = runtime.send(index, &prompt) {
+                let prompt =
+                    with_file(trimmed, chat.attach.then_some(active.as_deref()).flatten()) + &skill;
+                if let Err(e) = runtime.send_chat(index, &prompt, trimmed) {
                     runtime.sessions[index].draft = trimmed.to_owned();
-                    runtime.notice = Some((false, e));
+                    runtime.notice = Some((false, tr(&e).to_owned()));
                 }
                 let id = runtime.sessions[index].meta.id.as_str().to_owned();
                 chat.dock = Some(id.clone());
@@ -549,7 +1209,7 @@ impl Editor {
             }
             Err(e) => {
                 runtime.notice = Some((false, e.clone()));
-                self.notice = Some((true, e));
+                self.notice = Some((true, tr(&e).to_owned()));
                 None
             }
         }
@@ -568,6 +1228,7 @@ impl Editor {
         self.restore_chat_layout();
         let active = self.active_file();
         let root = self.root.clone();
+        let skill = self.skills.selected_input(&self.preferences.skills);
         let mut actions: Vec<Action> = Vec::new();
         {
             let (runtime, chat) = self.hub.agents.runtime_and_chat();
@@ -582,9 +1243,15 @@ impl Editor {
             }
             header(ui, runtime, chat, &slot, current, &mut actions);
             match current {
-                Some(index) => {
-                    session_body(ui, runtime, chat, index, active.as_deref(), &mut actions)
-                }
+                Some(index) => session_body(
+                    ui,
+                    runtime,
+                    chat,
+                    index,
+                    active.as_deref(),
+                    &skill,
+                    &mut actions,
+                ),
                 None => new_conversation(
                     ui,
                     runtime,
@@ -592,6 +1259,7 @@ impl Editor {
                     &slot,
                     root,
                     active.as_deref(),
+                    &skill,
                     &mut actions,
                 ),
             }
@@ -609,6 +1277,15 @@ impl Editor {
                     }
                 }
                 Action::Open(path) => self.open_file(path),
+                Action::Fork(id, line) => {
+                    let (runtime, chat) = self.hub.agents.runtime_and_chat();
+                    match runtime.fork_chat(&id, line) {
+                        Ok(index) => {
+                            chat.set(&slot, Some(runtime.sessions[index].meta.id.to_string()))
+                        }
+                        Err(error) => runtime.notice = Some((false, error)),
+                    }
+                }
                 Action::OpenGuided(reply_text) => {
                     let flow = self.preferences.guided.flow_order;
                     if let Some(plan) = super::guided::extract_plan_from_text(&reply_text, flow) {
@@ -624,11 +1301,110 @@ impl Editor {
                     self.hub_open = true;
                     self.hub.focus_agents("orchestrator");
                 }
-                Action::AddAi => self.hub.agents.chat.add_ai = Some(AddAi::default()),
+                Action::AddAi => self.open_providers(),
             }
         }
         self.remember_chat_layout();
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RowAction {
+    Pin,
+    Unpin,
+    Archive,
+    Unarchive,
+    Delete,
+}
+
+fn project_name(session: &LiveSession) -> String {
+    let meta = &session.meta;
+    meta.repo
+        .as_deref()
+        .unwrap_or(&meta.workdir)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(provider_name(&meta.provider))
+        .to_owned()
+}
+
+fn relative_age(at_ms: u64) -> String {
+    let secs = covalos_agents::now_ms().saturating_sub(at_ms) / 1000;
+    match secs {
+        0..60 => "now".to_owned(),
+        60..3600 => format!("{}m", secs / 60),
+        3600..86_400 => format!("{}h", secs / 3600),
+        _ => format!("{}d", secs / 86_400),
+    }
+}
+
+fn thread_row(
+    ui: &mut Ui,
+    session: &LiveSession,
+    selected: Option<&str>,
+    pinned: bool,
+    archived: bool,
+) -> (bool, Option<RowAction>) {
+    let meta = &session.meta;
+    let detail = if session.running() {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs(1));
+        let elapsed = meta
+            .log
+            .iter()
+            .rev()
+            .find(|line| line.kind == "you")
+            .map_or(0, |line| {
+                covalos_agents::now_ms().saturating_sub(line.at_ms) / 1000
+            });
+        format!("{}  {elapsed}s", tr("Working"))
+    } else {
+        relative_age(meta.log.last().map_or(meta.created_ms, |line| line.at_ms))
+    };
+    let response = super::theme::row(ui, &meta.title, &detail, selected == Some(meta.id.as_str()))
+        .on_hover_text(format!(
+            "{}  \u{00b7}  {}  \u{00b7}  {}",
+            provider_name(&meta.provider),
+            project_name(session),
+            meta.title
+        ));
+    let mut action = None;
+    response.context_menu(|ui| {
+        let pin = if pinned { tr("Unpin") } else { tr("Pin") };
+        if ui.button(pin).clicked() {
+            action = Some(if pinned {
+                RowAction::Unpin
+            } else {
+                RowAction::Pin
+            });
+            ui.close();
+        }
+        let archive = if archived {
+            tr("Unarchive")
+        } else {
+            tr("Archive")
+        };
+        if ui.button(archive).clicked() {
+            action = Some(if archived {
+                RowAction::Unarchive
+            } else {
+                RowAction::Archive
+            });
+            ui.close();
+        }
+        ui.separator();
+        if ui
+            .add_enabled(
+                !session.running(),
+                egui::Button::new(RichText::new(tr("Delete conversation")).color(colors().error)),
+            )
+            .clicked()
+        {
+            action = Some(RowAction::Delete);
+            ui.close();
+        }
+    });
+    (response.clicked(), action)
 }
 
 fn header(
@@ -640,96 +1416,55 @@ fn header(
     actions: &mut Vec<Action>,
 ) {
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
+        if !matches!(slot,Slot::Window(_)) {
+            ui.label(RichText::new(tr("Conversation")).size(LEAD).strong());
+        }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if ui
-                .add(egui::Button::new(
-                    RichText::new(tr("+ Add AI")).size(SMALL).strong(),
-                ))
-                .on_hover_text(tr(
-                    "Connect Claude Code, Codex or Gemini with an official method",
-                ))
-                .clicked()
-            {
-                actions.push(Action::AddAi);
-            }
-            if *slot == Slot::Split
-                && icon_button(ui, Icon::Close, tr("Close split"), false).clicked()
-            {
-                chat.split = None;
-            }
-            if *slot == Slot::Page
-                && chat.split.is_none()
-                && icon_button(
-                    ui,
-                    Icon::Compare,
-                    tr("Split: show a second conversation"),
-                    false,
-                )
-                .clicked()
-            {
-                chat.split = Some(String::new());
-            }
-            if let Some(index) = current {
-                let id = runtime.sessions[index].meta.id.as_str().to_owned();
-                if !matches!(slot, Slot::Window(_))
-                    && icon_button(ui, Icon::Detach, tr("Open in its own window"), false).clicked()
-                {
-                    actions.push(Action::Detach(id.clone()));
-                }
-                if !runtime.sessions[index].running()
-                    && icon_button(
-                        ui,
-                        Icon::Trash,
-                        tr("Close this conversation (its worktree is removed only if unchanged)"),
-                        false,
-                    )
-                    .clicked()
-                {
-                    runtime.notice = Some(match runtime.close(index) {
-                        Ok(note) => (true, note),
-                        Err(e) => (false, e),
-                    });
-                    actions.push(Action::Select(slot.clone(), None));
-                    return;
-                }
-            }
-            if matches!(slot, Slot::Window(_)) {
-                return;
-            }
-            let selected = current.map_or_else(
-                || tr("New conversation").to_owned(),
-                |i| runtime.sessions[i].meta.title.clone(),
-            );
-            egui::ComboBox::from_id_salt(("agent-switch", format!("{slot:?}")))
-                .width(ui.available_width().max(80.0))
-                .truncate()
-                .selected_text(RichText::new(selected).strong())
-                .show_ui(ui, |ui| {
-                    if ui
-                        .selectable_label(current.is_none(), tr("+ New conversation"))
-                        .clicked()
-                    {
+            let more = icon_button(ui, Icon::More, tr("Conversation options"), false);
+            egui::Popup::menu(&more).show(|ui| {
+                if let Some(i) = current {
+                    let session = &runtime.sessions[i];
+                    let details = Id::new(("thread-details",session.meta.id.as_str()));
+                    if ui.button(tr("Thread details")).clicked() {
+                        ui.ctx().data_mut(|d| {let visible = d.get_temp(details).unwrap_or(false); d.insert_temp(details, !visible);});
+                        ui.close();
+                    }
+                    if !matches!(slot, Slot::Window(_)) && ui.button(tr("Open in its own window")).clicked() {
+                        actions.push(Action::Detach(session.meta.id.to_string()));
+                        ui.close();
+                    }
+                    if !session.running() && ui.button(tr("Close this conversation (its worktree is removed only if unchanged)")).clicked() {
+                        runtime.notice = Some(match runtime.close(i) { Ok(note) => (true,note), Err(e) => (false,e) });
                         actions.push(Action::Select(slot.clone(), None));
+                        ui.close();
                     }
-                    for (i, session) in runtime.sessions.iter().enumerate().rev() {
-                        let label = format!(
-                            "{}  ·  {}  ·  {}",
-                            session.meta.title,
-                            provider_name(&session.meta.provider),
-                            tr(session.meta.status.label())
-                        );
-                        if ui.selectable_label(current == Some(i), label).clicked() {
-                            actions.push(Action::Select(
-                                slot.clone(),
-                                Some(session.meta.id.as_str().to_owned()),
-                            ));
+                }
+                if *slot == Slot::Page && chat.split.is_none() && ui.button(tr("Split: show a second conversation")).clicked() { chat.split = Some(String::new()); ui.close(); }
+                if *slot == Slot::Split && ui.button(tr("Close split")).clicked() { chat.split = None; ui.close(); }
+                if ui.button(tr("Agent usage")).clicked() {ui.ctx().data_mut(|d| d.insert_temp(Id::new("agent-usage-open"), true)); ui.close();}
+                if ui.button(tr("Manage providers")).clicked() {actions.push(Action::AddAi); ui.close();}
+            });
+            if !matches!(slot, Slot::Window(_)) && icon_button(ui, Icon::Add, tr("New chat"), false).clicked() {
+                actions.push(Action::Select(slot.clone(), None));
+            }
+            if !matches!(slot, Slot::Window(_)) {
+                let history = icon_button(ui,Icon::History,tr("Conversation history"),false);
+                egui::Popup::menu(&history).show(|ui| {
+                    ui.set_min_width(190.0);
+                    if runtime.sessions.is_empty() {ui.label(muted(tr("No conversations yet")));}
+                    ScrollArea::vertical().max_height(300.0).show(ui,|ui| {
+                        for (i, session) in runtime.sessions.iter().enumerate().rev() {
+                            if ui.selectable_label(current == Some(i),&session.meta.title).clicked() {
+                                actions.push(Action::Select(slot.clone(),Some(session.meta.id.to_string())));ui.close();
+                            }
                         }
-                    }
+                    });
                 });
+            }
         });
     });
-    ui.add_space(6.0);
+    ui.separator();
+    ui.add_space(7.0);
 }
 
 fn identity_line(ui: &mut Ui, runtime: &mut Runtime, session_index: usize) {
@@ -750,6 +1485,7 @@ fn identity_line(ui: &mut Ui, runtime: &mut Runtime, session_index: usize) {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 5.0;
                 dot(ui, status_color(meta.status));
+                ui.label(meta_text(tr(meta.status.label())));
                 ui.label(
                     RichText::new(provider_name(&meta.provider))
                         .size(SMALL)
@@ -765,7 +1501,7 @@ fn identity_line(ui: &mut Ui, runtime: &mut Runtime, session_index: usize) {
                                 .color(colors().secondary),
                         )
                         .on_hover_text(format!(
-                            "{} · {}",
+                            "{} Â· {}",
                             a.id,
                             tr(method_name(a.method))
                         ));
@@ -783,9 +1519,8 @@ fn identity_line(ui: &mut Ui, runtime: &mut Runtime, session_index: usize) {
                     let (color, text) = connection_view(runtime, account);
                     separator_dot(ui);
                     let response = ui.label(RichText::new(tr(&text)).size(SMALL).color(color));
-                    if let Some(
-                        Connection::SignedIn(t) | Connection::SignedOut(t) | Connection::Unknown(t),
-                    ) = runtime.connection.get(&account.id)
+                    if let Some(Connection::SignedOut(t) | Connection::Unknown(t)) =
+                        runtime.connection.get(&account.id)
                     {
                         response.on_hover_text(t.clone());
                     }
@@ -797,7 +1532,7 @@ fn identity_line(ui: &mut Ui, runtime: &mut Runtime, session_index: usize) {
                         "{}{}",
                         tr(preset_name(meta.preset)),
                         if meta.worktree_branch.is_some() {
-                            " · worktree"
+                            " Â· worktree"
                         } else {
                             ""
                         }
@@ -813,14 +1548,26 @@ fn session_body(
     chat: &mut ChatState,
     index: usize,
     active: Option<&str>,
+    skill: &str,
     actions: &mut Vec<Action>,
 ) {
-    identity_line(ui, runtime, index);
-    ui.add_space(6.0);
+    let account_id = runtime.sessions[index].meta.account.clone();
+    ensure_connection(runtime, &account_id);
+    let details = ui
+        .ctx()
+        .data(|d| {
+            d.get_temp(Id::new((
+                "thread-details",
+                runtime.sessions[index].meta.id.as_str(),
+            )))
+        })
+        .unwrap_or(false);
+    if details {
+        identity_line(ui, runtime, index);
+    }
     let composer_height = 112.0;
     let height = (ui.available_height() - composer_height).max(120.0);
     let id = runtime.sessions[index].meta.id.as_str().to_owned();
-    let audit = runtime.audit(&runtime.sessions[index].meta.id);
     ScrollArea::vertical()
         .id_salt(("agent-timeline", &id))
         .max_height(height)
@@ -829,30 +1576,34 @@ fn session_body(
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             timeline(ui, &runtime.sessions[index], actions);
-            changes_block(ui, chat, &runtime.sessions[index], actions);
-            technical_log(ui, &runtime.sessions[index], &audit);
+            Editor::conversation_approvals(ui, runtime, Some(&id));
+            if details {
+                changes_block(ui, chat, &runtime.sessions[index], actions);
+                technical_log(ui, runtime, &runtime.sessions[index]);
+            }
         });
     ui.add_space(6.0);
     let session = &mut runtime.sessions[index];
     let running = session.running();
     let stopping = session.stopping();
-    let label = format!(
-        "{} · {}",
-        provider_name(&session.meta.provider),
-        session
-            .meta
-            .model
-            .clone()
-            .unwrap_or_else(|| tr("default model").into())
-    );
     let hint = if stopping {
         tr("Stopping… waiting for the provider to exit")
     } else if running {
-        tr("Working… you can stop the turn")
+        tr("Draft your next message")
     } else {
         tr("Message the agent")
     };
     let mut draft = std::mem::take(&mut session.draft);
+    let account = session.meta.account.clone();
+    let mut choice = ModelChoice {
+        account: Some(account.clone()),
+        model: session.meta.requested_model.clone(),
+        effort: session.meta.effort.clone(),
+        claude_modes: session.meta.claude_modes,
+    };
+    let previous = choice.clone();
+    let mut manage = false;
+    let mut editing = false;
     let result = composer(
         ui,
         ("composer", &id),
@@ -861,23 +1612,59 @@ fn session_body(
         running,
         &mut chat.attach,
         active,
-        |ui| {
-            ui.label(meta_text(label));
+        |ui, field_changed| {
+            editing = field_changed;
+            if running {
+                let name = runtime
+                    .models(&account)
+                    .iter()
+                    .find(|m| Some(&m.id) == choice.model.as_ref())
+                    .map(|m| m.name.as_str())
+                    .or(choice.model.as_deref())
+                    .unwrap_or(tr("Provider default"));
+                provider_mark(ui, &runtime.sessions[index].meta.provider, 14.0);
+                ui.label(meta_text(choice.effort.as_ref().map_or_else(
+                    || name.to_owned(),
+                    |e| format!("{name} {}", effort_label(e)),
+                )));
+            } else {
+                manage = model_picker(ui, runtime, &mut choice, &mut chat.picker, Some(&account));
+            }
         },
     );
+    if manage {
+        actions.push(Action::AddAi);
+    }
+    if choice != previous {
+        runtime.sessions[index].meta.requested_model = choice.model;
+        runtime.sessions[index].meta.effort = choice.effort;
+        runtime.sessions[index].meta.claude_modes = choice.claude_modes;
+        runtime.save_sessions();
+    }
     match result {
         Composed::Send(text) => {
-            let prompt = with_file(&text, chat.attach.then_some(active).flatten());
-            if let Err(e) = runtime.send(index, &prompt) {
+            let prompt = with_file(&text, chat.attach.then_some(active).flatten()) + skill;
+            if !runtime.connection_ready(&account) {
                 runtime.sessions[index].draft = text;
-                runtime.notice = Some((false, e));
+                runtime.notice = Some((false, tr("Connect an AI to start").to_owned()));
+            } else if let Err(e) = runtime.send_chat(index, &prompt, &text) {
+                runtime.sessions[index].draft = text;
+                runtime.notice = Some((false, tr(&e).to_owned()));
             }
         }
         Composed::Stop => {
             runtime.sessions[index].draft = draft;
             runtime.cancel(index);
         }
-        Composed::Idle => runtime.sessions[index].draft = draft,
+        Composed::Idle => {
+            let session = &mut runtime.sessions[index];
+            session.draft = draft;
+            if !running && !session.has_warm_session() && editing {
+                let dir = session.meta.workdir.clone();
+                let preset = session.meta.preset;
+                runtime.prepare_draft(&account, &dir, preset);
+            }
+        }
     }
     notice(ui, runtime);
 }
@@ -890,7 +1677,7 @@ fn notice(ui: &mut Ui, runtime: &mut Runtime) {
             } else {
                 colors().warning
             }));
-            if ui.small_button("✕").clicked() {
+            if ui.small_button(tr("Dismiss notice")).clicked() {
                 runtime.notice = None;
             }
         });
@@ -921,12 +1708,22 @@ fn timeline(ui: &mut Ui, session: &LiveSession, actions: &mut Vec<Action>) {
             seen.push(name);
             let n = tools.iter().filter(|t| *t == name).count();
             names.push(if n > 1 {
-                format!("{name} ×{n}")
+                format!("{} Ã—{n}", tool_title(name))
             } else {
-                (*name).to_owned()
+                tool_title(name).to_owned()
             });
         }
-        activity(ui, colors().accent, &names.join(" · "));
+        ui.horizontal_wrapped(|ui| {
+            let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(16.0), egui::Sense::hover());
+            draw_icon_sized(
+                ui.painter(),
+                rect.center(),
+                Icon::Terminal,
+                colors().muted,
+                13.0,
+            );
+            ui.label(meta_text(names.join(" Â· ")));
+        });
         tools.clear();
     };
     if meta.log.iter().all(|l| l.kind != "you") && !session.running() {
@@ -935,16 +1732,28 @@ fn timeline(ui: &mut Ui, session: &LiveSession, actions: &mut Vec<Action>) {
             "Ask for a change, a review or an explanation. The agent works in the folder shown above.",
         )));
     }
-    for line in &meta.log {
+    for (line_index, line) in meta.log.iter().enumerate() {
         if line.kind == "tool" {
             tools.push(&line.text);
             continue;
         }
         flush(ui, &mut tools);
         match line.kind.as_str() {
-            "you" => user_message(ui, &line.text),
+            "you" => user_message(ui, &line.text, line.at_ms),
             "agent" => {
-                agent_message(ui, provider_name(&meta.provider), &line.text);
+                let (path, fork) = agent_message(
+                    ui,
+                    &meta.provider,
+                    &line.text,
+                    None,
+                    Some((&meta.workdir, line.at_ms)),
+                );
+                if fork {
+                    actions.push(Action::Fork(meta.id.clone(), line_index));
+                }
+                if let Some(path) = path {
+                    actions.push(Action::Open(path));
+                }
                 if line.text.contains("```covalos-guided")
                     && ui
                         .add(
@@ -979,32 +1788,40 @@ fn timeline(ui: &mut Ui, session: &LiveSession, actions: &mut Vec<Action>) {
                     });
                 ui.add_space(4.0);
             }
-            "done" => activity(ui, colors().success, &line.text),
             "cancelled" | "recovery" | "approval" => activity(ui, colors().warning, &line.text),
-            "context" => activity(ui, colors().syntax_string, &line.text),
             _ => {}
         }
     }
     flush(ui, &mut tools);
     if session.running() {
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            busy_indicator(ui);
-            ui.label(secondary(if session.stopping() {
-                tr("Stopping…")
-            } else {
-                tr("Working…")
-            }));
-        });
-        if !session.streaming.is_empty() {
-            ui.add(
-                egui::Label::new(
-                    RichText::new(&session.streaming)
-                        .size(BODY)
-                        .color(colors().secondary),
-                )
-                .wrap(),
+        let last_user = meta.log.iter().rposition(|line| line.kind == "you");
+        if meta.status == Status::Running || !session.streaming.is_empty() || session.stopping() {
+            let elapsed = last_user.map_or(0, |i| {
+                covalos_agents::now_ms().saturating_sub(meta.log[i].at_ms) / 1000
+            });
+            let acp = matches!(
+                meta.provider,
+                ProviderKind::Antigravity | ProviderKind::Gemini | ProviderKind::OpenCode
             );
+            let phase = if session.stopping() {
+                tr("Stopping")
+            } else if !session.streaming.is_empty() {
+                tr("Writing response")
+            } else if session.prompt_sent || (!acp && session.provider_started) {
+                tr("Waiting for response")
+            } else {
+                tr("Preparing session")
+            };
+            let (path, _) = agent_message(
+                ui,
+                &meta.provider,
+                &session.streaming,
+                Some((phase, elapsed)),
+                Some((&meta.workdir, 0)),
+            );
+            if let Some(path) = path {
+                actions.push(Action::Open(path));
+            }
         }
     }
 }
@@ -1018,13 +1835,13 @@ fn activity(ui: &mut Ui, color: egui::Color32, text: &str) {
     });
 }
 
-fn user_message(ui: &mut Ui, text: &str) {
+fn user_message(ui: &mut Ui, text: &str, at_ms: u64) {
     ui.add_space(6.0);
     let width = ui.available_width();
     ui.with_layout(Layout::top_down(Align::Max), |ui| {
-        Frame::new()
-            .fill(colors().accent_bg)
-            .corner_radius(10)
+        let message = Frame::new()
+            .fill(colors().elevated)
+            .corner_radius(12)
             .inner_margin(Margin::symmetric(11, 8))
             .show(ui, |ui| {
                 ui.set_max_width(width * 0.86);
@@ -1034,33 +1851,135 @@ fn user_message(ui: &mut Ui, text: &str) {
                         .selectable(true),
                 );
             });
+        message_actions(ui, message.response.rect, text, at_ms, true);
     });
     ui.add_space(4.0);
 }
 
-fn agent_message(ui: &mut Ui, provider: &str, text: &str) {
-    ui.add_space(4.0);
-    Frame::new()
-        .fill(surface())
-        .corner_radius(10)
-        .inner_margin(Margin::symmetric(12, 9))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.label(meta_text(provider));
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui
-                        .add(egui::Button::new(meta_text(tr("Copy"))).frame(false))
-                        .clicked()
-                    {
-                        ui.ctx().copy_text(text.to_owned());
-                    }
-                });
+fn tool_title(name: &str) -> &str {
+    match name {
+        "shell" | "command_execution" => tr("Terminal command"),
+        _ => name,
+    }
+}
+
+fn message_actions(
+    ui: &mut Ui,
+    message: egui::Rect,
+    text: &str,
+    at_ms: u64,
+    align_right: bool,
+) -> bool {
+    let mut fork = false;
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), 23.0),
+        if align_right {
+            Layout::right_to_left(Align::Center)
+        } else {
+            Layout::left_to_right(Align::Center)
+        },
+        |ui| {
+            let row = ui.available_rect_before_wrap();
+            let hitbox = message.union(egui::Rect::from_min_size(
+                row.min,
+                egui::vec2(row.width(), 23.0),
+            ));
+            let hovered = ui.rect_contains_pointer(hitbox);
+            let builder = if hovered {
+                egui::UiBuilder::new()
+            } else {
+                egui::UiBuilder::new().invisible()
+            };
+            ui.scope_builder(builder, |ui| {
+                if icon_button_sized(ui, Icon::Copy, "Copy", false, 21.0).clicked() {
+                    ui.ctx().copy_text(text.to_owned());
+                }
+                if !align_right {
+                    fork = icon_button_sized(ui, Icon::Git, "Fork conversation", false, 21.0)
+                        .clicked();
+                }
+                if let Ok(utc) = time::OffsetDateTime::from_unix_timestamp((at_ms / 1000) as i64) {
+                    let stamp = utc;
+                    ui.label(meta_text(format!(
+                        "{:02}:{:02} UTC",
+                        stamp.hour(),
+                        stamp.minute()
+                    )));
+                }
             });
-            ui.spacing_mut().item_spacing.y = 4.0;
-            super::hub::markdown(ui, text);
+        },
+    );
+    fork
+}
+
+fn typing_dots(ui: &mut Ui) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(26.0, 15.0), egui::Sense::hover());
+    let motion = ui.style().animation_time > 0.0;
+    let seconds = ui.input(|i| i.time) as f32;
+    for index in 0..3 {
+        let lift = if motion {
+            (seconds * 7.0 - index as f32 * 0.8).sin() * 2.0
+        } else {
+            0.0
+        };
+        ui.painter().circle_filled(
+            rect.left_center() + egui::vec2(4.0 + index as f32 * 8.0, -lift),
+            2.25,
+            colors().accent,
+        );
+    }
+    if motion {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(33));
+    }
+}
+
+fn agent_message(
+    ui: &mut Ui,
+    provider: &ProviderKind,
+    text: &str,
+    progress: Option<(&str, u64)>,
+    location: Option<(&std::path::Path, u64)>,
+) -> (Option<PathBuf>, bool) {
+    ui.add_space(9.0);
+    let message = ui.scope(|ui| {
+        ui.horizontal(|ui| {
+            provider_mark(ui, provider, 16.0);
+            ui.label(
+                RichText::new(provider_name(provider))
+                    .size(SMALL)
+                    .strong()
+                    .color(colors().secondary),
+            );
         });
-    ui.add_space(4.0);
+        Frame::new()
+            .inner_margin(Margin {
+                left: 24,
+                right: 4,
+                top: 2,
+                bottom: 2,
+            })
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                if let Some((phase, seconds)) = progress {
+                    ui.horizontal(|ui| {
+                        typing_dots(ui);
+                        ui.label(meta_text(format!("{seconds}s")))
+                            .on_hover_text(phase);
+                    });
+                    ui.ctx()
+                        .request_repaint_after(std::time::Duration::from_secs(1));
+                }
+                location.and_then(|(root, _)| super::hub::markdown_in_project(ui, text, root))
+            })
+            .inner
+    });
+    let fork = progress.is_none()
+        && location.is_some_and(|(_, stamp)| {
+            message_actions(ui, message.response.rect, text, stamp, false)
+        });
+    ui.add_space(8.0);
+    (message.inner, fork)
 }
 
 fn changes_block(
@@ -1189,10 +2108,10 @@ fn git(dir: &std::path::Path, args: &[&str]) -> Result<String, String> {
     }
 }
 
-fn technical_log(ui: &mut Ui, session: &LiveSession, audit: &[serde_json::Value]) {
+fn technical_log(ui: &mut Ui, runtime: &Runtime, session: &LiveSession) {
     let meta = &session.meta;
     egui::CollapsingHeader::new(meta_text(format!(
-        "{} · {} {}",
+        "{} Â· {} {}",
         tr("Technical log"),
         meta.log.len(),
         tr("events")
@@ -1202,12 +2121,12 @@ fn technical_log(ui: &mut Ui, session: &LiveSession, audit: &[serde_json::Value]
     .show(ui, |ui| {
         let base = meta.log.first().map_or(0, |l| l.at_ms);
         ui.label(meta_text(format!(
-            "{} turns · {} in · {} out{}",
+            "{} turns Â· {} in Â· {} out{}",
             meta.turns,
             meta.input_tokens,
             meta.output_tokens,
             if meta.cost_micros > 0 {
-                format!(" · US$ {:.4} reported", meta.cost_micros as f64 / 1e6)
+                format!(" Â· US$ {:.4} reported", meta.cost_micros as f64 / 1e6)
             } else {
                 String::new()
             }
@@ -1239,11 +2158,11 @@ fn technical_log(ui: &mut Ui, session: &LiveSession, audit: &[serde_json::Value]
                 .color(colors().secondary),
             );
         }
-        for entry in audit {
+        for entry in runtime.audit(&session.meta.id) {
             let allowed = entry["allow"] == true;
             ui.label(
                 RichText::new(format!(
-                    "gate {} {} {} — {}",
+                    "gate {} {} {} â€” {}",
                     if allowed { "ALLOW" } else { "DENY " },
                     entry["tool"].as_str().unwrap_or_default(),
                     entry["target"].as_str().unwrap_or_default(),
@@ -1278,7 +2197,7 @@ fn composer(
     running: bool,
     attach: &mut bool,
     active: Option<&str>,
-    target: impl FnOnce(&mut Ui),
+    target: impl FnOnce(&mut Ui, bool),
 ) -> Composed {
     let id = ui.make_persistent_id(salt);
     let mut send = false;
@@ -1290,13 +2209,17 @@ fn composer(
     }
     let mut result = Composed::Idle;
     Frame::new()
-        .fill(surface())
-        .stroke(egui::Stroke::new(1.0_f32, colors().control_border))
-        .corner_radius(12)
-        .inner_margin(Margin::symmetric(10, 8))
+        .fill(if super::theme::active() == super::theme::Theme::OledDark {
+            egui::Color32::from_gray(17)
+        } else {
+            colors().surface
+        })
+        .stroke(egui::Stroke::new(1.0_f32, colors().border))
+        .corner_radius(16)
+        .inner_margin(Margin::symmetric(13, 10))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.add(
+            let input = ui.add(
                 TextEdit::multiline(draft)
                     .id(id)
                     .return_key(egui::KeyboardShortcut::new(
@@ -1304,41 +2227,49 @@ fn composer(
                         Key::Enter,
                     ))
                     .frame(false)
-                    .hint_text(hint)
+                    .hint_text(meta_text(hint))
                     .font(egui::FontId::proportional(BODY + 1.0))
                     .desired_rows(2)
                     .desired_width(f32::INFINITY),
             );
-            ui.horizontal(|ui| {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
-                target(ui);
+                if running {
+                    if icon_button(ui, Icon::Stop, tr("Stop"), true).clicked() {
+                        result = Composed::Stop;
+                    }
+                } else if ui
+                    .add_enabled_ui(!draft.trim().is_empty(), |ui| {
+                        icon_button(ui, Icon::Send, tr("Send"), false)
+                    })
+                    .inner
+                    .clicked()
+                {
+                    send = true;
+                }
                 if let Some(file) = active {
                     let name = file.rsplit('/').next().unwrap_or(file);
                     let text = if *attach {
                         format!("+ {name}")
                     } else {
-                        format!("– {name}")
+                        format!("â€“ {name}")
                     };
+                    let width = (ui.available_width() / 3.0).clamp(32.0, 128.0);
                     if ui
-                        .add(egui::Button::new(meta_text(text)).frame(false))
-                        .on_hover_text(tr("Tell the agent which file is open in the editor"))
+                        .add_sized(
+                            [width, ui.spacing().interact_size.y],
+                            egui::Button::new(meta_text(text)).frame(false).truncate(),
+                        )
+                        .on_hover_text(format!(
+                            "{}\n{file}",
+                            tr("Tell the agent which file is open in the editor")
+                        ))
                         .clicked()
                     {
                         *attach = !*attach;
                     }
                 }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if running {
-                        if ui.add(egui::Button::new(tr("Stop"))).clicked() {
-                            result = Composed::Stop;
-                        }
-                    } else if ui
-                        .add_enabled(!draft.trim().is_empty(), primary(tr("Send")))
-                        .clicked()
-                    {
-                        send = true;
-                    }
-                });
+                target(ui, input.changed() || input.gained_focus());
             });
         });
     if send && !running && !draft.trim().is_empty() {
@@ -1347,6 +2278,7 @@ fn composer(
     result
 }
 
+#[allow(clippy::too_many_arguments)]
 fn new_conversation(
     ui: &mut Ui,
     runtime: &mut Runtime,
@@ -1354,27 +2286,21 @@ fn new_conversation(
     slot: &Slot,
     root: Option<PathBuf>,
     active: Option<&str>,
+    skill: &str,
     actions: &mut Vec<Action>,
 ) {
     let accounts = chat_accounts(runtime);
     for a in &accounts {
         ensure_connection(runtime, &a.id);
     }
-    if let Target::Account(id) = &chat.target
-        && !accounts.iter().any(|a| &a.id == id)
-    {
-        chat.target = Target::Auto;
-    }
     if chat.target == Target::Auto
         && let Some(first) = accounts.first()
     {
         chat.target = Target::Account(first.id.clone());
-        chat.model = first.default_model.clone();
+        chat.model = None;
+        chat.effort = None;
+        chat.claude_modes = ClaudeModes::default();
     }
-    let account = match &chat.target {
-        Target::Account(id) => accounts.iter().find(|a| &a.id == id).cloned(),
-        _ => None,
-    };
     let ready = root.is_some() && !accounts.is_empty();
     let composer_height = if ready { 112.0 } else { 0.0 };
     let height = (ui.available_height() - composer_height).max(140.0);
@@ -1414,7 +2340,7 @@ fn new_conversation(
             }
             ui.label(RichText::new(tr("New conversation")).size(LEAD).strong());
             ui.add_space(8.0);
-            target_picker(ui, runtime, chat, &accounts, account.as_ref());
+            target_picker(ui, chat);
             if chat.target == Target::Orchestrator {
                 ui.add_space(8.0);
                 plan_card(ui, runtime, actions);
@@ -1424,43 +2350,52 @@ fn new_conversation(
         notice(ui, runtime);
         return;
     }
-    let label = match (&chat.target, &account) {
-        (Target::Orchestrator, _) => tr("Covalos Orchestrator").to_owned(),
-        (_, Some(a)) => {
-            let model_display = chat
-                .model
-                .as_deref()
-                .filter(|m| model_belongs_to_provider(m, &a.provider))
-                .map(|m| curated_model_label(m).unwrap_or(m).to_owned())
-                .unwrap_or_else(|| tr("default model").into());
-            format!("{} · {}", provider_name(&a.provider), model_display)
-        }
-        _ => String::new(),
-    };
+    let mut open_providers = false;
     let hint = if chat.target == Target::Orchestrator {
         tr("Describe an objective; the orchestrator plans and assigns it")
     } else {
         tr("Message the agent")
     };
+    let mut draft = std::mem::take(&mut chat.draft);
+    let mut attach = chat.attach;
     let result = composer(
         ui,
         ("composer-new", format!("{slot:?}")),
-        &mut chat.draft,
+        &mut draft,
         hint,
         false,
-        &mut chat.attach,
+        &mut attach,
         active,
-        |ui| {
-            ui.label(meta_text(label));
+        |ui, composing| {
+            if chat.target == Target::Orchestrator {
+                ui.label(meta_text(tr("Covalos Orchestrator")));
+            } else {
+                open_providers = draft_picker(ui, runtime, chat, root.as_deref(), composing);
+            }
         },
     );
+    chat.draft = draft;
+    chat.attach = attach;
+    if open_providers {
+        actions.push(Action::AddAi);
+    }
     notice(ui, runtime);
     let Composed::Send(text) = result else { return };
     if chat.target == Target::Orchestrator {
         actions.push(Action::Objective(text));
         return;
     }
-    let Some(account) = account else { return };
+    let Some(account) = accounts
+        .iter()
+        .find(|a| chat.target == Target::Account(a.id.clone()))
+    else {
+        chat.draft = text;
+        runtime.notice = Some((
+            false,
+            tr("The selected account is unavailable. Choose an account before sending.").to_owned(),
+        ));
+        return;
+    };
     let title: String = text
         .lines()
         .next()
@@ -1468,14 +2403,13 @@ fn new_conversation(
         .chars()
         .take(48)
         .collect();
-    let model = chat
-        .model
-        .clone()
-        .filter(|m| model_belongs_to_provider(m, &account.provider));
+    let model = chat.model.clone();
     let created = runtime.create_session(NewSession {
         title,
         account: account.id.clone(),
         model,
+        effort: chat.effort.clone(),
+        claude_modes: chat.claude_modes,
         root: root.clone().expect("checked"),
         worktree: chat.worktree,
         preset: PRESETS[chat.preset].0,
@@ -1484,175 +2418,43 @@ fn new_conversation(
     });
     match created {
         Ok(index) => {
-            let prompt = with_file(&text, chat.attach.then_some(active).flatten());
-            if let Err(e) = runtime.send(index, &prompt) {
+            let prompt = with_file(&text, chat.attach.then_some(active).flatten()) + skill;
+            if let Err(e) = runtime.send_chat(index, &prompt, &text) {
                 runtime.sessions[index].draft = text;
-                runtime.notice = Some((false, e));
+                runtime.notice = Some((false, tr(&e).to_owned()));
             }
             let id = runtime.sessions[index].meta.id.as_str().to_owned();
             actions.push(Action::Select(slot.clone(), Some(id)));
         }
         Err(e) => {
             chat.draft = text;
-            runtime.notice = Some((false, e));
+            runtime.notice = Some((false, tr(&e).to_owned()));
         }
     }
 }
 
-/// Unified selector: an account (provider, sign-in, model, permissions) or the
-/// Covalos Orchestrator.
-fn target_picker(
-    ui: &mut Ui,
-    runtime: &mut Runtime,
-    chat: &mut ChatState,
-    accounts: &[Account],
-    account: Option<&Account>,
-) {
-    ui.label(meta_text(tr("Talk to")));
-    for a in accounts {
-        let (color, state) = connection_view(runtime, a);
-        let selected = chat.target == Target::Account(a.id.clone());
-        let response = choice_row(
-            ui,
-            selected,
-            provider_name(&a.provider),
-            tr(method_name(a.method)),
-            Some((color, state)),
-        );
-        if response.clicked() {
-            chat.target = Target::Account(a.id.clone());
-            chat.model = a.default_model.clone();
-        }
-    }
-    if choice_row(
-        ui,
-        chat.target == Target::Orchestrator,
-        "Covalos Orchestrator",
-        tr("Plans an objective and assigns roles to your accounts"),
-        None,
-    )
-    .clicked()
+fn target_picker(ui: &mut Ui, chat: &mut ChatState) {
+    if ui
+        .selectable_label(
+            chat.target == Target::Orchestrator,
+            tr("Covalos Orchestrator"),
+        )
+        .clicked()
     {
-        chat.target = Target::Orchestrator;
-    }
-    let Some(account) = account else { return };
-    if chat.target == Target::Orchestrator {
-        return;
-    }
-    if let Some(Connection::SignedOut(_)) = runtime.connection.get(&account.id) {
-        ui.add_space(4.0);
-        ui.horizontal_wrapped(|ui| {
-            ui.label(
-                RichText::new(tr("This account is signed out."))
-                    .size(SMALL)
-                    .color(colors().warning),
-            );
-            if account.method == ConnectionMethod::OfficialLogin
-                && ui.small_button(tr("Sign in")).clicked()
-            {
-                runtime.notice = Some(match runtime.sign_in(&account.id) {
-                    Ok(()) => (true, tr("Finish signing in in the console window.").into()),
-                    Err(e) => (false, e),
-                });
-            }
-            if ui.small_button(tr("Check again")).clicked() {
-                runtime.refresh_connection(&account.id);
-            }
-        });
-    }
-    ui.add_space(6.0);
-    egui::CollapsingHeader::new(meta_text(tr("Options")))
-        .id_salt(("agent-new-options", &account.id))
-        .default_open(false)
-        .show(ui, |ui| {
-            ui.label(meta_text(tr("Model")));
-            let models = model_options(runtime, account);
-            ui.horizontal_wrapped(|ui| {
-                if ui
-                    .selectable_label(chat.model.is_none(), tr("Default"))
-                    .clicked()
-                {
-                    chat.model = None;
-                }
-                for m in &models {
-                    if ui
-                        .selectable_label(chat.model.as_deref() == Some(m.as_str()), m)
-                        .clicked()
-                    {
-                        chat.model = Some(m.clone());
-                    }
-                }
-                let custom = ui.add(
-                    TextEdit::singleline(&mut chat.custom_model)
-                        .hint_text(tr("other model id"))
-                        .desired_width(120.0),
-                );
-                if custom.lost_focus() && !chat.custom_model.trim().is_empty() {
-                    chat.model = Some(chat.custom_model.trim().to_owned());
-                }
-            });
-            ui.add_space(6.0);
-            ui.label(meta_text(tr("Permissions")));
-            ui.horizontal_wrapped(|ui| {
-                for (i, (_, label)) in PRESETS.iter().enumerate() {
-                    ui.selectable_value(&mut chat.preset, i, tr(label));
-                }
-            });
-            checkbox(ui, &mut chat.worktree, tr("Work in its own git worktree"));
-        });
-}
-
-fn choice_row(
-    ui: &mut Ui,
-    selected: bool,
-    title: &str,
-    detail: &str,
-    state: Option<(egui::Color32, String)>,
-) -> egui::Response {
-    let response = Frame::new()
-        .fill(if selected {
-            colors().accent_bg
+        chat.target = if chat.target == Target::Orchestrator {
+            Target::Auto
         } else {
-            surface()
-        })
-        .stroke(egui::Stroke::new(
-            1.0_f32,
-            if selected {
-                colors().accent.gamma_multiply(0.6)
-            } else {
-                colors().border
-            },
-        ))
-        .corner_radius(9)
-        .inner_margin(Margin::symmetric(10, 7))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 1.0;
-                    ui.label(
-                        RichText::new(tr(title))
-                            .size(BODY)
-                            .strong()
-                            .color(colors().text),
-                    );
-                    ui.add(egui::Label::new(meta_text(detail)).truncate());
-                });
-                if let Some((color, text)) = state {
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.label(RichText::new(tr(&text)).size(SMALL).color(color));
-                        dot(ui, color);
-                    });
-                }
-            });
-        })
-        .response
-        .interact(egui::Sense::click());
-    ui.add_space(4.0);
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+            Target::Orchestrator
+        };
+    }
+    ui.horizontal_wrapped(|ui| {
+        for (index, (_, label)) in PRESETS.iter().enumerate() {
+            ui.selectable_value(&mut chat.preset, index, tr(label));
+        }
+    });
+    checkbox(ui, &mut chat.worktree, tr("Work in its own git worktree"));
 }
 
-/// Compact live view of the orchestrator's current plan.
 fn plan_card(ui: &mut Ui, runtime: &Runtime, actions: &mut Vec<Action>) {
     let Some(run) = runtime.plan.as_ref() else {
         ui.label(meta_text(tr(
@@ -1677,7 +2479,7 @@ fn plan_card(ui: &mut Ui, runtime: &Runtime, actions: &mut Vec<Action>) {
                     dot(ui, super::agent_hub::task_color(&task.status));
                     ui.add(
                         egui::Label::new(meta_text(format!(
-                            "{} · {}",
+                            "{} Â· {}",
                             task.spec.role, task.spec.title
                         )))
                         .truncate(),
@@ -1688,379 +2490,4 @@ fn plan_card(ui: &mut Ui, runtime: &Runtime, actions: &mut Vec<Action>) {
                 actions.push(Action::OpenOrchestrator);
             }
         });
-}
-
-// ---------------------------------------------------------------- add AI
-
-const ADD_PROVIDERS: [(&str, &str); 4] = [
-    (
-        "Claude Code",
-        "Anthropic's CLI. Official sign-in or an Anthropic API key.",
-    ),
-    (
-        "Codex",
-        "OpenAI's CLI. ChatGPT sign-in or an OpenAI API key.",
-    ),
-    (
-        "Gemini CLI",
-        "Google's CLI. Accounts can be saved; chats need its verified adapter.",
-    ),
-    (
-        "Other",
-        "Editors and agents without an official headless interface.",
-    ),
-];
-
-/// Methods each provider really supports through its own CLI.
-fn add_methods(
-    provider: usize,
-    isolated: bool,
-) -> Vec<(ConnectionMethod, &'static str, &'static str)> {
-    let mut out = vec![(
-        ConnectionMethod::SystemCli,
-        "Use my existing CLI sign-in",
-        "Runs the CLI exactly as you already signed in on this PC.",
-    )];
-    if isolated {
-        out.push((
-            ConnectionMethod::OfficialLogin,
-            "New isolated sign-in",
-            "Separate config folder and the provider's own login. Several accounts side by side.",
-        ));
-    }
-    match provider {
-        0 => out.push((
-            ConnectionMethod::ApiKey,
-            "Anthropic API key",
-            "Kept in Windows Credential Manager; passed only as ANTHROPIC_API_KEY.",
-        )),
-        1 => out.push((
-            ConnectionMethod::OfficialLogin,
-            "OpenAI API key",
-            "Runs codex login --with-api-key in an isolated folder. Covalos does not keep the key.",
-        )),
-        2 => out.push((
-            ConnectionMethod::ApiKey,
-            "Gemini API key",
-            "Kept in Windows Credential Manager; passed only as GEMINI_API_KEY.",
-        )),
-        _ => {}
-    }
-    out
-}
-
-impl Editor {
-    pub(super) fn add_ai_modal(&mut self, ctx: &egui::Context) {
-        let Some(mut form) = self.hub.agents.chat.add_ai.take() else {
-            return;
-        };
-        if !self.ensure_runtime(ctx) {
-            return;
-        }
-        let runtime = self.hub.agents.runtime.as_mut().expect("runtime");
-        let mut keep = true;
-        let modal = egui::Modal::new(Id::new("add-ai"))
-            .frame(modal_frame())
-            .show(ctx, |ui| {
-                ui.set_width(480.0);
-                ui.label(RichText::new(tr("Add AI")).size(HEADING).strong());
-                ui.label(muted(tr(
-                    "Connect with your subscription CLI or an API key.",
-                )));
-                ui.add_space(10.0);
-                if let Some(id) = form.created.clone() {
-                    add_ai_done(ui, runtime, &mut form, &id, &mut keep);
-                    return;
-                }
-                for (i, (name, detail)) in ADD_PROVIDERS.iter().take(3).enumerate() {
-                    let kind = match i {
-                        0 => Some(ProviderKind::ClaudeCode),
-                        1 => Some(ProviderKind::Codex),
-                        2 => Some(ProviderKind::Gemini),
-                        _ => None,
-                    };
-                    let state = kind.as_ref().and_then(|k| runtime.detections.get(k)).map(|d| {
-                        if !d.done {
-                            (colors().muted, tr("Detecting…").to_owned())
-                        } else if d.program.is_some() {
-                            (colors().success, tr("Installed").to_owned())
-                        } else {
-                            (colors().muted, tr("Not installed").to_owned())
-                        }
-                    });
-                    if choice_row(ui, form.provider == i, name, tr(detail), state).clicked() {
-                        form.provider = i;
-                        form.method = 0;
-                    }
-                }
-                ui.add_space(8.0);
-                if form.provider == 3 {
-                    for tool in &runtime.external {
-                        ui.label(
-                            RichText::new(format!(
-                                "{} — {}",
-                                tool.name,
-                                if tool.path.is_some() {
-                                    tr("detected")
-                                } else {
-                                    tr("not found")
-                                }
-                            ))
-                            .size(BODY)
-                            .strong(),
-                        );
-                        ui.label(meta_text(tool.note));
-                    }
-                    ui.label(meta_text(tr(
-                        "These cannot be driven by Covalos: they expose no official headless \
-                         interface, and reusing their sign-in would mean taking another app's tokens.",
-                    )));
-                    ui.add_space(8.0);
-                    if ui.button(tr("Close")).clicked() {
-                        keep = false;
-                    }
-                    return;
-                }
-                let kind = [
-                    ProviderKind::ClaudeCode,
-                    ProviderKind::Codex,
-                    ProviderKind::Gemini,
-                ][form.provider]
-                    .clone();
-                let installed = runtime
-                    .detections
-                    .get(&kind)
-                    .is_some_and(|d| d.program.is_some());
-                if let Some(rx) = &form.install {
-                    match rx.try_recv() {
-                        Ok(Ok(())) => {
-                            form.install = None;
-                            form.error = None;
-                            runtime.redetect();
-                        }
-                        Ok(Err(err)) => {
-                            form.install = None;
-                            form.error = Some(err);
-                        }
-                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                            form.install = None;
-                        }
-                        Err(std::sync::mpsc::TryRecvError::Empty) => {}
-                    }
-                }
-                if !installed {
-                    ui.label(RichText::new(tr("Not installed on this PC")).color(colors().warning));
-                    ui.label(meta_text(match form.provider {
-                        0 => "Install: npm install -g @anthropic-ai/claude-code",
-                        1 => "Install the Codex app or: npm install -g @openai/codex",
-                        _ => "Install: npm install -g @google/gemini-cli",
-                    }));
-                    ui.horizontal(|ui| {
-                        if form.install.is_some() {
-                            busy_indicator(ui);
-                            ui.label(muted(tr("Installing CLI…")));
-                        } else if let Some(pkg) = cli_npm_package(form.provider)
-                            && ui.add(primary(tr("Install CLI"))).clicked()
-                        {
-                            form.error = None;
-                            form.install = Some(spawn_cli_install(pkg, ctx.clone()));
-                        }
-                        if ui.small_button(tr("Detect again")).clicked() {
-                            runtime.redetect();
-                        }
-                    });
-                    ui.add_space(6.0);
-                }
-                let isolated = runtime
-                    .registry
-                    .get(&kind)
-                    .is_ok_and(|s| s.supports_isolated_login());
-                let methods: Vec<_> = add_methods(form.provider, isolated)
-                    .into_iter()
-                    .filter(|(m, _, _)| installed || *m == ConnectionMethod::ApiKey)
-                    .collect();
-                if methods.is_empty() {
-                    return;
-                }
-                form.method = form.method.min(methods.len() - 1);
-                ui.label(meta_text(tr("How to connect")));
-                for (i, (_, title, detail)) in methods.iter().enumerate() {
-                    if choice_row(ui, form.method == i, title, tr(detail), None).clicked() {
-                        form.method = i;
-                    }
-                }
-                let (method, title, _) = methods[form.method];
-                let wants_key = title.contains("API key");
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    ui.add(
-                        TextEdit::singleline(&mut form.label)
-                            .hint_text(tr("Name (e.g. Work)"))
-                            .desired_width(160.0),
-                    );
-                    ui.add(
-                        TextEdit::singleline(&mut form.model)
-                            .hint_text(tr("Default model (optional)"))
-                            .desired_width(180.0),
-                    );
-                });
-                if wants_key {
-                    ui.add(
-                        TextEdit::singleline(&mut form.key)
-                            .password(true)
-                            .hint_text(tr("Paste the API key"))
-                            .desired_width(f32::INFINITY),
-                    );
-                }
-                if let Some(error) = &form.error {
-                    ui.label(RichText::new(error).size(SMALL).color(colors().error));
-                }
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    let ready = !wants_key || !form.key.trim().is_empty();
-                    if ui.add_enabled(ready, primary(tr("Add"))).clicked() {
-                        match create_account(runtime, &kind, method, wants_key, &form) {
-                            Ok(id) => {
-                                form.key.clear();
-                                form.error = None;
-                                runtime.refresh_connection(&id);
-                                form.created = Some(id);
-                            }
-                            Err(e) => form.error = Some(e),
-                        }
-                    }
-                    if ui.button(tr("Cancel")).clicked() {
-                        keep = false;
-                    }
-                });
-            });
-        if modal.should_close() {
-            keep = false;
-        }
-        if keep {
-            self.hub.agents.chat.add_ai = Some(form);
-        }
-    }
-}
-
-fn create_account(
-    runtime: &mut Runtime,
-    kind: &ProviderKind,
-    method: ConnectionMethod,
-    wants_key: bool,
-    form: &AddAi,
-) -> Result<AccountId, String> {
-    let base = match kind {
-        ProviderKind::ClaudeCode => "claude",
-        ProviderKind::Codex => "codex",
-        _ => "gemini",
-    };
-    let taken: Vec<String> = runtime
-        .profiles
-        .accounts()
-        .iter()
-        .map(|a| a.id.to_string())
-        .collect();
-    let id = (1..100)
-        .map(|n| {
-            if n == 1 {
-                base.to_owned()
-            } else {
-                format!("{base}-{n}")
-            }
-        })
-        .find(|c| !taken.contains(c))
-        .ok_or("Too many accounts for this provider.")?;
-    let id = AccountId::new(id).map_err(|e| e.to_string())?;
-    let label = if form.label.trim().is_empty() {
-        format!("{} · {}", provider_name(kind), method_name(method))
-    } else {
-        form.label.trim().to_owned()
-    };
-    let mut account = Account::new(id.clone(), kind.clone(), &label, method);
-    let model = form.model.trim();
-    if !model.is_empty() {
-        account.default_model = Some(model.to_owned());
-        account.declared_models = vec![model.to_owned()];
-    }
-    runtime.add_account(account)?;
-    if wants_key {
-        let key = form.key.trim();
-        let saved = if method == ConnectionMethod::ApiKey {
-            runtime.save_api_key(&id, key)
-        } else {
-            runtime.codex_api_login(&id, key)
-        };
-        if let Err(e) = saved {
-            let _ = runtime.remove_account(&id);
-            return Err(e);
-        }
-    }
-    Ok(id)
-}
-
-fn add_ai_done(
-    ui: &mut Ui,
-    runtime: &mut Runtime,
-    form: &mut AddAi,
-    id: &AccountId,
-    keep: &mut bool,
-) {
-    let Some(account) = runtime
-        .profiles
-        .accounts()
-        .iter()
-        .find(|a| &a.id == id)
-        .cloned()
-    else {
-        *keep = false;
-        return;
-    };
-    ui.label(
-        RichText::new(format!("{} {}", account.label, tr("added")))
-            .size(LEAD)
-            .strong(),
-    );
-    let (color, text) = connection_view(runtime, &account);
-    ui.horizontal(|ui| {
-        dot(ui, color);
-        ui.label(RichText::new(tr(&text)).color(color));
-    });
-    if account.method == ConnectionMethod::OfficialLogin
-        && !matches!(runtime.connection.get(id), Some(Connection::SignedIn(_)))
-    {
-        ui.label(meta_text(tr(
-            "Sign in with the provider's own login. It opens in a console window.",
-        )));
-        if ui.add(primary(tr("Sign in now"))).clicked() {
-            runtime.notice = Some(match runtime.sign_in(id) {
-                Ok(()) => (true, tr("Finish signing in in the console window.").into()),
-                Err(e) => (false, e),
-            });
-        }
-    }
-    if account.provider == ProviderKind::Gemini {
-        ui.label(meta_text(tr(
-            "Saved. Gemini chats stay disabled until Covalos has a verified Gemini CLI adapter.",
-        )));
-    }
-    if let Some((ok, text)) = &runtime.notice {
-        ui.label(RichText::new(text).size(SMALL).color(if *ok {
-            colors().success
-        } else {
-            colors().warning
-        }));
-    }
-    ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        if ui.button(tr("Check sign-in")).clicked() {
-            runtime.refresh_connection(id);
-        }
-        if ui.add(primary(tr("Done"))).clicked() {
-            *keep = false;
-        }
-        if ui.button(tr("Add another")).clicked() {
-            *form = AddAi::default();
-        }
-    });
 }

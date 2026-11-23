@@ -121,6 +121,17 @@ fn shell_command(cwd: &Path) -> CommandBuilder {
 
 impl Shell {
     pub(super) fn spawn(id: u32, cwd: PathBuf, ctx: &egui::Context) -> Result<Self, String> {
+        let command = shell_command(&crate::agents_runtime::plain(&cwd));
+        Self::spawn_command(id, cwd, ctx, command, false)
+    }
+
+    pub(super) fn spawn_command(
+        id: u32,
+        cwd: PathBuf,
+        ctx: &egui::Context,
+        command: CommandBuilder,
+        oauth: bool,
+    ) -> Result<Self, String> {
         // "Ignore Ctrl+C" is inherited from whoever launched Covalos (any parent
         // started with CREATE_NEW_PROCESS_GROUP). Clear it before the shell is
         // created so the shell and its programs receive Ctrl+C.
@@ -140,8 +151,8 @@ impl Shell {
             .map_err(|e| format!("Could not open a pseudo console: {e}"))?;
         let child = pair
             .slave
-            .spawn_command(shell_command(&crate::agents_runtime::plain(&cwd)))
-            .map_err(|e| format!("Could not start PowerShell: {e}"))?;
+            .spawn_command(command)
+            .map_err(|e| format!("Could not start the terminal command: {e}"))?;
         drop(pair.slave);
         let pid = child.process_id();
         if let Some(pid) = pid {
@@ -172,7 +183,7 @@ impl Shell {
                         Ok(n) => n,
                     };
                     let chunk = &buffer[..n];
-                    if std::env::var_os("COVALOS_PTY_TRACE").is_some() {
+                    if !oauth && std::env::var_os("COVALOS_PTY_TRACE").is_some() {
                         eprintln!("pty <- {:?}", String::from_utf8_lossy(chunk));
                     }
                     // ConPTY may ask where the cursor is before it starts drawing.
@@ -215,13 +226,18 @@ impl Shell {
                     let text = super::terminal::strip_ansi(&String::from_utf8_lossy(chunk));
                     tail.push_str(&text);
                     if let Ok(mut list) = urls.lock() {
-                        for url in super::terminal::local_urls(&tail) {
+                        let detected = if oauth {
+                            oauth_urls(&tail)
+                        } else {
+                            super::terminal::local_urls(&tail)
+                        };
+                        for url in detected {
                             if !list.contains(&url) {
                                 list.push(url);
                             }
                         }
                     }
-                    let keep = tail.len().saturating_sub(256);
+                    let keep = tail.len().saturating_sub(if oauth { 16_384 } else { 256 });
                     let keep = tail.ceil_char_boundary(keep);
                     tail.drain(..keep);
                     ctx.request_repaint();
@@ -252,6 +268,10 @@ impl Shell {
 
     pub(super) fn exited(&self) -> bool {
         self.exited.load(Ordering::Relaxed)
+    }
+
+    pub(super) fn process_finished(&mut self) -> bool {
+        self.child.try_wait().is_ok_and(|exit| exit.is_some()) || self.exited()
     }
 
     pub(super) fn urls(&self) -> Vec<String> {
@@ -481,6 +501,19 @@ impl Shell {
     }
 }
 
+fn oauth_urls(text: &str) -> Vec<String> {
+    static URL: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r#"https://(?:claude\.ai|platform\.claude\.com|console\.anthropic\.com|auth\.openai\.com|auth\.chatgpt\.com|chatgpt\.com|accounts\.google\.com)/[^\s<>"\x1b]+(?:\s|$)"#).expect("OAuth URL pattern")
+    });
+    URL.find_iter(text)
+        .filter_map(|m| {
+            let candidate = m.as_str().trim_end();
+            (m.end() < text.len() || candidate.len() < m.as_str().len())
+                .then(|| candidate.trim_end_matches(['.', ')', ']']).to_owned())
+        })
+        .collect()
+}
+
 /// Bytes a VT terminal sends for a key; `None` for keys handled elsewhere.
 fn key_bytes(key: Key, m: egui::Modifiers) -> Option<Vec<u8>> {
     let seq: &[u8] = match key {
@@ -597,7 +630,7 @@ mod tests {
         shell.write(b"cd web; Write-Output ('co'+'valos-'+(Split-Path -Leaf (Get-Location)))\r");
         assert!(wait_for(&shell, "covalos-web", 30), "{}", shell.contents());
         shell.write(b"ping -n 60 127.0.0.1\r");
-        assert!(wait_for(&shell, "127.0.0.1", 30), "{}", shell.contents());
+        assert!(wait_for(&shell, "TTL=", 30), "{}", shell.contents());
         shell.interrupt();
         assert!(wait_for(&shell, "Control-C", 30), "{}", shell.contents());
         // The console drops input typed while it handles Ctrl+C.

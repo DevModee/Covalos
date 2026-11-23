@@ -6,12 +6,12 @@ Covalos has two numbers on purpose:
 
 | Name | Where | Current | Rule |
 | --- | --- | --- | --- |
-| **Public release** | `brand::RELEASE`, About window, top bar tag, git tag, release notes | **Alpha 0.1.0** (tag `v0.1.0-alpha`) | What people see. `Alpha 0.x.y` while the product is in alpha; bump `y` for fixes, `x` for new capabilities. Then `Beta`, then `1.0.0`. |
-| **Internal build** | `Cargo.toml` `version`, Windows file version (`build.rs`), installer | **0.4.0** | Only ever increases. Installers and update checks compare this number, so it is never reset to match the public name. Bump it with every published build. |
+| **Public release** | `brand::RELEASE`, About window, top bar tag, git tag, release notes | **Beta 0.8.3** | What people see. `Alpha 0.x.y` while the product is in alpha; bump `y` for fixes, `x` for new capabilities. Then `Beta`, then `1.0.0`. |
+| **Internal build** | `Cargo.toml` `version`, Windows file version (`build.rs`), installer | **0.8.3** | Only ever increases. Installers and update checks compare this number, so it is never reset to match the public name. Bump it with every published build. |
 
-About shows both: `Alpha 0.1.0 · build 0.4.0`.
+About shows both: `Beta 0.8.3 · build 0.8.3`.
 
-Tags: `v<public>` with the alpha suffix, e.g. `v0.1.0-alpha`. A tag is created only when a build is actually published; nothing here publishes automatically.
+Prerelease tags use the channel suffix, such as `v0.8.3-beta`. A tag is created only when a build is actually published; nothing here publishes automatically.
 
 ## Building
 
@@ -39,4 +39,4 @@ Before the first Linux/macOS build: implement listeners/process tables for Ports
 
 ## Third-party licenses
 
-Dependencies keep their own licenses. A published build must ship their notices (for example generated with `cargo about` or `cargo-license`) next to the executable or in the installer. Not generated yet for Alpha 0.1.0.
+Dependencies keep their own licenses. A published build must ship their notices (for example generated with `cargo about` or `cargo-license`) next to the executable or in the installer. The installer build collects license files and generates third-party notices.

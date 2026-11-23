@@ -65,6 +65,7 @@ Name: "contextmenu"; Description: "{cm:ContextMenu}"; GroupDescription: "{cm:Add
 
 [Files]
 Source: "{#PayloadDir}\covalos.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#PayloadDir}\WebView2Loader.dll"; DestDir: "{app}"
 Source: "{#PayloadDir}\covalos.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PayloadDir}\THIRD_PARTY_NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PayloadDir}\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion recursesubdirs createallsubdirs

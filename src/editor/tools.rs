@@ -447,9 +447,7 @@ impl Editor {
             let _ = add.current_dir(&root).args(["add", "-A"]).output();
         }
         let mut commit = Command::new("git");
-        commit
-            .current_dir(&root)
-            .args(["commit", "-m", &message]);
+        commit.current_dir(&root).args(["commit", "-m", &message]);
         self.tools.commit_output.clear();
         self.tools.commit_job = Some(worker(commit, ctx.clone(), true));
         self.tools.commit_message.clear();
@@ -526,24 +524,23 @@ impl Editor {
                 (SourceTab::GitHub, "GitHub"),
             ] {
                 let selected = self.tools.source_tab == tab;
-                let btn = egui::Button::new(
-                    RichText::new(tr(label)).size(SMALL).color(if selected {
+                let btn =
+                    egui::Button::new(RichText::new(tr(label)).size(SMALL).color(if selected {
                         colors().text
                     } else {
                         colors().secondary
-                    }),
-                )
-                .fill(if selected {
-                    colors().elevated
-                } else {
-                    egui::Color32::TRANSPARENT
-                })
-                .stroke(if selected {
-                    egui::Stroke::new(1.0_f32, colors().border)
-                } else {
-                    egui::Stroke::NONE
-                })
-                .corner_radius(6);
+                    }))
+                    .fill(if selected {
+                        colors().elevated
+                    } else {
+                        egui::Color32::TRANSPARENT
+                    })
+                    .stroke(if selected {
+                        egui::Stroke::new(1.0_f32, colors().border)
+                    } else {
+                        egui::Stroke::NONE
+                    })
+                    .corner_radius(6);
                 if ui.add(btn).clicked() {
                     self.tools.source_tab = tab;
                     if tab == SourceTab::GitHub && !self.tools.github_loaded {
@@ -632,9 +629,7 @@ impl Editor {
                                 );
                                 ui.add(
                                     egui::Label::new(
-                                        RichText::new(&item.title)
-                                            .size(BODY)
-                                            .color(colors().text),
+                                        RichText::new(&item.title).size(BODY).color(colors().text),
                                     )
                                     .truncate(),
                                 );
@@ -938,13 +933,10 @@ impl Editor {
                                 .unwrap_or('?')
                                 .to_ascii_uppercase()
                                 .to_string();
-                            let (avatar, _) =
-                                ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
-                            ui.painter().circle_filled(
-                                avatar.center(),
-                                8.5,
-                                colors().elevated,
-                            );
+                            let (avatar, _) = ui
+                                .allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+                            ui.painter()
+                                .circle_filled(avatar.center(), 8.5, colors().elevated);
                             ui.painter().text(
                                 avatar.center(),
                                 egui::Align2::CENTER_CENTER,
@@ -1116,13 +1108,13 @@ impl Editor {
                         (Tab::AgentLog, tr("Agent log").to_owned()),
                     ] {
                         let selected = self.tools.tab == tab;
-                        let btn = egui::Button::new(
-                            RichText::new(label).size(SMALL).color(if selected {
+                        let btn = egui::Button::new(RichText::new(label).size(SMALL).color(
+                            if selected {
                                 colors().text
                             } else {
                                 colors().secondary
-                            }),
-                        )
+                            },
+                        ))
                         .fill(if selected {
                             colors().elevated
                         } else {
@@ -1185,7 +1177,6 @@ impl Editor {
         }
     }
 
-    #[cfg(test)]
     pub(super) fn show_tool(&mut self, name: &str) {
         self.preferences.tools_open = true;
         self.tools.tab = match name {
@@ -1353,8 +1344,13 @@ fn parse_github_items(raw: &str) -> Result<Vec<GitHubItem>, String> {
     if trimmed.is_empty() {
         return Ok(Vec::new());
     }
-    let value: serde_json::Value = serde_json::from_str(trimmed)
-        .map_err(|_| trimmed.lines().next().unwrap_or("GitHub CLI unavailable.").to_owned())?;
+    let value: serde_json::Value = serde_json::from_str(trimmed).map_err(|_| {
+        trimmed
+            .lines()
+            .next()
+            .unwrap_or("GitHub CLI unavailable.")
+            .to_owned()
+    })?;
     let Some(arr) = value.as_array() else {
         return Err("Unexpected GitHub CLI output.".to_owned());
     };

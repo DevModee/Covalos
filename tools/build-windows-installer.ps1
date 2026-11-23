@@ -53,6 +53,22 @@ try {
     $stage = Join-Path $repo 'target\windows-package'
     New-Item -ItemType Directory -Force -Path $stage,$OutputDir | Out-Null
     Copy-Item -LiteralPath $BinaryPath -Destination (Join-Path $stage 'covalos.exe') -Force
+    $loader = Join-Path (Split-Path -Parent $BinaryPath) 'WebView2Loader.dll'
+    if (-not (Test-Path -LiteralPath $loader -PathType Leaf)) { throw 'The Windows GNU build is missing WebView2Loader.dll. Build Covalos before packaging.' }
+    Copy-Item -LiteralPath $loader -Destination (Join-Path $stage 'WebView2Loader.dll') -Force
+    $probeDir = Join-Path $TargetDir ('startup-check-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $probeDir | Out-Null
+    $previousConfig = $env:COVALOS_CONFIG_DIR
+    try {
+        $env:COVALOS_CONFIG_DIR = $probeDir
+        $probe = Start-Process -FilePath (Join-Path $stage 'covalos.exe') -ArgumentList '--library','sources' -WorkingDirectory $stage -WindowStyle Hidden -RedirectStandardOutput (Join-Path $probeDir 'sources.json') -PassThru
+        $null = $probe.Handle
+        if (-not $probe.WaitForExit(15000)) { $probe.Kill(); throw 'The staged application timed out at startup.' }
+        if ($probe.ExitCode -ne 0) { throw "The staged application failed at startup with exit code $($probe.ExitCode)." }
+        Get-Content -LiteralPath (Join-Path $probeDir 'sources.json') -Raw | ConvertFrom-Json | Out-Null
+    } finally {
+        $env:COVALOS_CONFIG_DIR = $previousConfig
+    }
     Copy-Item -LiteralPath (Join-Path $repo 'assets\brand\covalos-icon.ico') -Destination (Join-Path $stage 'covalos.ico') -Force
     $licenseDir = Join-Path $stage 'licenses'
     New-Item -ItemType Directory -Force -Path $licenseDir | Out-Null
@@ -91,6 +107,7 @@ try {
     $notices = New-Object 'System.Collections.Generic.List[string]'
     $notices.Add('COVALOS - Third-party notices')
     $notices.Add('Fonts: Geist and IBM Plex Mono (SIL OFL). UI: Lucide (ISC). File icons: Material Icon Theme and vscode-icons (MIT).')
+    $notices.Add('WebView2Loader.dll is distributed with the Microsoft Edge WebView2 SDK. The embedded web preview also uses the Microsoft Edge WebView2 Runtime installed on the machine.')
     $notices.Add('Provider marks identify their respective integrations and remain the property of their owners. See licenses/assets-brands-PROVENANCE.md.')
     $notices.Add('The license texts below apply to the named third-party components. They do not grant a license to COVALOS itself.')
     foreach ($package in @($seen | Where-Object { $_ -ne $metadata.resolve.root } | ForEach-Object { $packages[$_] } | Sort-Object name,version)) {

@@ -33,7 +33,10 @@ pub struct CliExecutor {
     /// Builds Claude Code `--settings` for an attempt, e.g. the host's
     /// PreToolUse approval gate scoped to the attempt's workdir.
     pub claude_settings: Option<SettingsFn>,
+    pub acp_execute: Option<AcpFn>,
 }
+
+pub type AcpFn = Arc<dyn Fn(std::process::Command, &Assignment, &Channel) -> Outcome + Send + Sync>;
 
 pub type SettingsFn = Arc<dyn Fn(&Assignment) -> Option<String> + Send + Sync>;
 
@@ -58,16 +61,12 @@ impl Executor for CliExecutor {
                 false,
             );
         };
-        let mut decoder: Box<dyn StreamDecoder> = match spec.headless {
-            Headless::ClaudeStreamJson => Box::new(ClaudeDecoder::default()),
-            Headless::CodexExecJson => Box::new(CodexDecoder::default()),
-            Headless::Unsupported => {
-                return fail(
-                    format!("{} has no headless mode in COVALOS yet", spec.label),
-                    false,
-                );
-            }
-        };
+        if spec.headless == Headless::Unsupported {
+            return fail(
+                format!("{} has no headless mode in COVALOS yet", spec.label),
+                false,
+            );
+        }
         let Some(program) = self
             .programs
             .get(&account.provider)
@@ -79,6 +78,7 @@ impl Executor for CliExecutor {
         let purpose = Purpose::Turn(Turn {
             resume: None,
             model: assignment.model.clone(),
+            effort: None,
             sandbox: assignment.role.autonomy.sandbox(),
             settings: self
                 .claude_settings
@@ -106,6 +106,17 @@ impl Executor for CliExecutor {
         };
 
         let mut command = plan.isolated_command(INHERITED_ENV);
+        let mut decoder: Box<dyn StreamDecoder> = match spec.headless {
+            Headless::ClaudeStreamJson => Box::new(ClaudeDecoder::default()),
+            Headless::CodexExecJson => Box::new(CodexDecoder::default()),
+            Headless::Acp => {
+                return match &self.acp_execute {
+                    Some(execute) => execute(command, assignment, channel),
+                    None => fail("This host does not have an ACP executor.", false),
+                };
+            }
+            Headless::Unsupported => unreachable!(),
+        };
         own_group(&mut command);
         let mut child = match command
             .stdin(Stdio::piped())

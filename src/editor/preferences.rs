@@ -34,6 +34,8 @@ pub(super) struct Preferences {
     pub(super) language: super::i18n::Language,
     pub(super) identity: super::identity::IdentityPreferences,
     pub(super) font_size: f32,
+    pub(super) ubuntu_interface: bool,
+    pub(super) hack_editor: bool,
     pub(super) compact: bool,
     pub(super) reduce_motion: bool,
     pub(super) quiet_notifications: bool,
@@ -52,7 +54,13 @@ pub(super) struct Preferences {
     pub(super) agent_detached: Vec<String>,
     /// Last chosen CLI model and thinking effort for Agent Hub.
     pub(super) agent_model: Option<String>,
+    pub(super) agent_account: Option<covalos_agents::AccountId>,
     pub(super) agent_effort: String,
+    pub(super) agent_favorites: std::collections::BTreeSet<(covalos_agents::AccountId, String)>,
+    /// Conversations pinned to the top of the sidebar, by runtime session id.
+    pub(super) agent_pinned: std::collections::BTreeSet<String>,
+    /// Conversations hidden under the Archived section.
+    pub(super) agent_archived: std::collections::BTreeSet<String>,
     pub(super) preview_width: f32,
     /// Last active workspace folder to reopen automatically on next launch.
     pub(super) last_workspace: Option<PathBuf>,
@@ -80,6 +88,8 @@ impl Default for Preferences {
             language: super::i18n::Language::system(),
             identity: super::identity::IdentityPreferences::default(),
             font_size: 15.0,
+            ubuntu_interface: false,
+            hack_editor: false,
             compact: false,
             reduce_motion: false,
             quiet_notifications: false,
@@ -95,7 +105,11 @@ impl Default for Preferences {
             agent_session: None,
             agent_detached: Vec::new(),
             agent_model: None,
-            agent_effort: "Medium".into(),
+            agent_account: None,
+            agent_effort: String::new(),
+            agent_favorites: Default::default(),
+            agent_pinned: Default::default(),
+            agent_archived: Default::default(),
             preview_width: 520.0,
             last_workspace: None,
             workspace_sessions: Vec::new(),
@@ -174,8 +188,8 @@ impl Preferences {
 
     pub(super) fn save_agent_rules(content: &str) -> io::Result<PathBuf> {
         const MAX_RULES_BYTES: usize = 24 * 1024;
-        let path = Self::agent_rules_path()
-            .ok_or_else(|| io::Error::other("Missing settings folder."))?;
+        let path =
+            Self::agent_rules_path().ok_or_else(|| io::Error::other("Missing settings folder."))?;
         let parent = path
             .parent()
             .ok_or_else(|| io::Error::other("Missing settings folder."))?;
@@ -299,9 +313,15 @@ impl Preferences {
     }
 
     /// Safely import allowlisted UI settings from a known local editor config file.
-    pub(super) fn import_from(&mut self, source: ExternalEditor) -> Result<Vec<&'static str>, String> {
+    pub(super) fn import_from(
+        &mut self,
+        source: ExternalEditor,
+    ) -> Result<Vec<&'static str>, String> {
         let Some(path) = source.settings_path() else {
-            return Err(format!("Could not locate {} settings folder.", source.name()));
+            return Err(format!(
+                "Could not locate {} settings folder.",
+                source.name()
+            ));
         };
         if !path.is_file() {
             return Err(format!("No {} settings file found.", source.name()));
@@ -318,7 +338,10 @@ impl Preferences {
         let meta = fs::metadata(path)
             .map_err(|e| format!("Could not read {} settings: {e}", source.name()))?;
         if meta.len() > MAX_IMPORT_BYTES {
-            return Err(format!("{} settings file is too large to import.", source.name()));
+            return Err(format!(
+                "{} settings file is too large to import.",
+                source.name()
+            ));
         }
         let raw = fs::read_to_string(path)
             .map_err(|e| format!("Could not read {} settings: {e}", source.name()))?;
@@ -326,7 +349,10 @@ impl Preferences {
         let value: serde_json::Value = serde_json::from_str(&cleaned)
             .map_err(|_| format!("{} settings file is not valid JSON.", source.name()))?;
         let Some(obj) = value.as_object() else {
-            return Err(format!("{} settings file must be a JSON object.", source.name()));
+            return Err(format!(
+                "{} settings file must be a JSON object.",
+                source.name()
+            ));
         };
         let mut applied = Vec::new();
         let font_key = match source {
@@ -340,9 +366,10 @@ impl Preferences {
             applied.push("font size");
         }
         let theme_name = match source {
-            ExternalEditor::Zed => obj
-                .get("theme")
-                .and_then(|v| v.as_str().or_else(|| v.get("mode").and_then(|m| m.as_str()))),
+            ExternalEditor::Zed => obj.get("theme").and_then(|v| {
+                v.as_str()
+                    .or_else(|| v.get("mode").and_then(|m| m.as_str()))
+            }),
             _ => obj.get("workbench.colorTheme").and_then(|v| v.as_str()),
         };
         if let Some(name) = theme_name {
@@ -366,7 +393,10 @@ impl Preferences {
             applied.push("density");
         }
         if applied.is_empty() {
-            return Err(format!("No compatible settings found in {}.", source.name()));
+            return Err(format!(
+                "No compatible settings found in {}.",
+                source.name()
+            ));
         }
         Ok(applied)
     }
@@ -574,7 +604,11 @@ mod tests {
 
         let oversized = dir.path().join("huge.json");
         fs::write(&oversized, vec![b' '; 600 * 1024])?;
-        assert!(prefs.import_from_path(ExternalEditor::VsCode, &oversized).is_err());
+        assert!(
+            prefs
+                .import_from_path(ExternalEditor::VsCode, &oversized)
+                .is_err()
+        );
         Ok(())
     }
 }

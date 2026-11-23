@@ -112,7 +112,7 @@ mod tests {
         assert!(
             account(ProviderKind::Codex, ApiKey)
                 .validate(&codex)
-                .is_err()
+                .is_ok()
         );
         assert!(
             account(ProviderKind::Gemini, ApiKey)
@@ -122,7 +122,7 @@ mod tests {
         assert!(
             account(ProviderKind::Gemini, OfficialLogin)
                 .validate(&gemini)
-                .is_err()
+                .is_ok()
         );
         assert!(
             account(ProviderKind::Gemini, SystemCli)

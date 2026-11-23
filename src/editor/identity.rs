@@ -340,6 +340,10 @@ impl Identity {
         p
     }
     pub(super) fn paint(&mut self, ui: &Ui, rect: Rect, prefs: &IdentityPreferences, _mood: Mood) {
+        if theme::active() == theme::Theme::OledDark {
+            ui.painter_at(rect).rect_filled(rect, 0, Color32::BLACK);
+            return;
+        }
         if prefs.background == Background::Off || rect.width() < 80.0 {
             return;
         }

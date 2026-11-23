@@ -198,6 +198,10 @@ impl Channel {
             .is_ok()
     }
 
+    pub fn cancellation_flag(&self) -> &AtomicBool {
+        &self.cancel.0
+    }
+
     pub fn report(&self, report: Report) {
         self.send(Body::Report(report));
     }

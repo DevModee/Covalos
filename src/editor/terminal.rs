@@ -452,7 +452,11 @@ impl Terminals {
         }
     }
 
-    fn open_tab(&mut self, cwd: PathBuf, ctx: &egui::Context) {
+    pub(super) fn active_directory(&self) -> Option<&Path> {
+        self.tabs.get(self.active).map(|tab| tab.cwd.as_path())
+    }
+
+    pub(super) fn open_tab(&mut self, cwd: PathBuf, ctx: &egui::Context) {
         self.next += 1;
         match super::pty::Shell::spawn(self.next, cwd, ctx) {
             Ok(shell) => {
@@ -479,7 +483,12 @@ impl Terminals {
 impl Editor {
     /// Terminal section of the tools panel: tabs of interactive shells.
     pub(super) fn terminal_view(&mut self, ui: &mut Ui) {
-        let Some(root) = self.root.clone() else {
+        let Some(root) = self
+            .root
+            .clone()
+            .or_else(|| self.editor_directory())
+            .or_else(|| self.terminals.active_directory().map(Path::to_owned))
+        else {
             ui.label(muted(tr("Open a project to run commands.")));
             return;
         };
@@ -497,13 +506,11 @@ impl Editor {
                     term.title()
                 );
                 let selected = i == terms.active || Some(i) == terms.second;
-                let btn = egui::Button::new(
-                    RichText::new(text).size(SMALL).color(if selected {
-                        colors().text
-                    } else {
-                        colors().secondary
-                    }),
-                )
+                let btn = egui::Button::new(RichText::new(text).size(SMALL).color(if selected {
+                    colors().text
+                } else {
+                    colors().secondary
+                }))
                 .fill(if selected {
                     colors().elevated
                 } else {
@@ -515,9 +522,7 @@ impl Editor {
                     egui::Stroke::NONE
                 })
                 .corner_radius(10);
-                let response = ui
-                    .add(btn)
-                    .on_hover_text(term.cwd.display().to_string());
+                let response = ui.add(btn).on_hover_text(term.cwd.display().to_string());
                 if response.clicked() {
                     terms.active = i;
                     terms.focus_input = true;
@@ -531,8 +536,7 @@ impl Editor {
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
-                if !terms.tabs.is_empty()
-                    && icon_button(ui, Icon::Close, "Close", false).clicked()
+                if !terms.tabs.is_empty() && icon_button(ui, Icon::Close, "Close", false).clicked()
                 {
                     close = Some(terms.active);
                 }

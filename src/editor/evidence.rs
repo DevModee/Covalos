@@ -402,7 +402,9 @@ impl eframe::App for Harness {
         self.render_ms.push(start.elapsed().as_secs_f64() * 1000.0);
         let image = ctx.input(|i| {
             i.events.iter().find_map(|event| match event {
-                Event::Screenshot { image, .. } => Some(image.clone()),
+                Event::Screenshot {
+                    image, user_data, ..
+                } if user_data.data.is_none() => Some(image.clone()),
                 _ => None,
             })
         });
@@ -1100,6 +1102,8 @@ fn start(
             title: title.into(),
             account: covalos_agents::AccountId::new("codex-main").unwrap(),
             model: None,
+            effort: None,
+            claude_modes: Default::default(),
             root: root.to_path_buf(),
             worktree,
             preset,
@@ -1524,7 +1528,7 @@ fn replay_steps() -> Vec<Step> {
         }),
         Wait(0.8),
         Shot("replay/07-editor-dock"),
-        Act(|e, _, _| e.hub.agents.chat.add_ai = Some(Default::default())),
+        Act(|e, _, _| e.open_providers()),
         Wait(0.6),
         Shot("replay/08-add-ai"),
     ]
@@ -1752,6 +1756,8 @@ fn tour_steps() -> Vec<Step> {
                     title: "Explain App.tsx".into(),
                     account: AccountId::new("codex-main").unwrap(),
                     model: None,
+                    effort: None,
+                    claude_modes: Default::default(),
                     root: root.to_path_buf(),
                     worktree: false,
                     preset: Preset::ReadOnly,

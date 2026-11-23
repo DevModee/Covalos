@@ -102,7 +102,9 @@ pub fn kill_tree(child: &mut Child) {
     }
     #[cfg(windows)]
     {
-        let _ = Command::new("taskkill.exe")
+        let mut command = Command::new("taskkill.exe");
+        own_group(&mut command);
+        let _ = command
             .args(["/PID", &child.id().to_string(), "/T", "/F"])
             .output();
     }

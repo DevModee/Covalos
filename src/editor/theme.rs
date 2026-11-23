@@ -16,7 +16,7 @@ pub(super) const TAB_HEIGHT: f32 = 34.0;
 pub(super) const BREADCRUMB_HEIGHT: f32 = 26.0;
 pub(super) const STATUS_HEIGHT: f32 = 24.0;
 pub(super) const PANEL_PADDING: i8 = 10;
-pub(super) const CONTROL_RADIUS: u8 = 6;
+pub(super) const CONTROL_RADIUS: u8 = 8;
 pub(super) const CHECKBOX_RADIUS: u8 = 2;
 pub(super) const MODAL_RADIUS: u8 = 12;
 pub(super) const HOVER_SECONDS: f32 = super::motion::HOVER;
@@ -30,6 +30,7 @@ pub(super) const COMPACT_CODE_LINE_HEIGHT: f32 = 1.16;
 pub(super) enum Theme {
     #[default]
     Obsidian,
+    OledDark,
     Nocturne,
     Dark,
     Midnight,
@@ -38,9 +39,10 @@ pub(super) enum Theme {
     HighContrast,
 }
 impl Theme {
-    pub(super) const ALL: [Self; 7] = [
+    pub(super) const ALL: [Self; 8] = [
         Self::Obsidian,
         Self::Nocturne,
+        Self::OledDark,
         Self::Dark,
         Self::Midnight,
         Self::Violet,
@@ -51,6 +53,7 @@ impl Theme {
         match self {
             Self::Obsidian => "Covalos Obsidian",
             Self::Nocturne => "Covalos Nocturne",
+            Self::OledDark => "OLED Dark",
             Self::Dark => "Covalos Graphite",
             Self::Midnight => "Covalos Midnight",
             Self::Violet => "Covalos Violet",
@@ -118,6 +121,16 @@ impl Theme {
             },
             // Deep violet-black base: surfaces separated by value, hairline borders, a lilac
             // accent and a luminous pink caret. Neutrals carry a slight violet cast.
+            Self::OledDark => Palette {
+                canvas: Color32::BLACK,
+                inset: Color32::BLACK,
+                surface: Color32::from_gray(9),
+                elevated: Color32::from_gray(21),
+                hover: Color32::from_gray(32),
+                border: Color32::from_gray(39),
+                control_border: Color32::from_gray(63),
+                ..Self::Nocturne.colors()
+            },
             Self::Nocturne => Palette {
                 canvas: Color32::from_rgb(9, 8, 13),
                 surface: Color32::from_rgb(17, 15, 23),
@@ -290,7 +303,7 @@ fn shift_rgb(color: Color32, delta: i16) -> Color32 {
 pub(super) fn colors() -> Palette {
     let theme = ACTIVE_THEME.with(|theme| theme.get());
     let mut palette = theme.colors();
-    if theme.is_dark() && theme != Theme::HighContrast {
+    if theme.is_dark() && !matches!(theme, Theme::HighContrast | Theme::OledDark) {
         let brightness = SURFACE_BRIGHTNESS.with(|b| b.get());
         let delta = ((brightness - 0.35) * 32.0).round() as i16;
         if delta != 0 {
@@ -306,7 +319,7 @@ pub(super) fn colors() -> Palette {
     palette
 }
 
-pub(super) fn install_fonts(ctx: &Context) {
+pub(super) fn install_fonts(ctx: &Context, ubuntu: bool, hack: bool) {
     let mut definitions = egui::FontDefinitions::default();
     definitions.font_data.insert(
         "Geist".into(),
@@ -320,16 +333,20 @@ pub(super) fn install_fonts(ctx: &Context) {
             "../../assets/fonts/IBMPlexMono.ttf"
         ))),
     );
-    definitions
-        .families
-        .entry(egui::FontFamily::Proportional)
-        .or_default()
-        .insert(0, "Geist".into());
-    definitions
-        .families
-        .entry(egui::FontFamily::Monospace)
-        .or_default()
-        .insert(0, "IBM Plex Mono".into());
+    for (family, bundled, use_alternative) in [
+        (egui::FontFamily::Proportional, "Geist", ubuntu),
+        (egui::FontFamily::Monospace, "IBM Plex Mono", hack),
+    ] {
+        let fonts = definitions.families.entry(family).or_default();
+        fonts.insert(
+            if use_alternative {
+                1.min(fonts.len())
+            } else {
+                0
+            },
+            bundled.into(),
+        );
+    }
     ctx.set_fonts(definitions);
 }
 
@@ -340,7 +357,7 @@ pub(super) fn install(ctx: &Context, font_size: f32, high_contrast: bool, theme:
     style.spacing.button_padding = egui::vec2(10.0, 5.0);
     style.spacing.interact_size.y = 28.0;
     style.spacing.window_margin = Margin::same(20);
-    style.spacing.menu_margin = Margin::same(6);
+    style.spacing.menu_margin = Margin::same(5);
     style.spacing.indent = 16.0;
     style.spacing.scroll.bar_width = 6.0;
     style.spacing.scroll.floating_width = 3.0;
@@ -385,7 +402,7 @@ pub(super) fn install(ctx: &Context, font_size: f32, high_contrast: bool, theme:
     );
     visuals.window_corner_radius = MODAL_RADIUS.into();
     visuals.window_highlight_topmost = false;
-    visuals.menu_corner_radius = CONTROL_RADIUS.into();
+    visuals.menu_corner_radius = 10.into();
     visuals.extreme_bg_color = colors().inset;
     visuals.faint_bg_color = colors().surface;
     visuals.selection.bg_fill = colors().selection;
@@ -408,7 +425,7 @@ pub(super) fn install(ctx: &Context, font_size: f32, high_contrast: bool, theme:
             if high_contrast {
                 colors().secondary
             } else {
-                colors().control_border
+                colors().border
             },
         );
         widget.fg_stroke = Stroke::new(1.0_f32, colors().text);
@@ -422,7 +439,13 @@ pub(super) fn install(ctx: &Context, font_size: f32, high_contrast: bool, theme:
     visuals.widgets.active.weak_bg_fill = colors().accent_bg;
     visuals.widgets.active.bg_stroke = Stroke::new(1.0_f32, colors().accent);
     visuals.widgets.open.weak_bg_fill = colors().accent_bg;
-    ctx.set_style(style);
+    let mode = if theme.is_dark() {
+        egui::Theme::Dark
+    } else {
+        egui::Theme::Light
+    };
+    ctx.set_theme(mode);
+    ctx.set_style_of(mode, style);
 }
 
 /// Corner radius and spacing of the workbench islands: recessed outer chrome framing
@@ -497,6 +520,57 @@ pub(super) fn primary(text: &str) -> egui::Button<'_> {
         .fill(colors().accent)
         .stroke(Stroke::NONE)
         .corner_radius(CONTROL_RADIUS)
+}
+
+pub(super) fn search_field(
+    ui: &mut egui::Ui,
+    salt: &str,
+    text: &mut String,
+    hint: &str,
+    limit: usize,
+) -> egui::Response {
+    let id = ui.make_persistent_id(salt);
+    let focused = ui.memory(|m| m.has_focus(id));
+    let progress = super::motion::state(ui, id.with("focus-ring"), focused, super::motion::CONTROL);
+    let stroke = super::motion::blend(colors().control_border, colors().accent, progress);
+    Frame::new()
+        .fill(colors().inset)
+        .stroke(Stroke::new(1.0_f32, stroke))
+        .corner_radius(CONTROL_RADIUS)
+        .inner_margin(Margin::symmetric(7, 3))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 5.0;
+                let (r, icon) =
+                    ui.allocate_exact_size(egui::vec2(14.0, 21.0), egui::Sense::click());
+                draw_icon_sized(ui.painter(), r.center(), Icon::Search, colors().muted, 13.0);
+                let width = ui.available_width() - if text.is_empty() { 0.0 } else { 26.0 };
+                let input = ui.add(
+                    egui::TextEdit::singleline(text)
+                        .margin(Margin::ZERO)
+                        .id(id)
+                        .frame(false)
+                        .desired_width(width.max(16.0))
+                        .hint_text(tr(hint))
+                        .char_limit(limit),
+                );
+                if icon.clicked() {
+                    input.request_focus();
+                }
+                if !text.is_empty()
+                    && icon_button_sized(ui, Icon::Close, "Clear filter", false, 20.0).clicked()
+                {
+                    text.clear();
+                    input.request_focus();
+                    let mut response = input;
+                    response.mark_changed();
+                    return response;
+                }
+                input
+            })
+            .inner
+        })
+        .inner
 }
 
 pub(super) fn checkbox(
@@ -786,11 +860,22 @@ pub(super) fn icon_button(
     label: &str,
     selected: bool,
 ) -> egui::Response {
+    icon_button_sized(ui, icon, label, selected, 32.0)
+}
+
+pub(super) fn icon_button_sized(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    label: &str,
+    selected: bool,
+    side: f32,
+) -> egui::Response {
     let response = ui.add(
         egui::Button::new("")
+            .small()
             .frame(false)
             .selected(selected)
-            .min_size(egui::vec2(32.0, 32.0)),
+            .min_size(egui::Vec2::splat(side)),
     );
     #[cfg(test)]
     super::motion::record(ui, label, response.rect);

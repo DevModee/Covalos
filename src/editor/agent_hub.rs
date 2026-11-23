@@ -15,13 +15,11 @@ use crate::agents_runtime::{PlanMode, PlanSetup, Runtime};
 pub(super) struct State {
     pub(super) runtime: Option<Runtime>,
     open_error: Option<String>,
-    provider: usize,
-    method: usize,
-    account_id: String,
-    account_label: String,
-    account_model: String,
-    secret: String,
-    secret_for: Option<AccountId>,
+    provider_selection: Option<AccountId>,
+    login: Option<ProviderLogin>,
+    pub(super) secret: String,
+    pub(super) secret_for: Option<AccountId>,
+    #[cfg(test)]
     status: Vec<(AccountId, String)>,
     pub(super) selected: Option<usize>,
     note: String,
@@ -53,13 +51,11 @@ impl Default for State {
         Self {
             runtime: None,
             open_error: None,
-            provider: 0,
-            method: 0,
-            account_id: String::new(),
-            account_label: String::new(),
-            account_model: String::new(),
+            provider_selection: None,
+            login: None,
             secret: String::new(),
             secret_for: None,
+            #[cfg(test)]
             status: Vec::new(),
             selected: None,
             note: String::new(),
@@ -77,29 +73,696 @@ impl Default for State {
     }
 }
 
-const PROVIDERS: [(ProviderKind, &str); 3] = [
+struct ProviderLogin {
+    id: AccountId,
+    process: LoginProcess,
+    focus: bool,
+}
+
+enum LoginProcess {
+    Terminal {
+        shell: Box<super::pty::Shell>,
+        command: String,
+        gemini: Option<GeminiLoginWatch>,
+    },
+    Acp {
+        events: std::sync::mpsc::Receiver<LoginEvent>,
+        cancel: Arc<std::sync::atomic::AtomicBool>,
+        links: Vec<String>,
+        verifying: bool,
+    },
+}
+
+type GeminiStamp = [Option<std::time::SystemTime>; 2];
+
+struct GeminiLoginWatch {
+    config: PathBuf,
+    observed: GeminiStamp,
+    checked: GeminiStamp,
+    changed: std::time::Instant,
+}
+
+impl GeminiLoginWatch {
+    fn new(config: PathBuf) -> Self {
+        Self {
+            config,
+            observed: [None; 2],
+            checked: [None; 2],
+            changed: std::time::Instant::now(),
+        }
+    }
+
+    fn has_checked(&self) -> bool {
+        self.checked.iter().any(Option::is_some)
+    }
+
+    fn should_verify(&mut self) -> bool {
+        let stamp = ["oauth_creds.json", "google_accounts.json"].map(|file| {
+            std::fs::metadata(self.config.join(file))
+                .and_then(|metadata| metadata.modified())
+                .ok()
+        });
+        if stamp != self.observed {
+            self.observed = stamp;
+            self.changed = std::time::Instant::now();
+        }
+        if self.observed == self.checked
+            || self.changed.elapsed() < std::time::Duration::from_secs(1)
+        {
+            return false;
+        }
+        self.checked = self.observed;
+        self.observed.iter().any(Option::is_some)
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn gemini_verifies_once_after_the_oauth_profile_settles() {
+    use std::time::{Duration, Instant};
+
+    let config = tempfile::tempdir().unwrap();
+    let mut watch = GeminiLoginWatch::new(config.path().to_path_buf());
+    assert!(!watch.should_verify());
+    std::fs::write(config.path().join("google_accounts.json"), b"{}").unwrap();
+    assert!(!watch.should_verify());
+    watch.changed = Instant::now() - Duration::from_secs(2);
+    assert!(watch.should_verify());
+    assert!(!watch.should_verify());
+}
+
+enum LoginEvent {
+    Link(String),
+    Verifying,
+    Done(Result<crate::agent_provider::Catalog, String>),
+}
+
+impl Drop for ProviderLogin {
+    fn drop(&mut self) {
+        if let LoginProcess::Acp { cancel, .. } = &self.process {
+            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+}
+
+impl State {
+    fn poll_login(&mut self) {
+        let (Some(login), Some(runtime)) = (&mut self.login, &mut self.runtime) else {
+            return;
+        };
+        use crate::agents_runtime::Connection;
+        if runtime.connection_ready(&login.id)
+            || runtime.connection.get(&login.id) == Some(&Connection::GeminiMigrationRequired)
+        {
+            self.login = None;
+            return;
+        }
+        let checking = matches!(
+            runtime.connection.get(&login.id),
+            Some(Connection::Checking)
+        );
+        let mut finished = false;
+        match &mut login.process {
+            LoginProcess::Terminal { shell, gemini, .. } => {
+                if gemini.is_some()
+                    && crate::agent_provider::gemini_oauth_retired(&shell.contents())
+                {
+                    runtime.mark_gemini_oauth_retired(&login.id);
+                    self.login = None;
+                    return;
+                }
+                finished = shell.process_finished();
+                if !finished
+                    && !checking
+                    && gemini.as_mut().is_some_and(GeminiLoginWatch::should_verify)
+                {
+                    runtime.refresh_connection(&login.id);
+                }
+            }
+            LoginProcess::Acp {
+                events,
+                links,
+                verifying,
+                ..
+            } => loop {
+                match events.try_recv() {
+                    Ok(LoginEvent::Link(link)) if !links.contains(&link) => links.push(link),
+                    Ok(LoginEvent::Link(_)) => {}
+                    Ok(LoginEvent::Verifying) => {
+                        *verifying = true;
+                        links.clear();
+                    }
+                    Ok(LoginEvent::Done(result)) => {
+                        runtime.finish_antigravity_login(&login.id, result);
+                        self.login = None;
+                        return;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        runtime.finish_antigravity_login(
+                            &login.id,
+                            Err("The provider closed the connection.".into()),
+                        );
+                        self.login = None;
+                        return;
+                    }
+                }
+            },
+        }
+        if finished {
+            if !checking {
+                runtime.refresh_connection(&login.id);
+            }
+            self.login = None;
+        }
+    }
+}
+
+fn add_provider(
+    runtime: &mut Runtime,
+    selection: &mut Option<AccountId>,
+    kind: &ProviderKind,
+    name: &str,
+    method: ConnectionMethod,
+) {
+    let index = 1 + runtime
+        .profiles
+        .accounts()
+        .iter()
+        .filter(|a| &a.provider == kind && a.method != ConnectionMethod::ApiKey)
+        .count();
+    let label = if method == ConnectionMethod::SystemCli {
+        format!("{name} ({})", tr("PC login"))
+    } else {
+        format!("{name} {index}")
+    };
+    let result = new_account_id(kind).and_then(|id| {
+        runtime.add_account(Account::new(id.clone(), kind.clone(), label, method))?;
+        runtime.refresh_connection(&id);
+        Ok(id)
+    });
+    match result {
+        Ok(id) => {
+            *selection = Some(id);
+            runtime.notice = None;
+        }
+        Err(error) => runtime.notice = Some((false, error)),
+    }
+}
+
+fn setup_antigravity(runtime: &mut Runtime, selection: &mut Option<AccountId>) {
+    let kind = ProviderKind::Antigravity;
+    if let Some(existing) = runtime
+        .profiles
+        .accounts()
+        .iter()
+        .find(|a| a.provider == kind && a.method == ConnectionMethod::SystemCli)
+    {
+        *selection = Some(existing.id.clone());
+        runtime.notice = None;
+    } else {
+        add_provider(
+            runtime,
+            selection,
+            &kind,
+            "Antigravity",
+            ConnectionMethod::SystemCli,
+        );
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn gemini_migration_creates_and_reuses_the_supported_antigravity_account() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut runtime = Runtime::open(dir.path().to_path_buf(), Arc::new(|| {})).unwrap();
+    let mut selection = None;
+    runtime.notice = Some((false, "stale notice".into()));
+    setup_antigravity(&mut runtime, &mut selection);
+    let id = selection.take().unwrap();
+    let account = runtime.profiles.get(&id).unwrap();
+    assert_eq!(account.provider, ProviderKind::Antigravity);
+    assert_eq!(account.method, ConnectionMethod::SystemCli);
+    assert!(runtime.notice.is_none());
+
+    setup_antigravity(&mut runtime, &mut selection);
+    assert_eq!(selection, Some(id));
+    assert_eq!(runtime.profiles.accounts().len(), 1);
+}
+
+pub(super) fn new_account_id(kind: &ProviderKind) -> Result<AccountId, String> {
+    static SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let sequence = SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    AccountId::new(format!(
+        "{}-{:x}-{sequence:x}",
+        kind.key(),
+        covalos_agents::now_ms()
+    ))
+    .map_err(|e| e.to_string())
+}
+
+fn provider_status(runtime: &Runtime, account: &Account) -> (egui::Color32, &'static str, String) {
+    use crate::agents_runtime::Connection;
+    if !account.enabled {
+        return (colors().muted, "Disabled", String::new());
+    }
+    if runtime.program(&account.provider).is_none() {
+        return (colors().error, "Not installed", String::new());
+    }
+    match runtime.connection.get(&account.id) {
+        Some(Connection::SignedIn(identity)) => {
+            let mut detail = identity.email.as_ref().map_or_else(
+                || tr("Email unavailable from provider").to_owned(),
+                |email| trf("Authenticated as {email}", &[("email", email.clone())]),
+            );
+            detail.push_str(" \u{00b7} ");
+            detail.push_str(
+                identity
+                    .plan
+                    .as_deref()
+                    .unwrap_or(tr("Plan unavailable from provider")),
+            );
+            (colors().success, "Authenticated", detail)
+        }
+        Some(Connection::SignedOut(reason)) => {
+            (colors().warning, "Not authenticated", tr(reason).to_owned())
+        }
+        Some(Connection::GeminiMigrationRequired) => (
+            colors().warning,
+            "Migration required",
+            tr("Gemini CLI personal sign-in moved to Antigravity.").into(),
+        ),
+        Some(Connection::Unknown(reason)) => {
+            (colors().warning, "Status unknown", tr(reason).to_owned())
+        }
+        Some(Connection::Checking) | None => (colors().muted, "Checking.", String::new()),
+        Some(Connection::Key(_)) => (colors().muted, "Status unknown", String::new()),
+    }
+}
+
+fn status_dot(ui: &mut Ui, color: egui::Color32) {
+    let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(8.0), egui::Sense::hover());
+    ui.painter().circle_filled(rect.center(), 3.0, color);
+}
+
+fn provider_switch(ui: &mut Ui, enabled: &mut bool) -> egui::Response {
+    let (rect, mut response) = ui.allocate_exact_size(egui::vec2(32.0, 20.0), egui::Sense::click());
+    if response.clicked() {
+        *enabled = !*enabled;
+        response.mark_changed();
+    }
+    let label = tr("Enable provider");
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, *enabled, label)
+    });
+    let track = rect.shrink(1.0);
+    ui.painter().rect_filled(
+        track,
+        9,
+        if *enabled {
+            colors().accent
+        } else {
+            colors().control_border
+        },
+    );
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            track.expand(1.0),
+            10,
+            egui::Stroke::new(1.0_f32, colors().accent_hover),
+            egui::StrokeKind::Outside,
+        );
+    }
+    let x = if *enabled {
+        track.right() - 9.0
+    } else {
+        track.left() + 9.0
+    };
+    ui.painter().circle_filled(
+        egui::pos2(x, track.center().y),
+        6.0,
+        if *enabled {
+            colors().canvas
+        } else {
+            colors().text
+        },
+    );
+    response.on_hover_text(label)
+}
+
+fn start_login(
+    runtime: &mut Runtime,
+    account: &Account,
+    ctx: &egui::Context,
+) -> Result<ProviderLogin, String> {
+    let command = runtime.login_command(&account.id)?;
+    let process = if account.provider == ProviderKind::Antigravity {
+        let (tx, events) = std::sync::mpsc::channel();
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop = cancel.clone();
+        let wake = ctx.clone();
+        let cwd = runtime.dir.clone();
+        std::thread::spawn(move || {
+            let result = crate::agent_provider::antigravity_login(
+                command,
+                &cwd,
+                &stop,
+                |url| {
+                    let _ = tx.send(LoginEvent::Link(url));
+                    wake.request_repaint();
+                },
+                || {
+                    let _ = tx.send(LoginEvent::Verifying);
+                    wake.request_repaint();
+                },
+            );
+            let _ = tx.send(LoginEvent::Done(result));
+            wake.request_repaint();
+        });
+        LoginProcess::Acp {
+            events,
+            cancel,
+            links: Vec::new(),
+            verifying: false,
+        }
+    } else {
+        let title = match account.provider {
+            ProviderKind::ClaudeCode => "claude auth login",
+            ProviderKind::Codex => "codex login",
+            ProviderKind::Gemini => "gemini",
+            _ => "opencode auth login",
+        };
+        let gemini = (account.provider == ProviderKind::Gemini)
+            .then(|| crate::agent_provider::gemini_config(&command))
+            .flatten()
+            .map(GeminiLoginWatch::new);
+        let pty = crate::runtime_install::pty_command(&command, &account.provider)?;
+        let shell =
+            super::pty::Shell::spawn_command(u32::MAX, runtime.dir.clone(), ctx, pty, true)?;
+        LoginProcess::Terminal {
+            shell: Box::new(shell),
+            command: title.into(),
+            gemini,
+        }
+    };
+    runtime.invalidate_connection(&account.id);
+    Ok(ProviderLogin {
+        id: account.id.clone(),
+        process,
+        focus: true,
+    })
+}
+
+fn provider_detail(
+    ui: &mut Ui,
+    runtime: &mut Runtime,
+    current_login: &mut Option<ProviderLogin>,
+    selection: &mut Option<AccountId>,
+    account: &Account,
+) {
+    use crate::runtime_install::Progress;
+    let (color, status, detail) = provider_status(runtime, account);
+    let migration = runtime.connection.get(&account.id)
+        == Some(&crate::agents_runtime::Connection::GeminiMigrationRequired);
+    let login = current_login
+        .as_ref()
+        .filter(|login| login.id == account.id);
+    let login_active = login.is_some();
+    let verified_once = login.is_some_and(|login| matches!(
+        &login.process, LoginProcess::Terminal { gemini: Some(watch), .. } if watch.has_checked()
+    ));
+    let checking = matches!(
+        runtime.connection.get(&account.id),
+        Some(crate::agents_runtime::Connection::Checking)
+    );
+    let needs_attention = verified_once && !checking && !detail.is_empty();
+    let verifying_acp = login.is_some_and(|login| {
+        matches!(
+            &login.process,
+            LoginProcess::Acp {
+                verifying: true,
+                ..
+            }
+        )
+    });
+    card(ui, |ui| {
+        ui.horizontal(|ui| {
+            super::agent_chat::provider_mark(ui, &account.provider, 20.0);
+            ui.label(heading(&account.label));
+        });
+        ui.add_space(UNIT);
+        ui.horizontal(|ui| {
+            let waiting = login_active && !needs_attention;
+            status_dot(ui, if waiting { colors().accent } else { color });
+            let shown = if waiting {
+                if checking || verifying_acp {
+                    "Verifying sign-in"
+                } else {
+                    "Signing in"
+                }
+            } else {
+                status
+            };
+            ui.label(RichText::new(tr(shown)).strong());
+        });
+        if (!login_active || needs_attention) && !detail.is_empty() {
+            ui.label(secondary(detail));
+        }
+        ui.add_space(UNIT * 2.0);
+        ui.label(label("Display name"));
+        let name_id = ui.make_persistent_id(("provider-name", &account.id));
+        let mut name = ui
+            .ctx()
+            .data(|data| data.get_temp::<String>(name_id))
+            .unwrap_or_else(|| account.label.clone());
+        let edit = ui.add(
+            TextEdit::singleline(&mut name)
+                .id(name_id)
+                .char_limit(64)
+                .desired_width(260.0),
+        );
+        if edit.lost_focus() {
+            if !name.trim().is_empty() && name.trim() != account.label {
+                let mut updated = runtime
+                    .profiles
+                    .get(&account.id)
+                    .cloned()
+                    .unwrap_or_else(|_| account.clone());
+                updated.label = name.trim().into();
+                if let Err(error) = runtime.update_account(updated) {
+                    runtime.notice = Some((false, error));
+                }
+            }
+            ui.ctx().data_mut(|data| data.remove::<String>(name_id));
+        } else if edit.changed() {
+            ui.ctx().data_mut(|data| data.insert_temp(name_id, name));
+        }
+        ui.add_space(UNIT * 2.0);
+        ui.label(label("Account storage"));
+        let antigravity = account.provider == ProviderKind::Antigravity;
+        ui.label(secondary(if antigravity {
+            "Shared Google sign-in"
+        } else if account.method == ConnectionMethod::SystemCli {
+            "Use PC login"
+        } else {
+            "Isolated sign-in"
+        }));
+        if let Ok(spec) = runtime.registry.get(&account.provider)
+            && let Some(var) = &spec.config_dir_var
+        {
+            ui.label(muted(var));
+            let path = if account.method != ConnectionMethod::SystemCli {
+                runtime
+                    .profiles
+                    .isolated_dir(&account.id)
+                    .display()
+                    .to_string()
+            } else {
+                match account.provider {
+                    ProviderKind::ClaudeCode => "~/.claude",
+                    ProviderKind::Codex => "~/.codex",
+                    ProviderKind::Gemini | ProviderKind::Antigravity => "~/.gemini",
+                    _ => "~/.config",
+                }
+                .to_owned()
+            };
+            ui.label(
+                RichText::new(path)
+                    .monospace()
+                    .small()
+                    .color(colors().secondary),
+            );
+        }
+        ui.add_space(UNIT * 2.0);
+        ui.label(label("Runtime"));
+        if let Some(install) = runtime.installing.get(&account.provider) {
+            let progress = install
+                .progress
+                .lock()
+                .map(|progress| progress.clone())
+                .unwrap_or_default();
+            ui.horizontal_wrapped(|ui| {
+                busy_indicator(ui);
+                let label = match progress {
+                    Progress::Preparing => tr("Preparing installation").to_owned(),
+                    Progress::Downloading(0) => tr("Downloading runtime").to_owned(),
+                    Progress::Downloading(bytes) => trf(
+                        "Downloaded {size} MiB",
+                        &[("size", format!("{:.1}", bytes as f64 / 1_048_576.0))],
+                    ),
+                    Progress::Installing => tr("Installing runtime").to_owned(),
+                    Progress::Cancelling => tr("Cancelling installation").to_owned(),
+                };
+                ui.label(secondary(label));
+                if ui
+                    .add_enabled(
+                        !matches!(progress, Progress::Cancelling),
+                        egui::Button::new(tr("Cancel installation")),
+                    )
+                    .clicked()
+                {
+                    install.cancel();
+                }
+            });
+        } else if let Some(program) = runtime.program(&account.provider) {
+            ui.label(
+                RichText::new(program.display().to_string())
+                    .monospace()
+                    .small()
+                    .color(colors().muted),
+            );
+        } else if ui.add(primary("Install runtime")).clicked()
+            && let Err(error) = runtime.install_provider(account.provider.clone())
+        {
+            runtime.notice = Some((false, error));
+        }
+        ui.add_space(UNIT * 2.0);
+        ui.horizontal_wrapped(|ui| {
+            if migration {
+                let setup = ui.add(primary("Set up Antigravity"));
+                #[cfg(test)]
+                super::motion::record(ui, "Set up Antigravity", setup.rect);
+                if setup.clicked() {
+                    setup_antigravity(runtime, selection);
+                }
+            } else if !login_active
+                && ui
+                    .add_enabled(
+                        account.enabled
+                            && (!matches!(
+                                account.provider,
+                                ProviderKind::Gemini | ProviderKind::Antigravity
+                            ) || !checking)
+                            && runtime.program(&account.provider).is_some()
+                            && current_login.is_none(),
+                        primary("Sign in"),
+                    )
+                    .clicked()
+            {
+                match start_login(runtime, account, ui.ctx()) {
+                    Ok(login) => *current_login = Some(login),
+                    Err(error) => runtime.notice = Some((false, error)),
+                }
+            }
+            if (!login_active || needs_attention)
+                && ui
+                    .add_enabled(
+                        account.enabled && !checking,
+                        egui::Button::new(tr("Check sign-in")),
+                    )
+                    .clicked()
+            {
+                runtime.refresh_connection(&account.id);
+            }
+            if ui.small_button(tr("Remove")).clicked() {
+                if login_active {
+                    *current_login = None;
+                }
+                if let Err(error) = runtime.remove_account(&account.id) {
+                    runtime.notice = Some((false, error));
+                }
+            }
+        });
+        if current_login
+            .as_ref()
+            .is_some_and(|login| login.id == account.id)
+        {
+            ui.add_space(UNIT * 2.0);
+            ui.horizontal(|ui| {
+                ui.label(label("Provider sign-in"));
+                if ui.small_button(tr("Cancel")).clicked() {
+                    *current_login = None;
+                    runtime.refresh_connection(&account.id);
+                }
+            });
+            if let Some(login) = current_login.as_mut() {
+                let links = match &mut login.process {
+                    LoginProcess::Terminal { shell, command, .. } => {
+                        ui.label(RichText::new(command.as_str()).monospace().small());
+                        let (rect, _) = ui.allocate_exact_size(
+                            egui::vec2(ui.available_width(), 158.0),
+                            egui::Sense::hover(),
+                        );
+                        shell.show(ui, rect, std::mem::take(&mut login.focus));
+                        shell.urls()
+                    }
+                    LoginProcess::Acp {
+                        links, verifying, ..
+                    } => {
+                        Frame::new()
+                            .fill(colors().inset)
+                            .inner_margin(Margin::same(12))
+                            .corner_radius(CONTROL_RADIUS)
+                            .show(ui, |ui| {
+                                ui.label(
+                                    RichText::new("ACP / authenticate / oauth-personal")
+                                        .monospace()
+                                        .small(),
+                                );
+                                ui.label(
+                                    RichText::new(tr(if *verifying {
+                                        "Checking Antigravity access and models."
+                                    } else if links.is_empty() {
+                                        "Starting Antigravity sign-in."
+                                    } else {
+                                        "Waiting for Google sign-in."
+                                    }))
+                                    .monospace()
+                                    .small(),
+                                );
+                            });
+                        if login.focus
+                            && let Some(url) = links.first()
+                        {
+                            ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+                            login.focus = false;
+                        }
+                        links.clone()
+                    }
+                };
+                for url in links.iter().rev().take(1) {
+                    ui.horizontal(|ui| {
+                        ui.hyperlink_to(tr("Open sign-in link"), url);
+                        if icon_button(ui, Icon::Copy, "Copy sign-in link", false).clicked() {
+                            ui.ctx().copy_text(url.clone());
+                        }
+                    });
+                }
+            }
+        }
+        if let Some(warning) = runtime.catalog_warning(&account.id) {
+            ui.label(secondary(tr(warning)));
+        }
+    });
+}
+
+const PROVIDERS: [(ProviderKind, &str); 5] = [
     (ProviderKind::ClaudeCode, "Claude Code"),
     (ProviderKind::Codex, "OpenAI Codex"),
     (ProviderKind::Gemini, "Gemini CLI"),
+    (ProviderKind::Antigravity, "Antigravity"),
+    (ProviderKind::OpenCode, "OpenCode"),
 ];
-const METHODS: [(ConnectionMethod, &str, &str); 3] = [
-    (
-        ConnectionMethod::SystemCli,
-        "Existing CLI sign-in",
-        "Uses the CLI exactly as you configured it.",
-    ),
-    (
-        ConnectionMethod::OfficialLogin,
-        "Isolated official sign-in",
-        "Own config folder; sign in with the provider's login. Allows several accounts.",
-    ),
-    (
-        ConnectionMethod::ApiKey,
-        "API key",
-        "Stored in Windows Credential Manager, passed only through the provider's variable.",
-    ),
-];
-// ---------------------------------------------------------------- reading style
 //
 // Agent Hub reads like a document: solid panels over a dimmed field, three
 // text tones (primary, secondary, metadata) and a 14.5/21 reading size.
@@ -221,6 +884,10 @@ fn badge(ui: &mut Ui, text: &str, color: egui::Color32) {
 impl Editor {
     /// Drives the runtime every frame once the Agent Hub opened it.
     pub(super) fn poll_agent_runtime(&mut self, ctx: &egui::Context) {
+        self.hub.agents.poll_login();
+        if self.hub.agents.login.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(150));
+        }
         let Some(runtime) = self.hub.agents.runtime.as_mut() else {
             return;
         };
@@ -303,7 +970,7 @@ impl Editor {
                     },
                     text,
                 );
-                if ui.small_button("✕").clicked() {
+                if ui.small_button(tr("Dismiss notice")).clicked() {
                     runtime.notice = None;
                 }
             });
@@ -311,287 +978,250 @@ impl Editor {
         }
     }
 
-    // ---------------------------------------------------------------- accounts
+    #[cfg(all(test, windows))]
+    pub(super) fn review_gemini_migration(&mut self) {
+        let runtime = self.hub.agents.runtime.as_mut().expect("review runtime");
+        let id = AccountId::new("gemini-migration-review").unwrap();
+        runtime
+            .add_account(Account::new(
+                id.clone(),
+                ProviderKind::Gemini,
+                "Gemini CLI",
+                ConnectionMethod::SystemCli,
+            ))
+            .unwrap();
+        runtime.detections.insert(
+            ProviderKind::Gemini,
+            crate::agents_runtime::Detection {
+                program: Some(PathBuf::from("gemini-fixture.cmd")),
+                version: Some("0.70.0".into()),
+                done: true,
+                ..Default::default()
+            },
+        );
+        runtime.mark_gemini_oauth_retired(&id);
+        self.hub.agents.provider_selection = Some(id);
+        self.open_providers();
+    }
+
+    pub(super) fn open_providers(&mut self) {
+        self.hub.focus_agents("accounts");
+        self.hub_open = true;
+    }
 
     pub(super) fn accounts_panel(&mut self, ui: &mut Ui) {
         if self.runtime_unavailable(ui) {
             return;
         }
         self.agent_notice(ui);
-        ScrollArea::vertical()
-            .id_salt("agent-accounts")
-            .show(ui, |ui| {
-                self.providers_detected(ui);
-                self.account_list(ui);
-                self.account_form(ui);
-            });
-    }
-
-    fn providers_detected(&mut self, ui: &mut Ui) {
-        let runtime = self.hub.agents.runtime.as_mut().expect("runtime");
-        card(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(label("Providers on this PC"));
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.small_button(tr("Detect again")).clicked() {
-                        runtime.redetect();
-                    }
-                });
-            });
-            ui.add_space(4.0);
-            for (kind, label) in &PROVIDERS {
-                let found = runtime.detections.get(kind).cloned().unwrap_or_default();
-                ui.horizontal_wrapped(|ui| {
-                    let (dot, state) = if !found.done {
-                        (colors().muted, "Detecting…".to_owned())
-                    } else if let Some(version) = &found.version {
-                        (colors().success, version.clone())
-                    } else if found.program.is_some() {
-                        (
-                            colors().warning,
-                            found.error.clone().unwrap_or_else(|| "Found".into()),
-                        )
-                    } else {
-                        (colors().muted, "Not installed".into())
-                    };
-                    ui.colored_label(dot, "●");
-                    ui.label(RichText::new(*label).strong());
-                    ui.label(small(state));
-                    if let Some(login) = &found.login {
-                        ui.label(small(format!("· default sign-in: {login}")));
-                    }
-                });
-                if let Some(path) = &found.program {
-                    ui.label(small(path.display().to_string()));
-                } else if found.done && *kind == ProviderKind::Gemini {
-                    ui.label(small(
-                        "Install the official Gemini CLI to detect it. Covalos has no verified \
-                         headless adapter for Gemini yet.",
-                    ));
-                }
-                ui.add_space(4.0);
-            }
-            for tool in &runtime.external {
-                ui.horizontal_wrapped(|ui| {
-                    ui.colored_label(
-                        if tool.path.is_some() {
-                            colors().secondary
-                        } else {
-                            colors().muted
-                        },
-                        "●",
-                    );
-                    ui.label(RichText::new(tool.name).strong());
-                    ui.label(small(if tool.path.is_some() {
-                        "Detected"
-                    } else {
-                        "Not found"
-                    }));
-                });
-                ui.label(small(tool.note));
-            }
-            ui.add_space(4.0);
-            ui.label(small(format!(
-                "API keys are kept in: {}. Sign-in tokens stay in each CLI's own folder; \
-                 Covalos never reads or copies them.",
-                runtime.credential_backend
-            )));
-        });
-    }
-
-    fn account_list(&mut self, ui: &mut Ui) {
         let state = &mut self.hub.agents;
         let runtime = state.runtime.as_mut().expect("runtime");
-        let accounts: Vec<Account> = runtime.profiles.accounts().to_vec();
-        section(
-            ui,
-            "Accounts",
-            "Several accounts per provider are supported. Isolated sign-ins keep separate \
-             config folders (CLAUDE_CONFIG_DIR / CODEX_HOME).",
-        );
-        if accounts.is_empty() {
-            ui.label(secondary("No accounts yet. Add one below."));
-            ui.add_space(8.0);
+        let accounts: Vec<_> = runtime
+            .profiles
+            .accounts()
+            .iter()
+            .filter(|account| account.method != ConnectionMethod::ApiKey)
+            .cloned()
+            .collect();
+        if !accounts
+            .iter()
+            .any(|account| Some(&account.id) == state.provider_selection.as_ref())
+        {
+            state.provider_selection = accounts.first().map(|account| account.id.clone());
         }
-        let mut remove = None;
-        for account in &accounts {
-            let key_state = runtime.has_api_key(account);
-            card(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(RichText::new(&account.label).strong());
-                    ui.label(small(format!(
-                        "{} · {} · id {}",
-                        super::agent_chat::provider_name(&account.provider),
-                        METHODS
-                            .iter()
-                            .find(|(m, _, _)| *m == account.method)
-                            .map_or("", |(_, l, _)| *l),
-                        account.id
-                    )));
-                    if let Some(model) = &account.default_model {
-                        ui.label(small(format!("· model {model}")));
+
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(tr("Providers")).size(HEADING).strong());
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if icon_button(ui, Icon::Refresh, "Refresh", false).clicked() {
+                    runtime.redetect();
+                    for account in &accounts {
+                        if state
+                            .login
+                            .as_ref()
+                            .is_none_or(|login| login.id != account.id)
+                        {
+                            runtime.refresh_connection(&account.id);
+                        }
                     }
-                });
-                if let Some((_, text)) = state.status.iter().find(|(id, _)| id == &account.id) {
-                    ui.label(small(text.clone()));
                 }
-                if let Some(has) = key_state {
-                    ui.label(small(if has {
-                        "API key stored in the credential store"
-                    } else {
-                        "No API key stored yet"
-                    }));
-                }
-                ui.horizontal_wrapped(|ui| {
-                    if account.method != ConnectionMethod::ApiKey
-                        && account.provider != ProviderKind::Gemini
-                        && ui.button(tr("Check sign-in")).clicked()
-                    {
-                        let text = runtime
-                            .account_status(&account.id)
-                            .unwrap_or_else(|e| format!("Status unavailable: {e}"));
-                        state.status.retain(|(id, _)| id != &account.id);
-                        state.status.push((account.id.clone(), text));
-                    }
-                    if account.method == ConnectionMethod::OfficialLogin
-                        && ui
-                            .button(tr("Sign in (official)"))
-                            .on_hover_text(tr(
-                                "Opens the provider's own login in a new console window.",
-                            ))
-                            .clicked()
-                    {
-                        runtime.notice = Some(match runtime.sign_in(&account.id) {
-                            Ok(()) => (
-                                true,
-                                "Finish signing in in the console window, then press Check \
-                                 sign-in."
-                                    .into(),
-                            ),
-                            Err(e) => (false, e),
+            });
+        });
+        ui.add_space(UNIT * 2.0);
+        let height = (ui.available_height() - UNIT).max(120.0);
+        let rail = (ui.available_width() * 0.30).clamp(148.0, 245.0);
+        let column_gap = UNIT * 3.0;
+        let detail_width = (ui.available_width() - rail - column_gap).max(1.0);
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = column_gap;
+            ui.allocate_ui_with_layout(
+                egui::vec2(rail, height),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    ui.set_width(rail);
+                    ui.set_max_width(rail);
+                    ScrollArea::vertical()
+                        .id_salt("provider-rail")
+                        .max_height((height - 38.0).max(80.0))
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            for account in &accounts {
+                                let selected =
+                                    state.provider_selection.as_ref() == Some(&account.id);
+                                let (tone, status, _) = provider_status(runtime, account);
+                                let version = runtime
+                                    .detections
+                                    .get(&account.provider)
+                                    .and_then(|det| det.version.clone());
+                                Frame::new()
+                                    .fill(if selected {
+                                        colors().accent_bg
+                                    } else {
+                                        colors().elevated
+                                    })
+                                    .corner_radius(CONTROL_RADIUS)
+                                    .inner_margin(Margin::same(8))
+                                    .show(ui, |ui| {
+                                        ui.set_width((rail - 26.0).max(100.0));
+                                        ui.horizontal(|ui| {
+                                            super::agent_chat::provider_mark(
+                                                ui,
+                                                &account.provider,
+                                                16.0,
+                                            );
+                                            let width = (ui.available_width() - 40.0).max(45.0);
+                                            if ui
+                                                .add_sized(
+                                                    [width, 26.0],
+                                                    egui::Button::new(
+                                                        RichText::new(&account.label).strong(),
+                                                    )
+                                                    .frame(false)
+                                                    .truncate(),
+                                                )
+                                                .on_hover_text(&account.label)
+                                                .clicked()
+                                            {
+                                                state.provider_selection = Some(account.id.clone());
+                                            }
+                                            let mut enabled = account.enabled;
+                                            if provider_switch(ui, &mut enabled).changed() {
+                                                if !enabled
+                                                    && state
+                                                        .login
+                                                        .as_ref()
+                                                        .is_some_and(|login| login.id == account.id)
+                                                {
+                                                    state.login = None;
+                                                }
+                                                let mut updated = account.clone();
+                                                updated.enabled = enabled;
+                                                if let Err(error) = runtime.update_account(updated)
+                                                {
+                                                    runtime.notice = Some((false, error));
+                                                }
+                                            }
+                                        });
+                                        ui.horizontal(|ui| {
+                                            status_dot(ui, tone);
+                                            ui.add(egui::Label::new(muted(status)).truncate());
+                                        });
+                                        if let Some(version) = version {
+                                            ui.add(
+                                                egui::Label::new(
+                                                    RichText::new(version)
+                                                        .monospace()
+                                                        .small()
+                                                        .color(colors().muted),
+                                                )
+                                                .truncate(),
+                                            );
+                                        }
+                                    });
+                            }
                         });
-                    }
-                    let wants_key = account.method == ConnectionMethod::ApiKey
-                        || (account.provider == ProviderKind::Codex
-                            && account.method == ConnectionMethod::OfficialLogin);
-                    if wants_key && ui.button(tr("Set API key…")).clicked() {
-                        state.secret.clear();
-                        state.secret_for = Some(account.id.clone());
-                    }
-                    if ui.button(tr("Remove")).clicked() {
-                        remove = Some(account.id.clone());
-                    }
-                });
-                if state.secret_for.as_ref() == Some(&account.id) {
-                    ui.horizontal(|ui| {
-                        ui.add(
-                            TextEdit::singleline(&mut state.secret)
-                                .password(true)
-                                .hint_text(tr("Paste the API key"))
-                                .desired_width(320.0),
-                        );
-                        if ui.add(primary("Save")).clicked() {
-                            let key = std::mem::take(&mut state.secret);
-                            let result = if account.method == ConnectionMethod::ApiKey {
-                                runtime.save_api_key(&account.id, &key)
-                            } else {
-                                runtime.codex_api_login(&account.id, &key)
-                            };
-                            runtime.notice = Some(match result {
-                                Ok(()) => (true, "API key saved.".into()),
-                                Err(e) => (false, e),
+                    ui.menu_button(tr("+ Add provider"), |ui| {
+                        for (kind, name) in &PROVIDERS {
+                            ui.horizontal(|ui| {
+                                super::agent_chat::provider_mark(ui, kind, 16.0);
+                                ui.label(RichText::new(*name).strong());
                             });
-                            state.secret_for = None;
-                        }
-                        if ui.button(tr("Cancel")).clicked() {
-                            state.secret.clear();
-                            state.secret_for = None;
-                        }
-                    });
-                }
-            });
-        }
-        if let Some(id) = remove {
-            runtime.notice = Some(match runtime.remove_account(&id) {
-                Ok(()) => (true, format!("Removed account {id}.")),
-                Err(e) => (false, e),
-            });
-        }
-    }
-
-    fn account_form(&mut self, ui: &mut Ui) {
-        let state = &mut self.hub.agents;
-        let runtime = state.runtime.as_mut().expect("runtime");
-        card(ui, |ui| {
-            ui.label(label("Add account"));
-            ui.add_space(6.0);
-            ui.horizontal_wrapped(|ui| {
-                for (i, (_, label)) in PROVIDERS.iter().enumerate() {
-                    ui.selectable_value(&mut state.provider, i, *label);
-                }
-            });
-            ui.horizontal_wrapped(|ui| {
-                for (i, (_, label, _)) in METHODS.iter().enumerate() {
-                    ui.selectable_value(&mut state.method, i, *label);
-                }
-            });
-            ui.label(small(METHODS[state.method].2));
-            ui.add_space(4.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.add(
-                    TextEdit::singleline(&mut state.account_id)
-                        .hint_text("id (e.g. claude-work)")
-                        .desired_width(170.0),
-                );
-                ui.add(
-                    TextEdit::singleline(&mut state.account_label)
-                        .hint_text(tr("Label"))
-                        .desired_width(170.0),
-                );
-                ui.add(
-                    TextEdit::singleline(&mut state.account_model)
-                        .hint_text(tr("Default model (optional)"))
-                        .desired_width(170.0),
-                );
-            });
-            if ui.add(primary("Add account")).clicked() {
-                let id = state.account_id.trim().to_ascii_lowercase();
-                let result = AccountId::new(id)
-                    .map_err(|e| e.to_string())
-                    .and_then(|id| {
-                        let (kind, default_label) = &PROVIDERS[state.provider];
-                        let label = state.account_label.trim();
-                        let mut account = Account::new(
-                            id,
-                            kind.clone(),
-                            if label.is_empty() {
-                                *default_label
+                            if runtime
+                                .registry
+                                .get(kind)
+                                .is_ok_and(|spec| spec.supports_isolated_login())
+                                && ui.button(tr("Isolated sign-in")).clicked()
+                            {
+                                add_provider(
+                                    runtime,
+                                    &mut state.provider_selection,
+                                    kind,
+                                    name,
+                                    ConnectionMethod::OfficialLogin,
+                                );
+                                ui.close();
+                            }
+                            let existing = accounts.iter().any(|account| {
+                                &account.provider == kind
+                                    && account.method == ConnectionMethod::SystemCli
+                            });
+                            let sign_in = if *kind == ProviderKind::Antigravity {
+                                "Shared Google sign-in"
                             } else {
-                                label
-                            },
-                            METHODS[state.method].0,
-                        );
-                        let model = state.account_model.trim();
-                        if !model.is_empty() {
-                            account.default_model = Some(model.to_owned());
-                            account.declared_models = vec![model.to_owned()];
+                                "Use PC login"
+                            };
+                            if ui
+                                .add_enabled(!existing, egui::Button::new(tr(sign_in)))
+                                .clicked()
+                            {
+                                add_provider(
+                                    runtime,
+                                    &mut state.provider_selection,
+                                    kind,
+                                    name,
+                                    ConnectionMethod::SystemCli,
+                                );
+                                ui.close();
+                            }
+                            ui.separator();
                         }
-                        runtime.add_account(account)
                     });
-                runtime.notice = Some(match result {
-                    Ok(()) => {
-                        state.account_id.clear();
-                        state.account_label.clear();
-                        state.account_model.clear();
-                        (true, "Account added.".into())
-                    }
-                    Err(e) => (false, e),
-                });
-            }
+                },
+            );
+            ui.allocate_ui_with_layout(
+                egui::vec2(detail_width, height),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    ScrollArea::vertical()
+                        .id_salt("provider-detail")
+                        .max_height(height)
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            if let Some(account) = accounts.iter().find(|account| {
+                                Some(&account.id) == state.provider_selection.as_ref()
+                            }) {
+                                provider_detail(
+                                    ui,
+                                    runtime,
+                                    &mut state.login,
+                                    &mut state.provider_selection,
+                                    account,
+                                );
+                            } else {
+                                ui.label(
+                                    RichText::new(tr("Connect an AI to start"))
+                                        .size(LEAD)
+                                        .strong(),
+                                );
+                                ui.label(secondary(
+                                    "Add a provider to sign in with your subscription.",
+                                ));
+                            }
+                        });
+                },
+            );
         });
     }
-
-    // ---------------------------------------------------------------- sessions
 
     pub(super) fn sessions_panel(&mut self, ui: &mut Ui) {
         if self.runtime_unavailable(ui) {
@@ -649,7 +1279,20 @@ impl Editor {
 
     fn approvals_strip(&mut self, ui: &mut Ui) {
         let runtime = self.hub.agents.runtime.as_mut().expect("runtime");
-        let pending = runtime.approvals.clone();
+        Self::conversation_approvals(ui, runtime, None);
+    }
+
+    pub(super) fn conversation_approvals(
+        ui: &mut Ui,
+        runtime: &mut crate::agents_runtime::Runtime,
+        session: Option<&str>,
+    ) {
+        let pending: Vec<_> = runtime
+            .approvals
+            .iter()
+            .filter(|r| session.is_none_or(|id| r.session == id))
+            .cloned()
+            .collect();
         if pending.is_empty() {
             return;
         }
@@ -745,8 +1388,6 @@ impl Editor {
             }
         });
     }
-
-    // ---------------------------------------------------------------- orchestrator
 
     pub(super) fn autonomy_panel(&mut self, ui: &mut Ui) {
         if self.runtime_unavailable(ui) {

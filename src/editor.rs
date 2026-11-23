@@ -20,6 +20,7 @@ mod identity;
 mod lsp;
 mod mascot;
 mod motion;
+mod navigation;
 mod panels;
 mod preferences;
 mod preview;
@@ -62,6 +63,7 @@ enum Sidebar {
     Files,
     Search,
     Git,
+    Chats,
 }
 
 enum Pending {
@@ -130,14 +132,13 @@ pub struct Editor {
     notice: Option<(bool, String)>,
     pending: Option<Pending>,
     force_close: bool,
-    new_file: Option<String>,
-    file_change: Option<(files::FileChange, String)>,
+    entry_draft: Option<files::EntryDraft>,
     pending_delete: Option<PathBuf>,
-    focus_new_file: bool,
     syntax: egui_extras::syntax_highlighting::CodeTheme,
     clean: clean::Clean,
     studio: studio::Studio,
     studio_open: bool,
+    nav: navigation::Navigation,
     /// Side panel opened from the activity bar while no project is open.
     sidebar_requested: bool,
     /// User toggle for collapsing or expanding the sidebar (Ctrl+B).
@@ -178,7 +179,7 @@ impl Editor {
     }
 
     fn new(ctx: &egui::Context, root: Option<PathBuf>, preferences: Preferences) -> Self {
-        theme::install_fonts(ctx);
+        theme::install_fonts(ctx, preferences.ubuntu_interface, preferences.hack_editor);
         // Ctrl +/- must zoom the panel under the pointer, not the whole interface.
         ctx.options_mut(|o| o.zoom_with_keyboard = false);
         theme::set_brightness(preferences.brightness);
@@ -232,13 +233,12 @@ impl Editor {
             notice: None,
             pending: None,
             force_close: false,
-            new_file: None,
-            file_change: None,
+            entry_draft: None,
             pending_delete: None,
-            focus_new_file: false,
             clean: clean::Clean::default(),
             studio: studio::Studio::default(),
             studio_open: false,
+            nav: navigation::Navigation::default(),
             sidebar_requested: false,
             sidebar_open: true,
             explorer_filter: String::new(),
@@ -260,10 +260,6 @@ impl Editor {
                 egui::TextStyle::Monospace.resolve(&ctx.style()).size,
             ),
         };
-        editor.hub.agents.chat.model = editor.preferences.agent_model.clone();
-        if !editor.preferences.agent_effort.trim().is_empty() {
-            editor.hub.agents.chat.effort = editor.preferences.agent_effort.clone();
-        }
         let startup_root = root.or_else(|| {
             editor
                 .preferences
@@ -310,6 +306,7 @@ impl Editor {
         self.include_project_note = false;
         self.guided.clear(None);
         self.guided.restore_for_workspace(&root);
+        self.entry_draft = None;
         self.root = Some(root.clone());
         self.hub_open = false;
         self.tools.workspace_changed();
@@ -352,7 +349,7 @@ impl Editor {
                 .remember_workspace_files(&root, files, active);
         }
         self.preferences.agent_model = self.hub.agents.chat.model.clone();
-        self.preferences.agent_effort = self.hub.agents.chat.effort.clone();
+        self.preferences.agent_effort = self.hub.agents.chat.effort.clone().unwrap_or_default();
         self.preferences.agent_session = self.hub.agents.chat.dock.clone();
         self.preferences.agent_detached = self.hub.agents.chat.detached.clone();
     }
@@ -519,6 +516,7 @@ impl Editor {
         }
     }
 
+    #[cfg(test)]
     fn create_file(&mut self, name: &str) -> bool {
         let Some(root) = &self.root else { return false };
         match workspace::create_file(root, name) {
@@ -917,14 +915,13 @@ impl Editor {
         }
 
         if self.pending.is_none()
-            && self.new_file.is_none()
             && self.palette.is_none()
-            && self.file_change.is_none()
             && self.pending_delete.is_none()
             && !self.conversation_exit_warning
         {
             self.shortcuts(ctx);
         }
+        self.begin_navigation(ctx);
         self.top_bar(ctx);
         self.status_bar(ctx);
         if self.studio_open && !self.hub_open {
@@ -962,16 +959,17 @@ impl Editor {
             self.floating_agents(ctx);
         }
         self.guided_overlay(ctx);
-        self.add_ai_modal(ctx);
         self.tunnel_modal(ctx);
         self.settings_window(ctx);
         self.about_window(ctx);
         self.notifications_modal(ctx);
         self.palette_modal(ctx);
         self.modals(ctx);
+        self.agent_usage_modal(ctx);
         self.conversation_close_modal(ctx);
         self.file_dialogs(ctx);
         self.companion_surface(ctx);
+        self.end_navigation(ctx);
     }
 }
 impl Editor {
@@ -1007,7 +1005,14 @@ impl Editor {
             (state, _) => state,
         };
         let (language_asset, language_text) = match language.filter(|_| prefs.show_language) {
-            Some(lang) => (Some(lang.to_ascii_lowercase().replace('#', "sharp").replace("++", "pp")), Some(lang.to_owned())),
+            Some(lang) => (
+                Some(
+                    lang.to_ascii_lowercase()
+                        .replace('#', "sharp")
+                        .replace("++", "pp"),
+                ),
+                Some(lang.to_owned()),
+            ),
             None => (None, None),
         };
         let activity = discord::Activity {

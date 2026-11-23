@@ -6,7 +6,10 @@ const crypto = require('node:crypto');
 const { execFile } = require('node:child_process');
 const args = process.argv.slice(2);
 const option = name => { const i = args.indexOf(name); return i < 0 ? undefined : args[i + 1]; };
-const installer = path.resolve(option('--installer') || 'dist/Covalos-0.4.0-Windows-x64-Setup.exe');
+const cargo = require('node:fs').readFileSync(path.join(__dirname, '..', 'Cargo.toml'), 'utf8');
+const version = /^version\s*=\s*"(\d+\.\d+\.\d+)"/m.exec(cargo)?.[1];
+if (!version) throw new Error('Could not read the package version from Cargo.toml');
+const installer = path.resolve(option('--installer') || 'dist/Covalos-' + version + '-Windows-x64-Setup.exe');
 const reportPath = path.resolve(option('--report') || 'artifacts/windows-installer/verification.json');
 const binaryPath = option('--binary');
 const execute = (exe, args, options = {}) => new Promise((resolve, reject) => execFile(exe, args,
@@ -50,9 +53,10 @@ const check = (name, condition) => { assert(condition, name); report.tests.push(
     await execute(installer, [...setupArgs, '/LOG=' + path.join(evidenceDir, 'install.log')]);
     installed = true;
     check('Installed executable and uninstaller exist', !!(await fs.stat(installedExe)) && !!(await fs.stat(uninstaller)));
+    check('WebView2 loader installed beside the executable', (await fs.stat(path.join(appDir, 'WebView2Loader.dll'))).isFile());
     if (binaryPath) check('Installed executable matches release binary', await hash(installedExe) === await hash(binaryPath));
     const uninstallInfo = await query(registry);
-    check('Registered in Windows Apps with correct name and version', uninstallInfo.includes('"DisplayName"="COVALOS"') && uninstallInfo.includes('"DisplayVersion"="0.4.0"'));
+    check('Registered in Windows Apps with correct name and version', uninstallInfo.includes('"DisplayName"="COVALOS"') && uninstallInfo.includes('"DisplayVersion"="' + version + '"'));
     check('Install directory with spaces and Unicode preserved', uninstallInfo.includes(appDir));
     check('App Paths points to installed executable', (await query(appPathKey)).includes(installedExe));
     for (const key of contextKeys) {

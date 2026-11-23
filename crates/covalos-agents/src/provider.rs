@@ -8,6 +8,8 @@ pub enum ProviderKind {
     ClaudeCode,
     Codex,
     Gemini,
+    Antigravity,
+    OpenCode,
     Custom(String),
 }
 
@@ -17,6 +19,8 @@ impl ProviderKind {
             Self::ClaudeCode => "claude-code",
             Self::Codex => "codex",
             Self::Gemini => "gemini",
+            Self::Antigravity => "antigravity",
+            Self::OpenCode => "opencode",
             Self::Custom(name) => name,
         }
     }
@@ -42,6 +46,7 @@ pub enum LoginFlow {
 pub enum Headless {
     ClaudeStreamJson,
     CodexExecJson,
+    Acp,
     Unsupported,
 }
 
@@ -71,9 +76,7 @@ impl ProviderSpec {
             binary_override_var: "COVALOS_CLAUDE_BIN".into(),
             config_dir_var: Some("CLAUDE_CONFIG_DIR".into()),
             api_key_var: Some("ANTHROPIC_API_KEY".into()),
-            login: LoginFlow::Interactive {
-                hint: "Run /login inside Claude Code".into(),
-            },
+            login: LoginFlow::Command(vec!["auth".into(), "login".into()]),
             headless: Headless::ClaudeStreamJson,
         }
     }
@@ -85,7 +88,7 @@ impl ProviderSpec {
             executable: "codex".into(),
             binary_override_var: "COVALOS_CODEX_BIN".into(),
             config_dir_var: Some("CODEX_HOME".into()),
-            api_key_var: None,
+            api_key_var: Some("OPENAI_API_KEY".into()),
             login: LoginFlow::Command(vec!["login".into()]),
             headless: Headless::CodexExecJson,
         }
@@ -97,12 +100,38 @@ impl ProviderSpec {
             label: "Gemini CLI".into(),
             executable: "gemini".into(),
             binary_override_var: "COVALOS_GEMINI_BIN".into(),
-            config_dir_var: None,
+            config_dir_var: Some("GEMINI_CLI_HOME".into()),
             api_key_var: Some("GEMINI_API_KEY".into()),
             login: LoginFlow::Interactive {
-                hint: "Choose a sign-in method when Gemini CLI starts".into(),
+                hint: "Choose Google Sign-In when Gemini CLI starts".into(),
             },
-            headless: Headless::Unsupported,
+            headless: Headless::Acp,
+        }
+    }
+
+    pub fn antigravity() -> Self {
+        Self {
+            kind: ProviderKind::Antigravity,
+            label: "Antigravity".into(),
+            executable: "antigravity-acp".into(),
+            binary_override_var: "COVALOS_ANTIGRAVITY_BIN".into(),
+            config_dir_var: Some("GEMINI_HOME".into()),
+            api_key_var: Some("GEMINI_API_KEY".into()),
+            login: LoginFlow::None,
+            headless: Headless::Acp,
+        }
+    }
+
+    pub fn opencode() -> Self {
+        Self {
+            kind: ProviderKind::OpenCode,
+            label: "OpenCode".into(),
+            executable: "opencode".into(),
+            binary_override_var: "COVALOS_OPENCODE_BIN".into(),
+            config_dir_var: Some("XDG_CONFIG_HOME".into()),
+            api_key_var: None,
+            login: LoginFlow::Command(vec!["auth".into(), "login".into()]),
+            headless: Headless::Acp,
         }
     }
 
@@ -122,6 +151,8 @@ impl ProviderRegistry {
             ProviderSpec::claude_code(),
             ProviderSpec::codex(),
             ProviderSpec::gemini(),
+            ProviderSpec::antigravity(),
+            ProviderSpec::opencode(),
         ];
         Self {
             specs: specs.into_iter().map(|s| (s.kind.clone(), s)).collect(),
@@ -136,7 +167,7 @@ impl ProviderRegistry {
             ));
         };
         validate_id(name)?;
-        if ["claude-code", "codex", "gemini"].contains(&name.as_str()) {
+        if ["claude-code", "codex", "gemini", "antigravity", "opencode"].contains(&name.as_str()) {
             return Err(Error::Duplicate(name.clone()));
         }
         if spec.executable.is_empty()
@@ -186,7 +217,7 @@ mod tests {
     #[test]
     fn builtins_are_present_and_isolation_is_explicit() {
         let registry = ProviderRegistry::builtin();
-        assert_eq!(registry.iter().count(), 3);
+        assert_eq!(registry.iter().count(), 5);
         assert!(
             registry
                 .get(&ProviderKind::ClaudeCode)
@@ -200,8 +231,14 @@ mod tests {
                 .supports_isolated_login()
         );
         assert!(
-            !registry
+            registry
                 .get(&ProviderKind::Gemini)
+                .unwrap()
+                .supports_isolated_login()
+        );
+        assert!(
+            registry
+                .get(&ProviderKind::OpenCode)
                 .unwrap()
                 .supports_isolated_login()
         );

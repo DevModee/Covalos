@@ -143,7 +143,10 @@ impl GuidedController {
             && let Ok(mut session) = serde_json::from_str::<GuidedSession>(&raw)
             && !session.plan.steps.is_empty()
         {
-            session.plan.steps.retain(|s| sanitize_relative_path(&s.path).is_some());
+            session
+                .plan
+                .steps
+                .retain(|s| sanitize_relative_path(&s.path).is_some());
             if !session.plan.steps.is_empty() {
                 session.step_index = session.step_index.min(session.plan.steps.len() - 1);
                 session
@@ -317,8 +320,8 @@ impl GuidedSession {
         if step_complete && self.step_index < self.completed_steps.len() {
             self.completed_steps[self.step_index] = true;
         }
-        let all_complete = !self.completed_steps.is_empty()
-            && self.completed_steps.iter().all(|&c| c);
+        let all_complete =
+            !self.completed_steps.is_empty() && self.completed_steps.iter().all(|&c| c);
 
         SyncSnapshot {
             on_target_file: true,
@@ -368,9 +371,7 @@ pub(super) fn build_guided_prompt(user_request: &str, flow: FlowOrder) -> String
 /// Extracts and validates a `GuidedPlan` from an assistant markdown response.
 pub(super) fn extract_plan_from_text(text: &str, flow: FlowOrder) -> Option<GuidedPlan> {
     let json_block = find_fenced_block(text, "covalos-guided")
-        .or_else(|| {
-            find_fenced_block(text, "json").filter(|b| b.contains("\"steps\""))
-        })?;
+        .or_else(|| find_fenced_block(text, "json").filter(|b| b.contains("\"steps\"")))?;
     let mut plan: GuidedPlan = serde_json::from_str(json_block.trim()).ok()?;
     let mut clean_steps = Vec::with_capacity(plan.steps.len());
     for mut step in plan.steps {
@@ -488,7 +489,14 @@ fn reorder_natural_jit(steps: Vec<GuidedStep>, known_files: &[String]) -> Vec<Gu
 
     for i in 0..pending.len() {
         if let Some(step) = pending[i].take() {
-            emit_natural(step, &mut pending, known_files, &mut created, &mut visiting, &mut out);
+            emit_natural(
+                step,
+                &mut pending,
+                known_files,
+                &mut created,
+                &mut visiting,
+                &mut out,
+            );
         }
     }
     out
@@ -604,7 +612,9 @@ fn extract_line_deps(line: &str, current_file: &str, known_files: &[String]) -> 
     let mut out = Vec::new();
     let trimmed = line.trim();
     // JS / TS: `import ... from './foo'` or `require('./foo')`
-    if trimmed.starts_with("import ") || trimmed.contains("require(") || trimmed.starts_with("export ")
+    if trimmed.starts_with("import ")
+        || trimmed.contains("require(")
+        || trimmed.starts_with("export ")
     {
         for quote in ['\'', '"'] {
             let mut rest = trimmed;
@@ -658,7 +668,9 @@ fn resolve_relative_import(
         return match_known_file(&format!("src/{stripped}"), known_files)
             .or_else(|| match_known_file(stripped, known_files));
     } else {
-        Path::new(current_file).parent().unwrap_or_else(|| Path::new(""))
+        Path::new(current_file)
+            .parent()
+            .unwrap_or_else(|| Path::new(""))
     };
     let joined = normalize_joined(base_dir, spec);
     match_known_file(&joined, known_files)
@@ -690,8 +702,17 @@ fn match_known_file(candidate: &str, known_files: &[String]) -> Option<String> {
         return Some(f.clone());
     }
     const EXTS: &[&str] = &[
-        ".ts", ".tsx", ".js", ".jsx", ".rs", ".py", ".css", "/index.ts", "/index.tsx",
-        "/index.js", "/mod.rs",
+        ".ts",
+        ".tsx",
+        ".js",
+        ".jsx",
+        ".rs",
+        ".py",
+        ".css",
+        "/index.ts",
+        "/index.tsx",
+        "/index.js",
+        "/mod.rs",
     ];
     for ext in EXTS {
         let with_ext = format!("{candidate}{ext}");
@@ -703,7 +724,8 @@ fn match_known_file(candidate: &str, known_files: &[String]) -> Option<String> {
 }
 
 fn paths_equal(a: &str, b: &str) -> bool {
-    a.replace('\\', "/").eq_ignore_ascii_case(&b.replace('\\', "/"))
+    a.replace('\\', "/")
+        .eq_ignore_ascii_case(&b.replace('\\', "/"))
 }
 
 fn normalize_line(line: &str, mode: MatchMode) -> String {
@@ -936,13 +958,13 @@ impl super::Editor {
                         }
                         if ui
                             .add(
-                                egui::Button::new(
-                                    RichText::new(tr("Why?")).size(11.0).color(if show_why {
+                                egui::Button::new(RichText::new(tr("Why?")).size(11.0).color(
+                                    if show_why {
                                         colors().accent
                                     } else {
                                         colors().muted
-                                    }),
-                                )
+                                    },
+                                ))
                                 .fill(if show_why {
                                     colors().accent_bg
                                 } else {
@@ -1024,8 +1046,7 @@ impl super::Editor {
                 }
 
                 // Optional 1-line explanation
-                if show_why
-                    && let Some(why) = step.why.as_deref().filter(|w| !w.trim().is_empty())
+                if show_why && let Some(why) = step.why.as_deref().filter(|w| !w.trim().is_empty())
                 {
                     ui.add_space(8.0);
                     ui.label(
@@ -1047,8 +1068,7 @@ impl super::Editor {
                         ui.set_width(ui.available_width());
                         let start = line_idx.saturating_sub(2);
                         let end = (line_idx + 4).min(step.lines.len());
-                        for (idx, code_line) in
-                            step.lines.iter().enumerate().take(end).skip(start)
+                        for (idx, code_line) in step.lines.iter().enumerate().take(end).skip(start)
                         {
                             if idx < line_idx {
                                 ui.label(
@@ -1138,7 +1158,9 @@ impl super::Editor {
                     if ui
                         .add(
                             egui::Button::new(
-                                RichText::new(tr("Finish")).size(SMALL).color(colors().muted),
+                                RichText::new(tr("Finish"))
+                                    .size(SMALL)
+                                    .color(colors().muted),
                             )
                             .frame(false),
                         )
@@ -1153,22 +1175,20 @@ impl super::Editor {
                             } else {
                                 format!("{}: {} →", tr("Next file"), next_path)
                             };
-                            let btn = egui::Button::new(
-                                RichText::new(label)
-                                    .size(SMALL)
-                                    .strong()
-                                    .color(if sync.step_complete {
+                            let btn =
+                                egui::Button::new(RichText::new(label).size(SMALL).strong().color(
+                                    if sync.step_complete {
                                         colors().canvas
                                     } else {
                                         colors().text
-                                    }),
-                            )
-                            .fill(if sync.step_complete {
-                                colors().accent
-                            } else {
-                                colors().elevated
-                            })
-                            .corner_radius(7);
+                                    },
+                                ))
+                                .fill(if sync.step_complete {
+                                    colors().accent
+                                } else {
+                                    colors().elevated
+                                })
+                                .corner_radius(7);
                             if ui.add(btn).clicked() {
                                 advance_now = true;
                             }
@@ -1194,17 +1214,13 @@ impl super::Editor {
         if let Some(path) = open_path {
             self.open_guided_file(&path);
         }
-        if prev_now
-            && let Some(path) = self.guided.prev_step(self.root.as_deref())
-        {
+        if prev_now && let Some(path) = self.guided.prev_step(self.root.as_deref()) {
             self.open_guided_file(&path);
         }
         if skip_line_now {
             self.guided.skip_line(self.root.as_deref());
         }
-        if advance_now
-            && let Some(path) = self.guided.advance_step(self.root.as_deref())
-        {
+        if advance_now && let Some(path) = self.guided.advance_step(self.root.as_deref()) {
             self.open_guided_file(&path);
         }
         if clear_now {

@@ -76,6 +76,17 @@ impl ProfileStore {
         self.save()
     }
 
+    pub fn update(&mut self, account: Account, providers: &ProviderRegistry) -> Result<()> {
+        account.validate(providers.get(&account.provider)?)?;
+        let slot = self
+            .accounts
+            .iter_mut()
+            .find(|a| a.id == account.id)
+            .ok_or_else(|| Error::NotFound(format!("account {}", account.id)))?;
+        *slot = account;
+        self.save()
+    }
+
     /// Removes the account, its stored secret and its isolated config directory.
     pub fn remove(&mut self, id: &AccountId, credentials: &mut dyn CredentialStore) -> Result<()> {
         let index = self

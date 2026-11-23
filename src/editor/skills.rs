@@ -23,9 +23,19 @@ pub(super) struct Skill {
     enabled: bool,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct SkillsShEntry {
+    pub spec: String,
+    pub installs: String,
+    pub url: String,
+}
+
 #[derive(Default)]
 pub(super) struct Skills {
     source: String,
+    search_query: String,
+    search_rx: Option<mpsc::Receiver<Result<Vec<SkillsShEntry>, String>>>,
+    search_results: Vec<SkillsShEntry>,
     download: Option<mpsc::Receiver<Result<Skill, String>>>,
     preview: Option<Skill>,
     selected: Option<String>,
@@ -71,6 +81,119 @@ impl Skills {
         });
         self.download = Some(receiver);
     }
+}
+
+fn strip_ansi(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' && chars.peek() == Some(&'[') {
+            chars.next();
+            for next in chars.by_ref() {
+                if next.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+pub(super) fn parse_skills_sh_output(output: &str) -> Vec<SkillsShEntry> {
+    let clean = strip_ansi(output);
+    let mut entries = Vec::new();
+    let lines: Vec<&str> = clean.lines().map(str::trim).collect();
+    for (i, line) in lines.iter().enumerate() {
+        let Some((spec, rest)) = line.split_once(' ') else {
+            continue;
+        };
+        if !spec.contains('/') || !spec.contains('@') {
+            continue;
+        }
+        let installs = rest.trim().to_owned();
+        let url = lines
+            .get(i + 1)
+            .and_then(|next| next.strip_prefix("└ "))
+            .map(|u| u.trim().to_owned())
+            .unwrap_or_else(|| {
+                let (repo, skill) = spec.split_once('@').unwrap_or((spec, ""));
+                format!("https://skills.sh/{repo}/{skill}")
+            });
+        entries.push(SkillsShEntry {
+            spec: spec.to_owned(),
+            installs,
+            url,
+        });
+    }
+    entries
+}
+
+fn search_skills_sh(query: &str) -> Result<Vec<SkillsShEntry>, String> {
+    let program = if cfg!(windows) { "npx.cmd" } else { "npx" };
+    let mut command = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let output = command
+        .args(["--yes", "skills", "find", query])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| format!("Could not run npx skills: {e}"))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        return Err(if err.is_empty() {
+            "skills.sh search failed".into()
+        } else {
+            err.chars().take(200).collect()
+        });
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    Ok(parse_skills_sh_output(&text))
+}
+
+fn fetch_skills_sh(spec: &str) -> Result<Skill, String> {
+    let clean = spec
+        .trim()
+        .strip_prefix("https://skills.sh/")
+        .unwrap_or(spec.trim());
+    let (owner_repo, skill_name) = if let Some((r, s)) = clean.split_once('@') {
+        (r, s)
+    } else {
+        let mut parts = clean.splitn(3, '/');
+        let owner = parts.next().ok_or("Invalid skills.sh identifier")?;
+        let repo = parts.next().ok_or("Invalid skills.sh identifier")?;
+        let skill = parts.next().ok_or("Invalid skills.sh identifier")?;
+        return fetch_skills_sh(&format!("{owner}/{repo}@{skill}"));
+    };
+    let (owner, repo) = owner_repo
+        .split_once('/')
+        .ok_or("Expected owner/repo@skill")?;
+    let candidates = [
+        format!("https://github.com/{owner}/{repo}/blob/main/skills/{skill_name}/SKILL.md"),
+        format!("https://github.com/{owner}/{repo}/blob/main/{skill_name}/SKILL.md"),
+        format!("https://github.com/{owner}/{repo}/blob/main/SKILL.md"),
+    ];
+    let mut last_err = String::new();
+    for url in candidates {
+        match fetch(&url) {
+            Ok(mut skill) => {
+                skill.id = format!("{owner}/{repo}@{skill_name}");
+                return Ok(skill);
+            }
+            Err(e) => last_err = e,
+        }
+    }
+    Err(if last_err.is_empty() {
+        format!("Could not fetch SKILL.md for {spec}")
+    } else {
+        last_err
+    })
 }
 
 struct Source<'a> {
@@ -190,12 +313,30 @@ fn fetch(url: &str) -> Result<Skill, String> {
 
 impl Editor {
     pub(super) fn skills_panel(&mut self, ui: &mut Ui) {
+        if let Some(rx) = &self.skills.search_rx {
+            match rx.try_recv() {
+                Ok(result) => {
+                    self.skills.search_rx = None;
+                    match result {
+                        Ok(list) => self.skills.search_results = list,
+                        Err(e) => self.skills.error = Some(e),
+                    }
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.skills.search_rx = None;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
         if let Some(download) = &self.skills.download {
             match download.try_recv() {
                 Ok(result) => {
                     self.skills.download = None;
                     match result {
-                        Ok(skill) => self.skills.preview = Some(skill),
+                        Ok(mut skill) => {
+                            skill.enabled = true;
+                            self.skills.preview = Some(skill);
+                        }
                         Err(error) => self.skills.error = Some(error),
                     }
                 }
@@ -207,14 +348,76 @@ impl Editor {
             }
         }
         ScrollArea::vertical().id_salt("hub-skills").show(ui, |ui| {
+            ui.label(RichText::new("skills.sh").strong());
             ui.label(muted(
-                "Review GitHub instructions before enabling them for tasks.",
+                "Search & install official best-practice skills from skills.sh.",
             ));
-            ui.label(secondary(tr("GitHub skill URL")));
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                let enter = ui
+                    .add(
+                        TextEdit::singleline(&mut self.skills.search_query)
+                            .hint_text("Search skills.sh (e.g. react, rust, testing)")
+                            .desired_width((ui.available_width() - 96.0).max(110.0)),
+                    )
+                    .lost_focus()
+                    && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if (ui
+                    .add_enabled(
+                        self.skills.search_rx.is_none()
+                            && !self.skills.search_query.trim().is_empty(),
+                        egui::Button::new(tr("Search")),
+                    )
+                    .clicked()
+                    || enter)
+                    && !self.skills.search_query.trim().is_empty()
+                {
+                    let q = self.skills.search_query.trim().to_owned();
+                    let (tx, rx) = mpsc::channel();
+                    let ctx = ui.ctx().clone();
+                    self.skills.error = None;
+                    self.skills.search_rx = Some(rx);
+                    thread::spawn(move || {
+                        let _ = tx.send(search_skills_sh(&q));
+                        ctx.request_repaint();
+                    });
+                }
+            });
+            if self.skills.search_rx.is_some() {
+                busy_indicator(ui);
+            }
+            if !self.skills.search_results.is_empty() {
+                ui.add_space(4.0);
+                let mut fetch_spec: Option<String> = None;
+                for entry in self.skills.search_results.iter().take(8) {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(&entry.spec).strong());
+                        ui.label(muted(&entry.installs));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.small_button(tr("Preview")).clicked() {
+                                fetch_spec = Some(entry.spec.clone());
+                            }
+                        });
+                    });
+                }
+                if let Some(spec) = fetch_spec {
+                    let (tx, rx) = mpsc::channel();
+                    let ctx = ui.ctx().clone();
+                    self.skills.error = None;
+                    self.skills.preview = None;
+                    self.skills.download = Some(rx);
+                    thread::spawn(move || {
+                        let _ = tx.send(fetch_skills_sh(&spec));
+                        ctx.request_repaint();
+                    });
+                }
+            }
+            ui.add_space(6.0);
+            ui.label(secondary(tr("GitHub or skills.sh URL")));
             ui.horizontal(|ui| {
                 ui.add(
                     TextEdit::singleline(&mut self.skills.source)
-                        .hint_text("https://github.com/owner/repo/blob/ref/SKILL.md")
+                        .hint_text("owner/repo@skill or GitHub SKILL.md URL")
                         .char_limit(600)
                         .desired_width((ui.available_width() - 132.0).max(110.0)),
                 );
@@ -232,7 +435,12 @@ impl Editor {
                     self.skills.preview = None;
                     self.skills.download = Some(receiver);
                     thread::spawn(move || {
-                        let _ = sender.send(fetch(&url));
+                        let res = if url.starts_with("https://github.com/") {
+                            fetch(&url)
+                        } else {
+                            fetch_skills_sh(&url)
+                        };
+                        let _ = sender.send(res);
                         ctx.request_repaint();
                     });
                 }
@@ -314,5 +522,17 @@ mod tests {
         ] {
             assert!(parse_source(url).is_none(), "{url}");
         }
+    }
+
+    #[test]
+    fn parses_skills_sh_search_output() {
+        let sample = "\nInstall with npx skills add <owner/repo@skill>\n\nvercel-labs/agent-skills@vercel-react-best-practices 921.8K installs\n└ https://skills.sh/vercel-labs/agent-skills/vercel-react-best-practices\n";
+        let parsed = parse_skills_sh_output(sample);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(
+            parsed[0].spec,
+            "vercel-labs/agent-skills@vercel-react-best-practices"
+        );
+        assert_eq!(parsed[0].installs, "921.8K installs");
     }
 }

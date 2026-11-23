@@ -213,6 +213,86 @@ impl StreamDecoder for CodexDecoder {
     }
 }
 
+/// Decodes Agent Client Protocol (ACP) JSON-RPC 2.0 lines (`gemini --acp`,
+/// `opencode acp`, `antigravity-acp`, etc.) into normalized `AgentEvent`s.
+#[derive(Default)]
+pub struct AcpDecoder {
+    failure: Option<String>,
+    completed: bool,
+    accumulated: String,
+}
+
+impl StreamDecoder for AcpDecoder {
+    fn decode(&mut self, line: &str) -> Vec<AgentEvent> {
+        let Some(json) = parse(line) else {
+            return Vec::new();
+        };
+        if let Some(err) = json.get("error").filter(|v| !v.is_null()) {
+            let msg = err["message"]
+                .as_str()
+                .unwrap_or("ACP provider reported an error")
+                .to_owned();
+            self.failure = Some(msg);
+            return Vec::new();
+        }
+        // JSON-RPC responses: id=2 is session/new (returns sessionId), id=3 is session/prompt (returns stopReason).
+        if let Some(result) = json.get("result").filter(|v| !v.is_null()) {
+            let mut out = Vec::new();
+            if let Some(session_id) = result["sessionId"].as_str() {
+                out.push(AgentEvent::Started {
+                    provider_session: session_id.to_owned(),
+                    // The session opens before the client applies its model selection.
+                    model: None,
+                });
+            }
+            if result["stopReason"].is_string() {
+                if !self.accumulated.is_empty() {
+                    out.push(AgentEvent::Message {
+                        text: std::mem::take(&mut self.accumulated),
+                    });
+                }
+                if let Some(u) = usage(&result["usage"]) {
+                    out.push(u);
+                }
+                self.completed = true;
+                out.push(AgentEvent::TurnCompleted);
+            }
+            return out;
+        }
+        // JSON-RPC notifications: `session/update`
+        if json["method"].as_str() == Some("session/update") {
+            let update = &json["params"]["update"];
+            let kind = update["sessionUpdate"].as_str().unwrap_or("");
+            match kind {
+                "agent_message_chunk" => {
+                    if let Some(text) = update["content"]["text"].as_str()
+                        && !text.is_empty()
+                    {
+                        self.accumulated.push_str(text);
+                        return vec![AgentEvent::TextDelta {
+                            text: text.to_owned(),
+                        }];
+                    }
+                }
+                "tool_call" => {
+                    let name = update["title"]
+                        .as_str()
+                        .or_else(|| update["kind"].as_str())
+                        .unwrap_or("Tool")
+                        .to_owned();
+                    return vec![AgentEvent::ToolStarted { name }];
+                }
+                _ => {}
+            }
+        }
+        Vec::new()
+    }
+
+    fn finish(&mut self, exit_ok: bool) -> Vec<AgentEvent> {
+        exit_events(self.failure.take(), self.completed, exit_ok)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -315,5 +395,45 @@ mod tests {
                 message: "quota".into()
             }]
         );
+    }
+
+    #[test]
+    fn acp_stream_is_normalized() {
+        let mut decoder = AcpDecoder::default();
+        let events = feed(
+            &mut decoder,
+            &[
+                json!({"jsonrpc":"2.0","id":2,"result":{"sessionId":"acp-1","models":{"currentModelId":"gemini-2.5-pro"}}}),
+                json!({"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Hi "}}}}),
+                json!({"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call","title":"read_file"}}}),
+                json!({"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"there"}}}}),
+                json!({"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}}}),
+            ],
+        );
+        assert_eq!(
+            events,
+            vec![
+                AgentEvent::Started {
+                    provider_session: "acp-1".into(),
+                    model: None,
+                },
+                AgentEvent::TextDelta { text: "Hi ".into() },
+                AgentEvent::ToolStarted {
+                    name: "read_file".into(),
+                },
+                AgentEvent::TextDelta {
+                    text: "there".into(),
+                },
+                AgentEvent::Message {
+                    text: "Hi there".into(),
+                },
+                AgentEvent::Usage(Usage {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                }),
+                AgentEvent::TurnCompleted,
+            ]
+        );
+        assert!(decoder.finish(true).is_empty());
     }
 }

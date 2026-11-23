@@ -234,7 +234,9 @@ fn decide_from_stdin(args: &[String]) -> io::Result<(bool, String)> {
         Verdict::Allow(reason) => (true, reason, "policy"),
         Verdict::Deny(reason) => (false, reason, "policy"),
         Verdict::Ask { reason, once_only } => {
-            let (allow, why) = ask(&gate_dir, &dir, &session, &tool, &action, reason, once_only)?;
+            let (allow, why) = ask(
+                &gate_dir, &dir, &session, &tool, &action, reason, once_only, None,
+            )?;
             (allow, why, "person")
         }
     };
@@ -242,6 +244,57 @@ fn decide_from_stdin(args: &[String]) -> io::Result<(bool, String)> {
     Ok((allow, reason))
 }
 
+pub(crate) fn approve_acp(
+    gate_dir: &Path,
+    session: &SessionId,
+    tool: &Value,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> bool {
+    let dir = session_dir(gate_dir, session);
+    let Ok(bytes) = fs::read(dir.join("policy.json")) else {
+        return false;
+    };
+    let Ok(policy) = serde_json::from_slice::<GatePolicy>(&bytes) else {
+        return false;
+    };
+    let title = tool["title"].as_str().unwrap_or("ACP tool");
+    let input = &tool["rawInput"];
+    let path = ["file_path", "path", "filePath"]
+        .into_iter()
+        .find_map(|key| input[key].as_str())
+        .or_else(|| tool["locations"].as_array()?.first()?["path"].as_str());
+    let action = match (tool["kind"].as_str(), path) {
+        (Some("read"), Some(path)) => Action::Read(PathBuf::from(path)),
+        (Some("edit" | "delete" | "move"), Some(path)) => Action::Write(PathBuf::from(path)),
+        (Some("execute"), _) if input["command"].is_string() => {
+            action_for("Bash", input, &policy.root)
+        }
+        _ if policy.preset == Preset::ReadOnly => return false,
+        _ => Action::Tool(title.to_owned()),
+    };
+    let (allow, reason, by) = match evaluate(&policy, title, &action) {
+        Verdict::Allow(reason) => (true, reason, "policy"),
+        Verdict::Deny(reason) => (false, reason, "policy"),
+        Verdict::Ask { reason, once_only } => {
+            let (allow, why) = ask(
+                gate_dir,
+                &dir,
+                session,
+                title,
+                &action,
+                reason,
+                once_only,
+                Some(cancel),
+            )
+            .unwrap_or_else(|error| (false, error.to_string()));
+            (allow, why, "person")
+        }
+    };
+    audit(gate_dir, session, title, &action, allow, by, &reason);
+    allow
+}
+
+#[allow(clippy::too_many_arguments)]
 fn ask(
     gate_dir: &Path,
     dir: &Path,
@@ -250,6 +303,7 @@ fn ask(
     action: &Action,
     reason: String,
     once_only: bool,
+    cancel: Option<&std::sync::atomic::AtomicBool>,
 ) -> io::Result<(bool, String)> {
     if !ui_alive(gate_dir) {
         return Ok((
@@ -258,7 +312,9 @@ fn ask(
         ));
     }
     let created_ms = now_ms();
-    let ticket = format!("{created_ms:x}-{:x}", std::process::id());
+    static NEXT_TICKET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let serial = NEXT_TICKET.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let ticket = format!("{created_ms:x}-{:x}-{serial:x}", std::process::id());
     let request = GateRequest {
         ticket: ticket.clone(),
         session: session.to_string(),
@@ -288,6 +344,9 @@ fn ask(
                     "denied in the Agent Hub".into()
                 },
             );
+        }
+        if cancel.is_some_and(|cancel| cancel.load(std::sync::atomic::Ordering::Relaxed)) {
+            break (false, "Turn cancelled.".into());
         }
         if now_ms() > request.expires_ms {
             break (false, format!("{reason}; approval expired"));

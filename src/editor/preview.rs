@@ -117,11 +117,8 @@ impl Editor {
             || self.settings_open
             || self.about_open
             || self.palette.is_some()
-            || self.new_file.is_some()
-            || self.file_change.is_some()
             || self.pending_delete.is_some()
             || self.conversation_exit_warning
-            || self.hub.agents.chat.add_ai.is_some()
             || self.terminals.confirming();
         let preview = &mut self.preview;
         let show = preview.open && preview.rect.is_some() && !covered;

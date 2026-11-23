@@ -828,6 +828,7 @@ mod cli {
             programs: [(ProviderKind::ClaudeCode, fake_claude(dir, body))].into(),
             limits: ProcessLimits::default(),
             claude_settings: None,
+            acp_execute: None,
         };
         let mut roles = RoleCatalog::builtin();
         roles

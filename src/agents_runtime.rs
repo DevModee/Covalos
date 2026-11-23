@@ -5,13 +5,17 @@
 //! stream decoders, profiles, credentials, worktrees, policy) and
 //! orchestration from `covalos-engine`. This module only owns threads, files
 //! and the state the UI draws.
-use crate::agent_gate::{self, GatePolicy, GateRequest};
+use crate::{
+    agent_gate::{self, GatePolicy, GateRequest},
+    agent_provider::{self, Catalog, Identity, Model},
+    runtime_install::{self, Install},
+};
 use covalos_agents::{
     Account, AccountId, AgentEvent, ConnectionMethod, PlanId, ProviderKind, ProviderRegistry,
     ProviderSpec, RoleId, SessionId,
     context::{Draft, EntryKind, SharedContext},
     credentials::{CredentialStore, Secret},
-    event::{ClaudeDecoder, CodexDecoder, StreamDecoder},
+    event::{AcpDecoder, ClaudeDecoder, CodexDecoder, StreamDecoder},
     launch::{self, Purpose, Sandbox, Turn},
     permission::Preset,
     profile::ProfileStore,
@@ -23,6 +27,7 @@ use covalos_engine::{
     agent::{AgentProfile, Preferences},
     budget::Budget,
     cli::CliExecutor,
+    executor::{Assignment, Channel, Outcome, Report, context_lines},
     journal::{self, Record},
     process::{INHERITED_ENV, ProcessLimits, kill_tree, own_group},
     role::{Capability, RoleCatalog},
@@ -50,8 +55,6 @@ const CONTEXT_BUDGET: usize = 4_000;
 pub(crate) type Wake = Arc<dyn Fn() + Send + Sync>;
 type Store = Arc<Mutex<dyn CredentialStore + Send>>;
 
-// ---------------------------------------------------------------- detection
-
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Detection {
     pub program: Option<PathBuf>,
@@ -62,47 +65,65 @@ pub(crate) struct Detection {
     pub done: bool,
 }
 
-/// Other agent tools found on the machine that COVALOS cannot drive.
-#[derive(Clone, Debug, Default)]
-pub(crate) struct ExternalTool {
-    pub name: &'static str,
-    pub path: Option<PathBuf>,
-    pub note: &'static str,
+fn run_capture(command: Command, timeout: Duration) -> Result<String, String> {
+    let (ok, text) = capture_status(command, timeout)?;
+    if ok || signed_out(&text) {
+        Ok(text)
+    } else {
+        Err(sanitize_status(&text))
+    }
 }
 
-fn run_capture(mut command: Command, timeout: Duration) -> Result<String, String> {
+pub(crate) fn capture_status(
+    mut command: Command,
+    timeout: Duration,
+) -> Result<(bool, String), String> {
     own_group(&mut command);
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::null())
         .spawn()
         .map_err(|e| e.to_string())?;
-    let mut out = child.stdout.take().expect("piped");
-    let mut err = child.stderr.take().expect("piped");
-    let reader = thread::spawn(move || {
+    covalos_engine::process::contain(&child);
+    let mut out = child.stdout.take().expect("piped").take(1_000_000);
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
         let mut text = String::new();
         let _ = out.read_to_string(&mut text);
-        let mut extra = String::new();
-        let _ = err.read_to_string(&mut extra);
-        text + &extra
+        let _ = tx.send(text);
     });
     let started = Instant::now();
     loop {
-        if child.try_wait().map_err(|e| e.to_string())?.is_some() {
-            break;
+        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+            let result = rx
+                .recv_timeout(Duration::from_secs(1))
+                .map_err(|_| "The provider did not close its output.")?;
+            return Ok((status.success(), result));
         }
         if started.elapsed() > timeout {
             kill_tree(&mut child);
-            return Err("timed out".into());
+            return Err("The provider did not respond in time.".into());
         }
         thread::sleep(Duration::from_millis(20));
     }
-    Ok(reader.join().unwrap_or_default())
 }
 
 /// Status line without e-mail addresses, CLI warnings or log noise.
 pub(crate) fn sanitize_status(text: &str) -> String {
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(text.trim())
+        && let Some(logged_in) = json["loggedIn"].as_bool()
+    {
+        if logged_in {
+            let plan = json["subscriptionType"]
+                .as_str()
+                .or_else(|| json["plan"].as_str())
+                .or_else(|| json["authMethod"].as_str())
+                .filter(|s| !s.trim().is_empty());
+            return plan.map_or_else(|| "Signed in".into(), |plan| format!("Signed in ({plan})"));
+        }
+        return "Not signed in".into();
+    }
     text.lines()
         .map(str::trim)
         .filter(|l| {
@@ -115,7 +136,7 @@ pub(crate) fn sanitize_status(text: &str) -> String {
         })
         .take(3)
         .collect::<Vec<_>>()
-        .join(" · ")
+        .join(" Â· ")
         .chars()
         .take(200)
         .collect()
@@ -123,11 +144,19 @@ pub(crate) fn sanitize_status(text: &str) -> String {
 
 /// Whether a CLI status text says the account is not signed in.
 pub(crate) fn signed_out(status: &str) -> bool {
-    let lower = status.to_ascii_lowercase();
+    let trimmed = status.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    let lower = trimmed.to_ascii_lowercase();
     lower.contains("not logged in")
         || lower.contains("not signed in")
         || lower.contains("expired")
         || lower.contains("log in again")
+        || lower.contains("unauthorized")
+        || lower.contains("please set an auth method")
+        || lower.contains("\"loggedin\": false")
+        || lower.contains("\"loggedin\":false")
 }
 
 /// Strips the Windows verbatim prefix that `canonicalize` adds; git,
@@ -145,7 +174,7 @@ pub(crate) fn plain(path: &Path) -> PathBuf {
 
 fn status_command(spec: &ProviderSpec) -> Option<&'static [&'static str]> {
     match spec.kind {
-        ProviderKind::ClaudeCode => Some(&["auth", "status", "--text"]),
+        ProviderKind::ClaudeCode => Some(&["auth", "status"]),
         ProviderKind::Codex => Some(&["login", "status"]),
         _ => None,
     }
@@ -164,9 +193,9 @@ fn account_plan(
     launch::plan(spec, account, profiles, credentials, program, purpose, cwd)
 }
 
-fn detect(spec: &ProviderSpec) -> Detection {
+fn detect(spec: &ProviderSpec, program: Option<PathBuf>) -> Detection {
     let mut found = Detection {
-        program: launch::discover(spec),
+        program,
         done: true,
         ..Detection::default()
     };
@@ -188,29 +217,14 @@ fn detect(spec: &ProviderSpec) -> Detection {
     {
         found.login = Some(sanitize_status(&out));
     }
+    if spec.kind == ProviderKind::Antigravity {
+        found.version = program
+            .parent()
+            .and_then(|dir| std::fs::read_to_string(dir.join("covalos-runtime-version")).ok())
+            .or(found.version);
+    }
     found
 }
-
-fn external_tools() -> Vec<ExternalTool> {
-    let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
-    let antigravity = local.as_ref().and_then(|l| {
-        [
-            "Programs/Antigravity IDE/bin/antigravity-ide.cmd",
-            "Programs/antigravity/bin/antigravity.cmd",
-        ]
-        .iter()
-        .map(|p| l.join(p))
-        .find(|p| p.is_file())
-    });
-    vec![ExternalTool {
-        name: "Google Antigravity",
-        path: antigravity,
-        note: "Editor launcher only: no documented headless agent interface. Covalos does not \
-               reuse its sign-in.",
-    }]
-}
-
-// ---------------------------------------------------------------- sessions
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -244,13 +258,28 @@ pub(crate) struct LogLine {
     pub text: String,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub(crate) struct ClaudeModes {
+    pub fast: bool,
+    pub ultracode: bool,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct SessionMeta {
     pub id: SessionId,
     pub title: String,
     pub account: AccountId,
+    #[serde(default)]
+    pub account_email: Option<String>,
     pub provider: ProviderKind,
     pub model: Option<String>,
+    #[serde(default)]
+    pub requested_model: Option<String>,
+    #[serde(default)]
+    pub effort: Option<String>,
+    #[serde(default)]
+    pub claude_modes: ClaudeModes,
     pub workdir: PathBuf,
     pub worktree_branch: Option<String>,
     /// Repository the worktree belongs to.
@@ -271,9 +300,11 @@ pub(crate) struct SessionMeta {
 }
 
 enum TurnMsg {
+    PromptSent,
     Event(AgentEvent),
     /// Provider-reported fields COVALOS shows as-is (rate limits).
     Note(String),
+    Warm(WarmTicket),
     Exit {
         ok: bool,
         detail: String,
@@ -283,9 +314,14 @@ enum TurnMsg {
 pub(crate) struct LiveSession {
     pub meta: SessionMeta,
     pub streaming: String,
+    pub provider_started: bool,
+    pub prompt_sent: bool,
+    first_content: bool,
     pub draft: String,
     turn: Option<(Receiver<TurnMsg>, Arc<AtomicBool>)>,
     last_message: String,
+    warm: Option<(Instant, WarmTicket)>,
+    accept_warm: bool,
 }
 
 impl LiveSession {
@@ -293,10 +329,21 @@ impl LiveSession {
         Self {
             meta,
             streaming: String::new(),
+            provider_started: false,
+            prompt_sent: false,
+            first_content: false,
             draft: String::new(),
             turn: None,
             last_message: String::new(),
+            warm: None,
+            accept_warm: false,
         }
+    }
+
+    pub(crate) fn has_warm_session(&self) -> bool {
+        self.warm
+            .as_ref()
+            .is_some_and(|(parked, _)| parked.elapsed() < WARM_IDLE)
     }
 
     pub(crate) fn running(&self) -> bool {
@@ -311,14 +358,34 @@ impl LiveSession {
     }
 
     fn log(&mut self, kind: &str, text: impl Into<String>) {
-        let text = agent_gate::redact(&text.into());
+        let text = text.into();
+        let text = if matches!(kind, "you" | "agent") {
+            if covalos_agents::context::looks_secret(&text) {
+                "[hidden: looks like a secret]".into()
+            } else {
+                text.chars().take(32_000).collect()
+            }
+        } else {
+            agent_gate::redact(&text)
+        };
         self.meta.log.push(LogLine {
             at_ms: covalos_agents::now_ms(),
             kind: kind.into(),
             text,
         });
-        let excess = self.meta.log.len().saturating_sub(LOG_LIMIT);
-        self.meta.log.drain(..excess);
+        let mut bytes = 0;
+        let keep = self
+            .meta
+            .log
+            .iter()
+            .rev()
+            .take(LOG_LIMIT)
+            .take_while(|line| {
+                bytes += line.text.len();
+                bytes <= 512 * 1024
+            })
+            .count();
+        self.meta.log.drain(..self.meta.log.len() - keep);
     }
 }
 
@@ -326,14 +393,14 @@ pub(crate) struct NewSession {
     pub title: String,
     pub account: AccountId,
     pub model: Option<String>,
+    pub effort: Option<String>,
+    pub claude_modes: ClaudeModes,
     pub root: PathBuf,
     pub worktree: bool,
     pub preset: Preset,
     pub allow_safe_commands: bool,
     pub share_context: bool,
 }
-
-// ---------------------------------------------------------------- autonomy
 
 #[derive(Serialize, Deserialize)]
 struct PlanSidecar {
@@ -375,8 +442,6 @@ pub(crate) enum PlanMode {
     Spec(PlanSpec),
 }
 
-// ---------------------------------------------------------------- runtime
-
 pub(crate) struct Runtime {
     pub registry: ProviderRegistry,
     pub profiles: ProfileStore,
@@ -385,9 +450,12 @@ pub(crate) struct Runtime {
     pub dir: PathBuf,
     pub gate_dir: PathBuf,
     pub detections: BTreeMap<ProviderKind, Detection>,
-    pub external: Vec<ExternalTool>,
+    pub installing: BTreeMap<ProviderKind, Install>,
     detect_rx: Option<Receiver<(ProviderKind, Detection)>>,
+    install_tx: Sender<(ProviderKind, Result<(), String>)>,
+    install_rx: Receiver<(ProviderKind, Result<(), String>)>,
     pub sessions: Vec<LiveSession>,
+    prepared: Option<DraftLaunch>,
     pub context: SharedContext,
     pub approvals: Vec<GateRequest>,
     last_scan: Option<Instant>,
@@ -397,8 +465,13 @@ pub(crate) struct Runtime {
     pub notice: Option<(bool, String)>,
     /// Last sign-in check per account, from the provider's own status command.
     pub connection: BTreeMap<AccountId, Connection>,
-    status_tx: Sender<(AccountId, Result<String, String>)>,
-    status_rx: Receiver<(AccountId, Result<String, String>)>,
+    status_tx: Sender<ProbeResult>,
+    status_rx: Receiver<ProbeResult>,
+    probe_ids: BTreeMap<AccountId, u64>,
+    probe_serial: u64,
+    catalogs: BTreeMap<AccountId, Catalog>,
+    limit_requests: BTreeMap<AccountId, Receiver<Result<Vec<agent_provider::LimitWindow>, String>>>,
+    pub limits: BTreeMap<AccountId, Result<Vec<agent_provider::LimitWindow>, String>>,
     exe: PathBuf,
     wake: Wake,
 }
@@ -407,12 +480,15 @@ pub(crate) struct Runtime {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Connection {
     Checking,
-    SignedIn(String),
+    SignedIn(Identity),
     SignedOut(String),
+    GeminiMigrationRequired,
     /// API-key accounts: whether a key is stored.
     Key(bool),
     Unknown(String),
 }
+
+type ProbeResult = (AccountId, u64, bool, Result<Option<Catalog>, String>);
 
 fn credential_store() -> (Store, &'static str) {
     #[cfg(windows)]
@@ -443,11 +519,125 @@ fn lock(store: &Store) -> std::sync::MutexGuard<'_, dyn CredentialStore + Send +
 }
 
 impl Runtime {
+    #[cfg(test)]
+    pub(crate) fn seed_review_accounts(&mut self) -> AccountId {
+        self.detect_rx = None;
+        let primary = AccountId::new("codex-review").unwrap();
+        for (id, kind, label, email) in [
+            (
+                primary.clone(),
+                ProviderKind::Codex,
+                "Codex Personal",
+                "personal@example.invalid",
+            ),
+            (
+                AccountId::new("codex-review-work").unwrap(),
+                ProviderKind::Codex,
+                "Codex Work",
+                "work@example.invalid",
+            ),
+            (
+                AccountId::new("claude-review").unwrap(),
+                ProviderKind::ClaudeCode,
+                "Claude Personal",
+                "claude@example.invalid",
+            ),
+        ] {
+            self.detections.insert(
+                kind.clone(),
+                Detection {
+                    program: Some(self.exe.clone()),
+                    version: Some("Visual fixture".into()),
+                    done: true,
+                    ..Detection::default()
+                },
+            );
+            if self.profiles.get(&id).is_ok() {
+                continue;
+            }
+            self.add_account(Account::new(
+                id.clone(),
+                kind,
+                label,
+                ConnectionMethod::OfficialLogin,
+            ))
+            .unwrap();
+            let identity = Identity {
+                email: Some(email.into()),
+                plan: Some("Example subscription".into()),
+            };
+            self.connection
+                .insert(id.clone(), Connection::SignedIn(identity.clone()));
+            self.catalogs.insert(
+                id,
+                Catalog {
+                    identity,
+                    models: [
+                        ("example", "Example model", true),
+                        ("example-fast", "Example Fast", false),
+                    ]
+                    .into_iter()
+                    .map(|(id, name, is_default)| Model {
+                        id: id.into(),
+                        name: name.into(),
+                        efforts: vec!["low".into(), "medium".into(), "high".into()],
+                        default_effort: Some("medium".into()),
+                        config: None,
+                        is_default,
+                    })
+                    .collect(),
+                    warning: None,
+                },
+            );
+        }
+        primary
+    }
+
+    #[cfg(test)]
+    pub(crate) fn seed_review_conversation(&mut self, root: PathBuf, account: AccountId) -> String {
+        let index = self
+            .create_session(NewSession {
+                title: "hola".into(),
+                account,
+                root,
+                model: None,
+                effort: None,
+                claude_modes: ClaudeModes::default(),
+                worktree: false,
+                preset: Preset::Supervised,
+                allow_safe_commands: false,
+                share_context: false,
+            })
+            .unwrap();
+        let session = &mut self.sessions[index];
+        session.log("you", "hola");
+        session.log(
+            "agent",
+            "\u{00a1}Hola! \u{00bf}En qu\u{00e9} te ayudo con el proyecto?",
+        );
+        session.meta.id.to_string()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn review_waiting(&mut self, id: &str) {
+        let session = self
+            .sessions
+            .iter_mut()
+            .find(|s| s.meta.id.as_str() == id)
+            .unwrap();
+        session.meta.log.retain(|line| line.kind != "agent");
+        session.meta.status = Status::Running;
+        session.prompt_sent = true;
+        let (_tx, rx) = mpsc::channel();
+        session.turn = Some((rx, Arc::new(AtomicBool::new(false))));
+    }
+
     pub(crate) fn open(dir: PathBuf, wake: Wake) -> Result<Self, String> {
         let profiles = ProfileStore::open(dir.join("profiles")).map_err(|e| e.to_string())?;
         let (credentials, credential_backend) = credential_store();
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         let (status_tx, status_rx) = mpsc::channel();
+        let (install_tx, install_rx) = mpsc::channel();
         let context = std::fs::read(dir.join("context.json"))
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
@@ -460,11 +650,14 @@ impl Runtime {
             gate_dir: dir.join("gate"),
             dir,
             detections: BTreeMap::new(),
-            external: external_tools(),
+            installing: BTreeMap::new(),
             detect_rx: None,
+            install_tx,
+            install_rx,
             sessions: Vec::new(),
             context,
             approvals: Vec::new(),
+            prepared: None,
             last_scan: None,
             plan: None,
             planning: None,
@@ -473,6 +666,11 @@ impl Runtime {
             connection: BTreeMap::new(),
             status_tx,
             status_rx,
+            probe_ids: BTreeMap::new(),
+            probe_serial: 0,
+            catalogs: BTreeMap::new(),
+            limit_requests: BTreeMap::new(),
+            limits: BTreeMap::new(),
             exe,
             wake,
         };
@@ -485,12 +683,14 @@ impl Runtime {
     pub(crate) fn redetect(&mut self) {
         let (tx, rx) = mpsc::channel();
         for spec in self.registry.iter().cloned() {
+            let program = runtime_install::program(&self.dir.join("runtimes"), &spec.kind)
+                .or_else(|| launch::discover(&spec));
             self.detections
                 .insert(spec.kind.clone(), Detection::default());
             let tx = tx.clone();
             let wake = self.wake.clone();
             thread::spawn(move || {
-                let found = detect(&spec);
+                let found = detect(&spec, program);
                 let _ = tx.send((spec.kind.clone(), found));
                 wake();
             });
@@ -501,10 +701,12 @@ impl Runtime {
     pub(crate) fn program(&self, kind: &ProviderKind) -> Option<PathBuf> {
         // Detection runs in the background (version and sign-in probes); the
         // binary lookup itself is cheap, so never block a turn on it.
-        self.detections
-            .get(kind)
-            .and_then(|d| d.program.clone())
-            .or_else(|| self.registry.get(kind).ok().and_then(launch::discover))
+        runtime_install::program(&self.dir.join("runtimes"), kind).or_else(|| {
+            self.detections
+                .get(kind)
+                .and_then(|d| d.program.clone())
+                .or_else(|| self.registry.get(kind).ok().and_then(launch::discover))
+        })
     }
 
     fn spec_for(&self, id: &AccountId) -> Result<(Account, ProviderSpec, PathBuf), String> {
@@ -521,12 +723,40 @@ impl Runtime {
         Ok((account, spec, program))
     }
 
-    // ------------------------------------------------------------ accounts
-
     pub(crate) fn add_account(&mut self, account: Account) -> Result<(), String> {
         self.profiles
             .add(account, &self.registry)
             .map_err(|e| e.to_string())
+    }
+
+    pub(crate) fn update_account(&mut self, account: Account) -> Result<(), String> {
+        let id = account.id.clone();
+        let changed = self.profiles.get(&id).is_ok_and(|before| {
+            before.enabled != account.enabled || before.method != account.method
+        });
+        self.profiles
+            .update(account, &self.registry)
+            .map_err(|e| e.to_string())?;
+        if changed {
+            self.invalidate_connection(&id);
+            self.refresh_connection(&id);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn invalidate_connection(&mut self, id: &AccountId) {
+        if self.prepared.as_ref().is_some_and(|p| &p.account == id) {
+            self.prepared = None;
+        }
+        for session in self.sessions.iter_mut().filter(|s| &s.meta.account == id) {
+            session.warm = None;
+            session.accept_warm = false;
+        }
+        self.limit_requests.remove(id);
+        self.limits.remove(id);
+        self.probe_ids.remove(id);
+        self.catalogs.remove(id);
+        self.connection.remove(id);
     }
 
     pub(crate) fn remove_account(&mut self, id: &AccountId) -> Result<(), String> {
@@ -537,10 +767,11 @@ impl Runtime {
         {
             return Err("Stop the account's running sessions first.".into());
         }
-        let mut store = lock(&self.credentials);
         self.profiles
-            .remove(id, &mut *store)
-            .map_err(|e| e.to_string())
+            .remove(id, &mut *lock(&self.credentials))
+            .map_err(|e| e.to_string())?;
+        self.invalidate_connection(id);
+        Ok(())
     }
 
     pub(crate) fn save_api_key(&mut self, id: &AccountId, key: &str) -> Result<(), String> {
@@ -554,7 +785,10 @@ impl Runtime {
         }
         lock(&self.credentials)
             .save(&credential, key)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        self.invalidate_connection(id);
+        self.refresh_connection(id);
+        Ok(())
     }
 
     pub(crate) fn has_api_key(&self, account: &Account) -> Option<bool> {
@@ -562,148 +796,205 @@ impl Runtime {
         Some(matches!(lock(&self.credentials).load(&key), Ok(Some(_))))
     }
 
-    /// Opens the provider's own sign-in in a new console window. COVALOS only
-    /// chooses the config directory; the CLI stores its own tokens there.
-    pub(crate) fn sign_in(&mut self, id: &AccountId) -> Result<(), String> {
-        let (account, spec, program) = self.spec_for(id)?;
-        let plan = account_plan(
-            &spec,
-            &account,
-            &self.profiles,
-            &*lock(&self.credentials),
-            program,
-            &Purpose::Login,
-            None,
-        )
-        .map_err(|e| e.to_string())?;
-        let mut command = plan.isolated_command(INHERITED_ENV);
-        if account.provider == ProviderKind::ClaudeCode {
-            // `claude auth login` is the documented sign-in entry point.
-            command.args(["auth", "login"]);
+    pub(crate) fn mark_gemini_oauth_retired(&mut self, id: &AccountId) {
+        self.invalidate_connection(id);
+        self.connection
+            .insert(id.clone(), Connection::GeminiMigrationRequired);
+    }
+
+    pub(crate) fn login_command(&self, id: &AccountId) -> Result<Command, String> {
+        if self.connection.get(id) == Some(&Connection::GeminiMigrationRequired) {
+            return Err("Gemini CLI personal sign-in moved to Antigravity.".into());
         }
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x0000_0010); // CREATE_NEW_CONSOLE
+        let (account, spec, _) = self.spec_for(id)?;
+        let purpose = if account.provider == ProviderKind::Antigravity {
+            Purpose::Inspect
+        } else {
+            Purpose::Login
+        };
+        let mut command = self.account_command(id, &purpose)?;
+        if spec.kind == ProviderKind::Gemini {
+            command.env("GEMINI_CLI_SKIP_UPDATE_CHECK", "1");
         }
-        command.spawn().map_err(|e| e.to_string())?;
+        Ok(command)
+    }
+
+    pub(crate) fn install_provider(&mut self, kind: ProviderKind) -> Result<(), String> {
+        if !self.installing.contains_key(&kind) && self.program(&kind).is_none() {
+            let install = runtime_install::spawn(
+                self.dir.join("runtimes"),
+                kind.clone(),
+                self.install_tx.clone(),
+                self.wake.clone(),
+            );
+            self.installing.insert(kind, install);
+        }
         Ok(())
     }
 
-    /// Codex only: `codex login --with-api-key` into the account's isolated
-    /// CODEX_HOME. The key goes through stdin and is not kept by COVALOS.
-    pub(crate) fn codex_api_login(&mut self, id: &AccountId, key: &str) -> Result<(), String> {
-        let (account, spec, program) = self.spec_for(id)?;
-        if account.provider != ProviderKind::Codex
-            || account.method != ConnectionMethod::OfficialLogin
+    pub(crate) fn finish_antigravity_login(
+        &mut self,
+        id: &AccountId,
+        result: Result<Catalog, String>,
+    ) {
+        self.invalidate_connection(id);
+        if !self
+            .profiles
+            .get(id)
+            .is_ok_and(|a| a.enabled && a.provider == ProviderKind::Antigravity)
         {
-            return Err("Only isolated Codex accounts sign in with an API key here.".into());
+            return;
         }
+        let state = match result {
+            Ok(catalog) => {
+                let state = Connection::SignedIn(catalog.identity.clone());
+                self.catalogs.insert(id.clone(), catalog);
+                self.notice = None;
+                state
+            }
+            Err(error) => Connection::Unknown(agent_gate::redact(&error)),
+        };
+        self.connection.insert(id.clone(), state);
+    }
+
+    pub(crate) fn connection_ready(&self, id: &AccountId) -> bool {
+        matches!(
+            self.connection.get(id),
+            Some(Connection::SignedIn(_) | Connection::Key(true))
+        )
+    }
+
+    fn account_email(&self, id: &AccountId) -> Option<&str> {
+        match self.connection.get(id)? {
+            Connection::SignedIn(identity) => identity.email.as_deref(),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn models(&self, id: &AccountId) -> &[Model] {
+        self.catalogs
+            .get(id)
+            .map_or(&[], |catalog| catalog.models.as_slice())
+    }
+
+    pub(crate) fn request_limits(&mut self, account: &Account, refresh: bool) {
+        if self.limit_requests.contains_key(&account.id)
+            || (!refresh && self.limits.contains_key(&account.id))
+        {
+            return;
+        }
+        self.limits.remove(&account.id);
+        let command = match self.account_command(&account.id, &Purpose::Inspect) {
+            Ok(command) => command,
+            Err(error) => {
+                self.limits.insert(account.id.clone(), Err(error));
+                return;
+            }
+        };
+        let (tx, rx) = mpsc::channel();
+        self.limit_requests.insert(account.id.clone(), rx);
+        let kind = account.provider.clone();
+        let wake = self.wake.clone();
+        thread::spawn(move || {
+            let _ = tx.send(agent_provider::read_limits(command, &kind));
+            wake();
+        });
+    }
+
+    pub(crate) fn catalog_warning(&self, id: &AccountId) -> Option<&str> {
+        self.catalogs.get(id)?.warning.as_deref()
+    }
+
+    pub(crate) fn refresh_connection(&mut self, id: &AccountId) {
+        let Ok(account) = self.profiles.get(id).cloned() else {
+            return;
+        };
+        if !account.enabled || self.program(&account.provider).is_none() {
+            self.invalidate_connection(id);
+            return;
+        }
+        let key = account.method == ConnectionMethod::ApiKey;
+        if key && self.has_api_key(&account) != Some(true) {
+            self.invalidate_connection(id);
+            self.connection.insert(id.clone(), Connection::Key(false));
+            return;
+        }
+        let commands = self
+            .account_command(id, &Purpose::Inspect)
+            .and_then(|command| {
+                let status = (account.provider == ProviderKind::ClaudeCode)
+                    .then(|| self.account_command(id, &Purpose::Inspect))
+                    .transpose()?;
+                Ok((command, status))
+            });
+        self.invalidate_connection(id);
+        let (command, status) = match commands {
+            Ok(commands) => commands,
+            Err(error) => {
+                self.connection
+                    .insert(id.clone(), Connection::Unknown(error));
+                return;
+            }
+        };
+        self.probe_serial += 1;
+        let serial = self.probe_serial;
+        self.probe_ids.insert(id.clone(), serial);
+        self.connection.insert(id.clone(), Connection::Checking);
+        let tx = self.status_tx.clone();
+        let wake = self.wake.clone();
+        let id = id.clone();
+        let cwd = self.dir.clone();
+        thread::spawn(move || {
+            let result = match account.provider {
+                ProviderKind::ClaudeCode => {
+                    agent_provider::claude(status.expect("Claude status command"), command, key)
+                }
+                ProviderKind::Codex => agent_provider::codex(command, key),
+                ProviderKind::Gemini | ProviderKind::Antigravity | ProviderKind::OpenCode => {
+                    agent_provider::acp_probe(command, &cwd, &account.provider, key)
+                }
+                ProviderKind::Custom(_) => Err("No official status command.".into()),
+            };
+            let _ = tx.send((id, serial, key, result));
+            wake();
+        });
+    }
+
+    fn account_command(&self, id: &AccountId, purpose: &Purpose) -> Result<Command, String> {
+        let (account, spec, program) = self.spec_for(id)?;
         let plan = account_plan(
             &spec,
             &account,
             &self.profiles,
             &*lock(&self.credentials),
             program,
-            &Purpose::Login,
-            None,
+            purpose,
+            Some(&self.dir),
         )
         .map_err(|e| e.to_string())?;
-        // Purpose::Login yields `codex login`; add the documented stdin flag.
         let mut command = plan.isolated_command(INHERITED_ENV);
-        command.arg("--with-api-key");
-        own_group(&mut command);
-        let mut child = command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| e.to_string())?;
-        {
-            let secret = Secret::new(key.trim());
-            let mut stdin = child.stdin.take().expect("piped");
-            stdin
-                .write_all(secret.expose().as_bytes())
-                .map_err(|e| e.to_string())?;
-        }
-        let output = child.wait_with_output().map_err(|e| e.to_string())?;
-        if output.status.success() {
-            Ok(())
-        } else {
-            Err(sanitize_status(&String::from_utf8_lossy(&output.stderr)))
-        }
+        agent_provider::configure_acp(&mut command, &account.provider);
+        Ok(command)
     }
 
-    /// Sign-in state of one account through the CLI's own status command.
-    /// Checks an account's sign-in in the background with the CLI's own status
-    /// command; the result lands in `connection` on a later `tick`.
-    pub(crate) fn refresh_connection(&mut self, id: &AccountId) {
-        let Some(account) = self
-            .profiles
-            .accounts()
-            .iter()
-            .find(|a| &a.id == id)
-            .cloned()
-        else {
-            return;
-        };
-        if account.method == ConnectionMethod::ApiKey {
-            let stored = self.has_api_key(&account).unwrap_or(false);
-            self.connection.insert(id.clone(), Connection::Key(stored));
-            return;
-        }
-        match self.status_command_for(id) {
-            Ok(command) => {
-                self.connection.insert(id.clone(), Connection::Checking);
-                let tx = self.status_tx.clone();
-                let wake = self.wake.clone();
-                let id = id.clone();
-                thread::spawn(move || {
-                    let _ = tx.send((id, run_capture(command, Duration::from_secs(20))));
-                    wake();
-                });
-            }
-            Err(e) => {
-                self.connection.insert(id.clone(), Connection::Unknown(e));
-            }
-        }
-    }
-
+    #[cfg(test)]
     pub(crate) fn account_status(&self, id: &AccountId) -> Result<String, String> {
         self.account_status_raw(id).map(|t| sanitize_status(&t))
     }
 
+    #[cfg(test)]
     fn account_status_raw(&self, id: &AccountId) -> Result<String, String> {
         run_capture(self.status_command_for(id)?, Duration::from_secs(20))
     }
 
+    #[cfg(test)]
     fn status_command_for(&self, id: &AccountId) -> Result<Command, String> {
-        let (account, spec, program) = self.spec_for(id)?;
+        let (_, spec, _) = self.spec_for(id)?;
         let args = status_command(&spec).ok_or("No official status command.")?;
-        let plan = account_plan(
-            &spec,
-            &account,
-            &self.profiles,
-            &*lock(&self.credentials),
-            program,
-            &Purpose::Login,
-            None,
-        )
-        .map_err(|e| e.to_string())?;
-        // Rebuild with the status arguments instead of the login ones.
-        let mut command = Command::new(&plan.program);
-        let isolated = plan.isolated_command(INHERITED_ENV);
-        command.env_clear();
-        for (name, value) in isolated.get_envs() {
-            if let Some(value) = value {
-                command.env(name, value);
-            }
-        }
+        let mut command = self.account_command(id, &Purpose::Inspect)?;
         command.args(args);
         Ok(command)
     }
-
-    // ------------------------------------------------------------ sessions
 
     fn sessions_path(&self) -> PathBuf {
         self.dir.join("sessions.json")
@@ -776,12 +1067,21 @@ impl Runtime {
                 spec.label
             ));
         }
-        let mut stamp = covalos_agents::now_ms().to_string();
-        let id = SessionId::new(format!(
-            "s{}",
-            stamp.split_off(stamp.len().saturating_sub(9))
-        ))
-        .map_err(|e| e.to_string())?;
+        if !account.enabled {
+            return Err("Provider account is disabled.".into());
+        }
+        if let Some(model) = &new.model
+            && !self
+                .models(&account.id)
+                .iter()
+                .any(|entry| &entry.id == model)
+        {
+            return Err("This model is no longer available for the selected account.".into());
+        }
+        static NEXT_SESSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let sequence = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
+        let id = SessionId::new(format!("s{:x}-{sequence:x}", covalos_agents::now_ms()))
+            .map_err(|e| e.to_string())?;
         let (workdir, branch, repo) = if new.worktree {
             let manager = WorktreeManager::new(&new.root, self.worktree_base(&new.root));
             let tree = manager
@@ -792,7 +1092,7 @@ impl Runtime {
             (new.root.clone(), None, None)
         };
         let title = if new.title.trim().is_empty() {
-            format!("{} · {}", spec.label, account.label)
+            format!("{} Â· {}", spec.label, account.label)
         } else {
             new.title.trim().to_owned()
         };
@@ -800,8 +1100,12 @@ impl Runtime {
             id,
             title,
             account: account.id.clone(),
+            account_email: self.account_email(&account.id).map(str::to_owned),
             provider: account.provider.clone(),
-            model: new.model.filter(|m| !m.trim().is_empty()),
+            model: None,
+            requested_model: new.model.filter(|m| !m.trim().is_empty()),
+            effort: new.effort,
+            claude_modes: new.claude_modes,
             workdir,
             worktree_branch: branch,
             repo,
@@ -824,14 +1128,147 @@ impl Runtime {
         );
         session.log(
             "created",
-            format!("{} · {} · {where_}", spec.label, account.label),
+            format!("{} Â· {} Â· {where_}", spec.label, account.label),
         );
         self.sessions.push(session);
         self.save_sessions();
         Ok(self.sessions.len() - 1)
     }
 
+    pub(crate) fn prepare_draft(&mut self, id: &AccountId, root: &Path, preset: Preset) {
+        if !self.connection_ready(id)
+            || !self.profiles.get(id).is_ok_and(|a| {
+                a.enabled
+                    && a.provider == ProviderKind::Antigravity
+                    && a.method != ConnectionMethod::ApiKey
+            })
+        {
+            return;
+        }
+        let root = plain(root);
+        if self.prepared.as_ref().is_some_and(|p| {
+            p.matches(id, &root, preset) && p.started.elapsed() < Duration::from_secs(90)
+        }) {
+            return;
+        }
+        let Ok(mut command) = self.account_command(id, &Purpose::Inspect) else {
+            return;
+        };
+        command.current_dir(&root);
+        agent_provider::acp_args(&mut command, &ProviderKind::Antigravity);
+        self.prepared = Some(DraftLaunch {
+            started: Instant::now(),
+            account: id.clone(),
+            root,
+            preset,
+            ticket: prepare_process(command, preset),
+        });
+    }
+
+    pub(crate) fn fork_chat(&mut self, id: &SessionId, line: usize) -> Result<usize, String> {
+        let meta = &self
+            .sessions
+            .iter()
+            .find(|session| &session.meta.id == id)
+            .ok_or("Unknown session.")?
+            .meta;
+        let mut context: Vec<_> = meta
+            .log
+            .iter()
+            .take(line.saturating_add(1))
+            .filter(|line| matches!(line.kind.as_str(), "you" | "agent"))
+            .cloned()
+            .collect();
+        let latest_messages: Vec<_> = context
+            .iter()
+            .rev()
+            .take(12)
+            .rev()
+            .map(|line| {
+                format!(
+                    "{}: {}",
+                    line.kind,
+                    line.text.chars().take(1200).collect::<String>()
+                )
+            })
+            .collect();
+        let new = NewSession {
+            title: format!("{} \u{2197}", meta.title),
+            account: meta.account.clone(),
+            model: meta.requested_model.clone(),
+            effort: meta.effort.clone(),
+            claude_modes: meta.claude_modes,
+            root: meta.workdir.clone(),
+            worktree: false,
+            preset: meta.preset,
+            allow_safe_commands: meta.allow_safe_commands,
+            share_context: meta.share_context,
+        };
+        let index = self.create_session(new)?;
+        let session = &mut self.sessions[index];
+        session.meta.log.append(&mut context);
+        session.log("fork_context", latest_messages.join("\n"));
+        self.save_sessions();
+        Ok(index)
+    }
+
     pub(crate) fn send(&mut self, index: usize, prompt: &str) -> Result<(), String> {
+        self.send_chat(index, prompt, prompt)
+    }
+
+    pub(crate) fn claude_mode_support(
+        &self,
+        account: &AccountId,
+        model: Option<&str>,
+    ) -> ClaudeModes {
+        if !self
+            .profiles
+            .get(account)
+            .is_ok_and(|profile| profile.provider == ProviderKind::ClaudeCode)
+        {
+            return ClaudeModes::default();
+        }
+        let Some(model) = self
+            .models(account)
+            .iter()
+            .find(|entry| Some(entry.id.as_str()) == model)
+        else {
+            return ClaudeModes::default();
+        };
+        let version = self
+            .detections
+            .get(&ProviderKind::ClaudeCode)
+            .and_then(|detected| detected.version.as_deref())
+            .and_then(|version| version.split_whitespace().next())
+            .and_then(|version| {
+                let mut parts = version.trim_start_matches('v').split('.');
+                Some((
+                    parts.next()?.parse::<u32>().ok()?,
+                    parts.next()?.parse::<u32>().ok()?,
+                    parts.next()?.parse::<u32>().ok()?,
+                ))
+            })
+            .unwrap_or_default();
+        let name = model.name.to_ascii_lowercase();
+        let fast_model = ["claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"]
+            .contains(&model.id.as_str())
+            || (model.id == "opus"
+                && ["opus 5.5", "opus 5 ", "opus 4.8"]
+                    .iter()
+                    .any(|supported| name.contains(supported)));
+        ClaudeModes {
+            fast: version >= (2, 1, 205) && fast_model,
+            ultracode: version >= (2, 1, 284)
+                && model.efforts.iter().any(|effort| effort == "xhigh"),
+        }
+    }
+
+    pub(crate) fn send_chat(
+        &mut self,
+        index: usize,
+        prompt: &str,
+        display: &str,
+    ) -> Result<(), String> {
         let prompt = prompt.trim().to_owned();
         if prompt.is_empty() {
             return Err("Write a message first.".into());
@@ -842,7 +1279,38 @@ impl Runtime {
         }
         let meta = session.meta.clone();
         let (account, spec, program) = self.spec_for(&meta.account)?;
-        let settings = if spec.headless == Headless::ClaudeStreamJson {
+        if account.provider != meta.provider {
+            return Err("This conversation belongs to a different provider.".into());
+        }
+        if let Some(email) = &meta.account_email
+            && self.account_email(&meta.account) != Some(email)
+        {
+            return Err(
+                "The provider account changed. Start a new conversation for this login.".into(),
+            );
+        }
+        let verified_model = self
+            .models(&account.id)
+            .iter()
+            .find(|model| Some(&model.id) == meta.requested_model.as_ref());
+        if meta.requested_model.is_some() && verified_model.is_none() {
+            return Err("This model is no longer available for the selected account.".into());
+        }
+        let effort = meta.effort.clone();
+        if effort
+            .as_ref()
+            .is_some_and(|e| !verified_model.is_some_and(|m| m.efforts.contains(e)))
+        {
+            return Err("The selected reasoning level is no longer available.".into());
+        }
+        let modes = meta.claude_modes;
+        let supported = self.claude_mode_support(&meta.account, meta.requested_model.as_deref());
+        if (modes.fast && !supported.fast) || (modes.ultracode && !supported.ultracode) {
+            return Err(
+                "The selected Claude mode is unavailable for this model or CLI version.".into(),
+            );
+        }
+        let mut settings = if matches!(spec.headless, Headless::ClaudeStreamJson | Headless::Acp) {
             let policy = GatePolicy {
                 root: meta.workdir.clone(),
                 preset: meta.preset,
@@ -857,9 +1325,26 @@ impl Runtime {
         } else {
             None
         };
+        if let Some(raw) = &mut settings
+            && spec.headless == Headless::ClaudeStreamJson
+            && (supported.fast || supported.ultracode)
+        {
+            let mut merged: serde_json::Value =
+                serde_json::from_str(raw).map_err(|e| e.to_string())?;
+            if supported.fast {
+                merged["fastMode"] = modes.fast.into();
+            }
+            if supported.ultracode {
+                merged["ultracode"] = modes.ultracode.into();
+            }
+            *raw = merged.to_string();
+        }
         let turn = Turn {
             resume: meta.provider_session.clone(),
-            model: meta.model.clone(),
+            model: verified_model
+                .filter(|_| spec.headless != Headless::Acp)
+                .map(|model| model.id.clone()),
+            effort: effort.clone(),
             sandbox: match meta.preset {
                 Preset::ReadOnly => Sandbox::ReadOnly,
                 _ => Sandbox::WorkspaceWrite,
@@ -876,12 +1361,14 @@ impl Runtime {
             Some(&meta.workdir),
         )
         .map_err(|e| e.to_string())?;
-        let command = plan.isolated_command(INHERITED_ENV);
+        let build_command = || {
+            let mut command = plan.isolated_command(INHERITED_ENV);
+            agent_provider::configure_acp(&mut command, &account.provider);
+            command
+        };
+        let command = build_command();
         // A resumed turn gets one silent-start retry (see `FIRST_EVENT`).
-        let retry = meta
-            .provider_session
-            .is_some()
-            .then(|| plan.isolated_command(INHERITED_ENV));
+        let retry = meta.provider_session.is_some().then(build_command);
 
         let mut full = String::new();
         let latest = self.context.latest_seq();
@@ -896,18 +1383,57 @@ impl Runtime {
                 full.push_str("\n\n---\n");
             }
         }
+        if meta.turns == 0
+            && let Some(history) = meta.log.iter().find(|line| line.kind == "fork_context")
+        {
+            full.push_str("Prior conversation excerpt (context only):\n");
+            full.push_str(&history.text);
+            full.push_str("\n\n");
+        }
         full.push_str(&prompt);
 
         let decoder: Box<dyn StreamDecoder + Send> = match spec.headless {
             Headless::ClaudeStreamJson => Box::new(ClaudeDecoder::default()),
+            Headless::Acp => Box::new(AcpDecoder::default()),
             _ => Box::new(CodexDecoder::default()),
         };
+        let acp = (spec.headless == Headless::Acp).then(|| AcpConfig {
+            cwd: meta.workdir.clone(),
+            resume: meta.provider_session.clone(),
+            model: verified_model.cloned(),
+            effort,
+            provider: account.provider.clone(),
+            api_key: account.method == ConnectionMethod::ApiKey,
+            preset: meta.preset,
+            gate_dir: self.gate_dir.clone(),
+            session: meta.id.clone(),
+        });
         let cancel = Arc::new(AtomicBool::new(false));
         let (tx, rx) = mpsc::channel();
+        let session = &mut self.sessions[index];
+        session.accept_warm = account.provider == ProviderKind::Antigravity;
+        let warm = session
+            .warm
+            .take()
+            .filter(|(parked, _)| parked.elapsed() < WARM_IDLE)
+            .map(|(_, ticket)| LaunchTicket::Conversation(ticket))
+            .or_else(|| {
+                if self
+                    .prepared
+                    .as_ref()
+                    .is_some_and(|p| p.matches(&meta.account, &meta.workdir, meta.preset))
+                {
+                    self.prepared.take().map(|p| LaunchTicket::Draft(p.ticket))
+                } else {
+                    None
+                }
+            });
         spawn_turn(
+            warm,
             command,
             retry,
             full,
+            acp,
             decoder,
             cancel.clone(),
             tx,
@@ -919,9 +1445,12 @@ impl Runtime {
         session.meta.context_cursor = latest;
         session.meta.turns += 1;
         session.meta.status = Status::Running;
+        session.provider_started = false;
+        session.prompt_sent = false;
+        session.first_content = false;
         session.streaming.clear();
         session.last_message.clear();
-        session.log("you", prompt);
+        session.log("you", display);
         if shared {
             session.log(
                 "context",
@@ -986,8 +1515,6 @@ impl Runtime {
         Ok(())
     }
 
-    // ------------------------------------------------------------ approvals
-
     pub(crate) fn answer(&mut self, request: &GateRequest, allow: bool, remember: bool) {
         if let Err(error) = agent_gate::answer(&self.gate_dir, request, allow, remember) {
             self.notice = Some((false, error.to_string()));
@@ -1008,8 +1535,6 @@ impl Runtime {
             );
         }
     }
-
-    // ------------------------------------------------------------ autonomy
 
     fn plans_dir(&self) -> PathBuf {
         self.dir.join("plans")
@@ -1048,11 +1573,14 @@ impl Runtime {
             .collect();
         let mut agents = Vec::new();
         let mut programs = BTreeMap::new();
-        let mut prefs = Preferences {
+        let prefs = Preferences {
             pinned: pins.clone(),
             ..Preferences::default()
         };
         for account in self.profiles.accounts() {
+            if !account.enabled || !self.connection_ready(&account.id) {
+                continue;
+            }
             let Ok(spec) = self.registry.get(&account.provider) else {
                 continue;
             };
@@ -1063,29 +1591,66 @@ impl Runtime {
             if let Some(p) = &program {
                 programs.insert(account.provider.clone(), p.clone());
             }
-            // Never hand work to an account its own CLI reports as signed out.
-            if account.method != ConnectionMethod::ApiKey
-                && self
-                    .account_status_raw(&account.id)
-                    .is_ok_and(|status| signed_out(&status))
-            {
-                prefs.excluded.insert(account.id.clone());
+            let mut profile =
+                AgentProfile::from_account(account, all.clone(), Some(program.is_some()));
+            profile.models = covalos_agents::models::ModelCatalog::default();
+            for model in self.models(&account.id) {
+                profile.models.observe(&model.id);
             }
-            agents.push(AgentProfile::from_account(
-                account,
-                all.clone(),
-                Some(program.is_some()),
-            ));
-        }
-        if agents.iter().all(|a| prefs.excluded.contains(&a.account)) {
-            return Err("Every configured account reports that it is signed out.".into());
+            agents.push(profile);
         }
         if agents.is_empty() {
-            return Err("Add at least one Claude Code or Codex account first.".into());
+            return Err("Connect an enabled agent account before starting a plan.".into());
         }
         let exe = self.exe.clone();
         let gate_dir = self.gate_dir.clone();
+        let acp_exe = exe.clone();
+        let acp_gate = gate_dir.clone();
+        let acp_models = self
+            .catalogs
+            .iter()
+            .map(|(id, catalog)| (id.clone(), catalog.models.clone()))
+            .collect::<BTreeMap<_, _>>();
         let executor = CliExecutor {
+            acp_execute: Some(Arc::new(move |mut command, assignment, channel| {
+                let preset = assignment.role.autonomy.preset();
+                let policy = GatePolicy {
+                    root: assignment.workdir.clone(),
+                    preset,
+                    grants: assignment.role.grants.clone(),
+                    allow_safe_commands: false,
+                };
+                if let Err(error) =
+                    agent_gate::install(&acp_exe, &acp_gate, &assignment.session, &policy)
+                {
+                    return Outcome::Failed {
+                        reason: error.to_string(),
+                        retryable: false,
+                    };
+                }
+                agent_provider::configure_acp(&mut command, &assignment.provider);
+                let model = assignment.model.as_ref().and_then(|id| {
+                    acp_models
+                        .get(&assignment.account)?
+                        .iter()
+                        .find(|model| &model.id == id)
+                        .cloned()
+                });
+                let config = AcpConfig {
+                    cwd: assignment.workdir.clone(),
+                    resume: None,
+                    model,
+                    effort: None,
+                    provider: assignment.provider.clone(),
+                    api_key: command
+                        .get_envs()
+                        .any(|(key, value)| key == "GEMINI_API_KEY" && value.is_some()),
+                    preset,
+                    gate_dir: acp_gate.clone(),
+                    session: assignment.session.clone(),
+                };
+                execute_acp_assignment(command, assignment, channel, &config)
+            })),
             registry: self.registry.clone(),
             profiles: Arc::new(
                 ProfileStore::open(self.dir.join("profiles")).map_err(|e| e.to_string())?,
@@ -1233,6 +1798,8 @@ impl Runtime {
             title: format!("Plan: {}", goal.chars().take(40).collect::<String>()),
             account,
             model,
+            effort: None,
+            claude_modes: ClaudeModes::default(),
             root: root.to_path_buf(),
             worktree: false,
             preset: Preset::ReadOnly,
@@ -1312,43 +1879,129 @@ impl Runtime {
         Ok(())
     }
 
-    // ------------------------------------------------------------ frame
-
     /// Drains provider streams, refreshes approvals and drives the engine.
     /// Returns true while anything is in flight (the UI keeps repainting).
     pub(crate) fn tick(&mut self) -> bool {
+        self.limit_requests.retain(|id, rx| match rx.try_recv() {
+            Ok(result) => {
+                self.limits.insert(id.clone(), result);
+                false
+            }
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.limits
+                    .insert(id.clone(), Err("Usage limits unavailable".into()));
+                false
+            }
+            Err(mpsc::TryRecvError::Empty) => true,
+        });
+        let mut ready = Vec::new();
         if let Some(rx) = &self.detect_rx {
             while let Ok((kind, found)) = rx.try_recv() {
+                if found.program.is_some() {
+                    ready.extend(
+                        self.profiles
+                            .accounts()
+                            .iter()
+                            .filter(|a| {
+                                a.enabled
+                                    && a.provider == kind
+                                    && !self.connection.contains_key(&a.id)
+                            })
+                            .map(|a| a.id.clone()),
+                    );
+                }
                 self.detections.insert(kind, found);
             }
             if self.detections.values().all(|d| d.done) {
                 self.detect_rx = None;
             }
         }
-        while let Ok((id, result)) = self.status_rx.try_recv() {
+        for id in ready {
+            self.refresh_connection(&id);
+        }
+        while let Ok((kind, result)) = self.install_rx.try_recv() {
+            self.installing.remove(&kind);
+            match result {
+                Ok(()) => {
+                    self.notice = Some((true, format!("{} installed.", kind.key())));
+                    self.redetect();
+                }
+                Err(e) => {
+                    self.notice = Some((false, format!("Install {} failed: {e}", kind.key())));
+                }
+            }
+        }
+        while let Ok((id, serial, key, result)) = self.status_rx.try_recv() {
+            if self.probe_ids.get(&id) != Some(&serial) {
+                continue;
+            }
+            self.probe_ids.remove(&id);
             let state = match result {
-                Ok(text) if signed_out(&text) => Connection::SignedOut(sanitize_status(&text)),
-                Ok(text) => Connection::SignedIn(sanitize_status(&text)),
-                Err(e) => Connection::Unknown(e),
+                Ok(Some(catalog)) => {
+                    let state = if key {
+                        Connection::Key(true)
+                    } else {
+                        Connection::SignedIn(catalog.identity.clone())
+                    };
+                    self.catalogs.insert(id.clone(), catalog);
+                    state
+                }
+                Ok(None) => {
+                    Connection::SignedOut("Sign in with the provider to use this account.".into())
+                }
+                Err(error)
+                    if !key
+                        && agent_provider::gemini_oauth_retired(&error)
+                        && self
+                            .profiles
+                            .get(&id)
+                            .is_ok_and(|account| account.provider == ProviderKind::Gemini) =>
+                {
+                    Connection::GeminiMigrationRequired
+                }
+                Err(error) if agent_provider::signed_out(&error) => {
+                    Connection::SignedOut("Sign in with the provider to use this account.".into())
+                }
+                Err(error) => Connection::Unknown(agent_gate::redact(&error)),
             };
             self.connection.insert(id, state);
         }
+
         let mut changed = false;
         let mut publish: Vec<(SessionId, Draft)> = Vec::new();
+        let mut recheck = std::collections::BTreeSet::new();
         for session in &mut self.sessions {
             let Some((rx, _)) = &session.turn else {
                 continue;
             };
             let messages: Vec<TurnMsg> = rx.try_iter().collect();
             for message in messages {
-                changed = true;
+                changed |= !matches!(message, TurnMsg::Event(AgentEvent::TextDelta { .. }));
                 match message {
-                    TurnMsg::Event(event) => apply_event(session, event),
+                    TurnMsg::PromptSent => {
+                        session.prompt_sent = true;
+                        session.log("prompt_sent", "Prompt sent");
+                    }
+                    TurnMsg::Event(event) => {
+                        if let AgentEvent::Failed { message } = &event
+                            && agent_provider::signed_out(message)
+                        {
+                            recheck.insert(session.meta.account.clone());
+                        }
+                        apply_event(session, event);
+                    }
+                    TurnMsg::Warm(ticket) => {
+                        if session.accept_warm {
+                            session.warm = Some((Instant::now(), ticket));
+                        }
+                    }
                     TurnMsg::Note(note) => session.log("provider", note),
                     TurnMsg::Exit { ok, detail } => {
                         session.turn = None;
                         if session.last_message.is_empty() && !session.streaming.is_empty() {
-                            session.last_message = std::mem::take(&mut session.streaming);
+                            let partial = std::mem::take(&mut session.streaming);
+                            session.log("agent", partial.clone());
+                            session.last_message = partial;
                         }
                         session.streaming.clear();
                         if session.meta.status == Status::Running {
@@ -1378,6 +2031,9 @@ impl Runtime {
                     }
                 }
             }
+        }
+        for id in recheck {
+            self.refresh_connection(&id);
         }
         for (author, draft) in publish {
             match self.context.publish(draft) {
@@ -1439,16 +2095,21 @@ impl Drop for Runtime {
 }
 
 fn apply_event(session: &mut LiveSession, event: AgentEvent) {
+    if !session.first_content
+        && matches!(&event, AgentEvent::Message{text} | AgentEvent::TextDelta{text} if !text.is_empty())
+    {
+        session.first_content = true;
+        session.log("first_content", "First response text");
+    }
     match event {
         AgentEvent::Started {
             provider_session,
             model,
         } => {
+            session.provider_started = true;
             let fresh = session.meta.provider_session.as_deref() != Some(&provider_session);
             session.meta.provider_session = Some(provider_session.clone());
-            if let Some(model) = &model
-                && session.meta.model.is_none()
-            {
+            if let Some(model) = &model {
                 session.meta.model = Some(model.clone());
             }
             if fresh {
@@ -1456,7 +2117,7 @@ fn apply_event(session: &mut LiveSession, event: AgentEvent) {
                     "started",
                     format!(
                         "Provider session {provider_session}{}",
-                        model.map(|m| format!(" · {m}")).unwrap_or_default()
+                        model.map(|m| format!(" Â· {m}")).unwrap_or_default()
                     ),
                 );
             }
@@ -1481,7 +2142,7 @@ fn apply_event(session: &mut LiveSession, event: AgentEvent) {
             session.log(
                 "usage",
                 format!(
-                    "{} in · {} out tokens",
+                    "{} in Â· {} out tokens",
                     usage.input_tokens, usage.output_tokens
                 ),
             );
@@ -1546,12 +2207,191 @@ enum Attempt {
     Silent,
 }
 
+#[derive(Clone)]
+struct AcpConfig {
+    cwd: PathBuf,
+    resume: Option<String>,
+    model: Option<Model>,
+    effort: Option<String>,
+    provider: ProviderKind,
+    api_key: bool,
+    preset: Preset,
+    gate_dir: PathBuf,
+    session: SessionId,
+}
+
+fn execute_acp_assignment(
+    command: Command,
+    assignment: &Assignment,
+    channel: &Channel,
+    config: &AcpConfig,
+) -> Outcome {
+    let mut decoder: Box<dyn StreamDecoder + Send> = Box::<AcpDecoder>::default();
+    let answer = std::cell::RefCell::new(String::new());
+    let failure = std::cell::RefCell::new(None);
+    let completed = std::cell::Cell::new(false);
+    let send = |message| match message {
+        TurnMsg::Event(event) => {
+            match &event {
+                AgentEvent::Message { text } => answer.borrow_mut().clone_from(text),
+                AgentEvent::Failed { message } => *failure.borrow_mut() = Some(message.clone()),
+                _ => {}
+            }
+            channel.report(Report::Event(event));
+        }
+        TurnMsg::Exit { ok, detail } => {
+            completed.set(ok);
+            if !detail.is_empty() {
+                *failure.borrow_mut() = Some(detail);
+            }
+        }
+        TurnMsg::Note(_) | TurnMsg::Warm(_) | TurnMsg::PromptSent => {}
+    };
+    run_attempt(
+        command,
+        None,
+        false,
+        &assignment.prompt(),
+        Some(config),
+        &mut decoder,
+        channel.cancellation_flag(),
+        &send,
+        false,
+    );
+    if channel.is_cancelled() {
+        return Outcome::Cancelled;
+    }
+    if !completed.get() {
+        return Outcome::Failed {
+            reason: failure
+                .into_inner()
+                .unwrap_or_else(|| "ACP did not complete the assignment.".into()),
+            retryable: false,
+        };
+    }
+    let answer = answer.into_inner();
+    for entry in context_lines(&answer) {
+        channel.report(Report::Publish(entry));
+    }
+    Outcome::Succeeded {
+        summary: answer.chars().take(2_000).collect(),
+    }
+}
+
 /// Runs one provider turn. `retry` is a second copy of the command, used once
 /// when a resumed turn produces no output at all (bug 1 in the checkpoint).
+struct DraftLaunch {
+    started: Instant,
+    account: AccountId,
+    root: PathBuf,
+    preset: Preset,
+    ticket: Sender<Sender<std::process::Child>>,
+}
+impl DraftLaunch {
+    fn matches(&self, account: &AccountId, root: &Path, preset: Preset) -> bool {
+        self.account == *account && self.root == root && self.preset == preset
+    }
+}
+enum LaunchTicket {
+    Conversation(WarmTicket),
+    Draft(Sender<Sender<std::process::Child>>),
+}
+enum ReadyProcess {
+    Conversation(WarmProcess),
+    Initialized(std::process::Child),
+}
+
+fn claim_process<T>(ticket: Sender<Sender<T>>) -> Option<T> {
+    let (tx, rx) = mpsc::channel();
+    ticket.send(tx).ok()?;
+    rx.recv().ok()
+}
+
+fn prepare_process(mut command: Command, preset: Preset) -> Sender<Sender<std::process::Child>> {
+    let (ticket, requests) = mpsc::channel::<Sender<std::process::Child>>();
+    thread::spawn(move || {
+        let Ok(mut child) = piped_provider(&mut command) else {
+            return;
+        };
+        // Only negotiate transport capabilities before Send. The project, user text,
+        // authentication and all tool requests enter the usual turn path.
+        if initialize_acp(child.stdin.as_mut().expect("piped"), preset).is_ok()
+            && let Ok(consumer) = requests.recv_timeout(Duration::from_secs(90))
+            && child.try_wait().is_ok_and(|s| s.is_none())
+        {
+            match consumer.send(child) {
+                Ok(()) => return,
+                Err(err) => child = err.0,
+            }
+        }
+        kill_tree(&mut child);
+    });
+    ticket
+}
+
+fn initialize_acp(stdin: &mut std::process::ChildStdin, preset: Preset) -> std::io::Result<()> {
+    let mut params = agent_provider::acp_init();
+    params["clientCapabilities"]["fs"] =
+        serde_json::json!({"readTextFile":true,"writeTextFile":preset != Preset::ReadOnly});
+    writeln!(stdin, "{}", agent_provider::rpc(1, "initialize", params))?;
+    stdin.flush()
+}
+
+fn piped_provider(command: &mut Command) -> std::io::Result<std::process::Child> {
+    own_group(command);
+    let child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    covalos_engine::process::contain(&child);
+    Ok(child)
+}
+
+const WARM_IDLE: Duration = Duration::from_secs(120);
+type WarmTicket = Sender<Sender<WarmProcess>>;
+struct WarmProcess {
+    child: std::process::Child,
+    stdin: std::process::ChildStdin,
+    lines: Receiver<String>,
+    diagnostics: thread::JoinHandle<String>,
+    session_id: String,
+    state: serde_json::Value,
+}
+
+// Only the owning conversation receives a ticket. Dropping the ticket or
+// leaving it unused releases the provider process on this background thread.
+fn park_process(mut process: WarmProcess, send: &dyn Fn(TurnMsg)) {
+    let (tx, rx) = mpsc::channel::<Sender<WarmProcess>>();
+    send(TurnMsg::Warm(tx));
+    send(TurnMsg::Exit {
+        ok: true,
+        detail: String::new(),
+    });
+    if let Ok(request) = rx.recv_timeout(WARM_IDLE)
+        && matches!(process.lines.try_recv(), Err(mpsc::TryRecvError::Empty))
+        && process
+            .child
+            .try_wait()
+            .is_ok_and(|status| status.is_none())
+    {
+        match request.send(process) {
+            Ok(()) => return,
+            Err(error) => process = error.0,
+        }
+    }
+    if process.child.try_wait().is_ok_and(|s| s.is_none()) {
+        kill_tree(&mut process.child);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn spawn_turn(
+    warm: Option<LaunchTicket>,
     command: Command,
     retry: Option<Command>,
     prompt: String,
+    acp: Option<AcpConfig>,
     decoder: Box<dyn StreamDecoder + Send>,
     cancel: Arc<AtomicBool>,
     tx: Sender<TurnMsg>,
@@ -1564,15 +2404,40 @@ fn spawn_turn(
         };
         let mut decoder = decoder;
         let watchdog = retry.is_some();
-        match run_attempt(command, &prompt, &mut decoder, &cancel, &send, watchdog) {
+        let warm = warm.and_then(|ticket| match ticket {
+            LaunchTicket::Conversation(ticket) => {
+                claim_process(ticket).map(ReadyProcess::Conversation)
+            }
+            LaunchTicket::Draft(ticket) => claim_process(ticket).map(ReadyProcess::Initialized),
+        });
+        match run_attempt(
+            command,
+            warm,
+            true,
+            &prompt,
+            acp.as_ref(),
+            &mut decoder,
+            &cancel,
+            &send,
+            watchdog,
+        ) {
             Attempt::Finished => {}
             Attempt::Silent => {
                 send(TurnMsg::Note(
                     "The provider stayed silent after resuming; retrying once.".into(),
                 ));
                 if let Some(command) = retry
-                    && let Attempt::Silent =
-                        run_attempt(command, &prompt, &mut decoder, &cancel, &send, true)
+                    && let Attempt::Silent = run_attempt(
+                        command,
+                        None,
+                        true,
+                        &prompt,
+                        acp.as_ref(),
+                        &mut decoder,
+                        &cancel,
+                        &send,
+                        true,
+                    )
                 {
                     send(TurnMsg::Exit {
                         ok: false,
@@ -1598,63 +2463,101 @@ fn stop_and_drain(child: &mut std::process::Child, lines: &Receiver<String>) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_attempt(
     mut command: Command,
+    warm: Option<ReadyProcess>,
+    keep_warm: bool,
     prompt: &str,
+    acp: Option<&AcpConfig>,
     decoder: &mut Box<dyn StreamDecoder + Send>,
     cancel: &AtomicBool,
     send: &dyn Fn(TurnMsg),
     watchdog: bool,
 ) -> Attempt {
-    own_group(&mut command);
-    let mut child = match command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-    {
-        Ok(child) => {
-            covalos_engine::process::contain(&child);
-            child
-        }
-        Err(error) => {
-            send(TurnMsg::Exit {
-                ok: false,
-                detail: format!("Could not start the provider: {error}"),
+    let antigravity = acp.is_some_and(|config| config.provider == ProviderKind::Antigravity);
+    let mut acp_session_id = None;
+    let mut acp_session_state = serde_json::Value::Null;
+    let mut first = None;
+    let (mut child, mut acp_stdin, lines, diagnostics) =
+        if let Some(ReadyProcess::Conversation(warm)) = warm {
+            acp_session_id = Some(warm.session_id);
+            // Reuse the confirmed session, reapplying the new turn's model and
+            // reasoning through the same negotiation as a cold resume.
+            first = Some(serde_json::json!({"id":2,"result":warm.state}).to_string());
+            (warm.child, Some(warm.stdin), warm.lines, warm.diagnostics)
+        } else {
+            let prepared = matches!(warm, Some(ReadyProcess::Initialized(_)));
+            let mut child = match if let Some(ReadyProcess::Initialized(child)) = warm {
+                Ok(child)
+            } else {
+                piped_provider(&mut command)
+            } {
+                Ok(child) => child,
+                Err(error) => {
+                    send(TurnMsg::Exit {
+                        ok: false,
+                        detail: format!("Could not start the provider: {error}"),
+                    });
+                    return Attempt::Finished;
+                }
+            };
+            let mut stdin = child.stdin.take().expect("piped");
+            let mut acp_stdin = None;
+            if let Some(config) = acp {
+                if !prepared && let Err(error) = initialize_acp(&mut stdin, config.preset) {
+                    kill_tree(&mut child);
+                    send(TurnMsg::Exit {
+                        ok: false,
+                        detail: error.to_string(),
+                    });
+                    return Attempt::Finished;
+                }
+                acp_stdin = Some(stdin);
+            } else {
+                let input = prompt.to_owned();
+                thread::spawn(move || {
+                    let _ = stdin.write_all(input.as_bytes());
+                });
+            }
+            let stderr = child.stderr.take().expect("piped");
+            let (lines_tx, lines) = mpsc::channel::<String>();
+            let signals = antigravity.then(|| lines_tx.clone());
+            let diagnostics = thread::spawn(move || {
+                let mut kept = Vec::new();
+                for mut line in BufReader::new(stderr).split(b'\n').map_while(Result::ok) {
+                    if let Some(signals) = &signals
+                        && agent_provider::oauth_link(&String::from_utf8_lossy(&line)).is_some()
+                    {
+                        let _ = signals.send("covalos: antigravity sign-in required".into());
+                        continue;
+                    }
+                    let room = 8192_usize.saturating_sub(kept.len());
+                    line.push(b'\n');
+                    kept.extend_from_slice(&line[..line.len().min(room)]);
+                }
+                String::from_utf8_lossy(&kept).trim().to_owned()
             });
-            return Attempt::Finished;
-        }
-    };
-    let mut stdin = child.stdin.take().expect("piped");
-    let input = prompt.to_owned();
-    thread::spawn(move || {
-        let _ = stdin.write_all(input.as_bytes());
-    });
-    let mut stderr = child.stderr.take().expect("piped");
-    let diagnostics = thread::spawn(move || {
-        let mut kept = Vec::new();
-        let mut buffer = [0_u8; 4096];
-        while let Ok(n) = stderr.read(&mut buffer) {
-            if n == 0 {
-                break;
-            }
-            let room = 8192_usize.saturating_sub(kept.len());
-            kept.extend_from_slice(&buffer[..n.min(room)]);
-        }
-        String::from_utf8_lossy(&kept).trim().to_owned()
-    });
-    let stdout = child.stdout.take().expect("piped");
-    let (lines_tx, lines) = mpsc::channel::<String>();
-    thread::spawn(move || {
-        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            if lines_tx.send(line).is_err() {
-                break;
-            }
-        }
-    });
+            let stdout = child.stdout.take().expect("piped");
+            thread::spawn(move || {
+                for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                    if lines_tx.send(line).is_err() {
+                        break;
+                    }
+                }
+            });
+            (child, acp_stdin, lines, diagnostics)
+        };
     let started = Instant::now();
     let mut bytes = 0_usize;
     let mut heard = false;
+    let mut acp_result = None;
+    let mut acp_prompted = false;
+    let setup_timeout = if antigravity {
+        agent_provider::ANTIGRAVITY_SETUP_TIMEOUT + Duration::from_secs(60)
+    } else {
+        Duration::from_secs(45)
+    };
     loop {
         if cancel.load(Ordering::SeqCst) {
             stop_and_drain(&mut child, &lines);
@@ -1665,7 +2568,11 @@ fn run_attempt(
             });
             return Attempt::Finished;
         }
-        if watchdog && !heard && started.elapsed() > FIRST_EVENT {
+        if acp.is_some() && !acp_prompted && started.elapsed() > setup_timeout {
+            acp_result = Some(Err("The ACP session did not become ready in time.".into()));
+            break;
+        }
+        if watchdog && !antigravity && !heard && started.elapsed() > FIRST_EVENT {
             stop_and_drain(&mut child, &lines);
             return Attempt::Silent;
         }
@@ -1677,10 +2584,76 @@ fn run_attempt(
             });
             return Attempt::Finished;
         }
-        match lines.recv_timeout(Duration::from_millis(30)) {
+        match first
+            .take()
+            .map(Ok)
+            .unwrap_or_else(|| lines.recv_timeout(Duration::from_millis(30)))
+        {
             Ok(line) => {
                 heard = true;
                 bytes += line.len();
+                if acp.is_some()
+                    && (line == "covalos: antigravity sign-in required"
+                        || agent_provider::oauth_link(&line).is_some())
+                {
+                    acp_result = Some(Err("Authentication required.".into()));
+                    break;
+                }
+                if let Some(cfg) = acp
+                    && let Some(ref mut writer) = acp_stdin
+                    && let Ok(msg) = serde_json::from_str::<serde_json::Value>(line.trim())
+                {
+                    match acp_message(
+                        cfg,
+                        &msg,
+                        &mut acp_session_id,
+                        &mut acp_session_state,
+                        prompt,
+                        cancel,
+                    ) {
+                        Ok(AcpReply::Continue) => {
+                            let replay = cfg.resume.is_some() && acp_session_id.is_none();
+                            if replay && msg["method"] == "session/update" {
+                                continue;
+                            }
+                        }
+                        Ok(AcpReply::Send(out)) => {
+                            let starts_prompt = out["method"] == "session/prompt";
+                            acp_prompted |= starts_prompt;
+                            if let Err(error) =
+                                writeln!(writer, "{out}").and_then(|()| writer.flush())
+                            {
+                                acp_result = Some(Err(error.to_string()));
+                                break;
+                            }
+                            if starts_prompt && let Some(id) = &acp_session_id {
+                                send(TurnMsg::PromptSent);
+                                let model =
+                                    cfg.model.as_ref().map(|m| m.id.clone()).or_else(|| {
+                                        agent_provider::acp_session(&acp_session_state)
+                                            .into_iter()
+                                            .find(|m| m.is_default)
+                                            .map(|m| m.id)
+                                    });
+                                send(TurnMsg::Event(AgentEvent::Started {
+                                    provider_session: id.clone(),
+                                    model,
+                                }));
+                            }
+                        }
+                        Ok(AcpReply::Done) => {
+                            for event in decoder.decode(&line) {
+                                send(TurnMsg::Event(event));
+                            }
+                            acp_result = Some(Ok(()));
+                            break;
+                        }
+                        Err(error) => {
+                            acp_result = Some(Err(error));
+                            break;
+                        }
+                    }
+                }
                 if let Some(note) = rate_limit_note(&line) {
                     send(TurnMsg::Note(note));
                 }
@@ -1691,6 +2664,51 @@ fn run_attempt(
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
+    }
+    if acp.is_some() {
+        if keep_warm
+            && antigravity
+            && matches!(acp_result, Some(Ok(())))
+            && let Some(session_id) = acp_session_id
+        {
+            acp_session_state["sessionId"] = serde_json::json!(session_id);
+            park_process(
+                WarmProcess {
+                    child,
+                    stdin: acp_stdin.expect("ACP stdin"),
+                    lines,
+                    diagnostics,
+                    session_id,
+                    state: acp_session_state,
+                },
+                send,
+            );
+            return Attempt::Finished;
+        }
+        drop(acp_stdin);
+        stop_and_drain(&mut child, &lines);
+        let result = acp_result.unwrap_or_else(|| {
+            let detail = diagnostics.join().unwrap_or_default();
+            Err(if detail.is_empty() {
+                "ACP session ended before the turn completed.".into()
+            } else {
+                format!(
+                    "ACP session ended before the turn completed. {}",
+                    agent_gate::redact(&detail)
+                )
+            })
+        });
+        let ok = result.is_ok();
+        if let Err(detail) = result {
+            send(TurnMsg::Event(AgentEvent::Failed {
+                message: agent_gate::redact(&detail),
+            }));
+        }
+        send(TurnMsg::Exit {
+            ok,
+            detail: String::new(),
+        });
+        return Attempt::Finished;
     }
     let status = child.wait();
     let ok = status.as_ref().is_ok_and(|s| s.success());
@@ -1705,6 +2723,387 @@ fn run_attempt(
         detail: agent_gate::redact(&detail),
     });
     Attempt::Finished
+}
+
+enum AcpReply {
+    Continue,
+    Send(serde_json::Value),
+    Done,
+}
+
+fn acp_file_request(
+    cfg: &AcpConfig,
+    method: &str,
+    params: &serde_json::Value,
+    cancel: &AtomicBool,
+) -> Result<serde_json::Value, String> {
+    use serde_json::json;
+
+    const FILE_LIMIT: usize = 4 * 1024 * 1024;
+    let write = method == "fs/write_text_file";
+    if write && cfg.preset == Preset::ReadOnly {
+        return Err("This conversation is read-only.".into());
+    }
+    let path = params["path"]
+        .as_str()
+        .map(Path::new)
+        .filter(|path| path.is_absolute())
+        .ok_or("ACP requires an absolute file path.")?;
+    let root = cfg.cwd.canonicalize().map_err(|e| e.to_string())?;
+    let target = if write && !path.exists() {
+        let parent = path.parent().ok_or("The file has no parent directory.")?;
+        parent
+            .canonicalize()
+            .map_err(|e| e.to_string())?
+            .join(path.file_name().ok_or("The file has no name.")?)
+    } else {
+        path.canonicalize().map_err(|e| e.to_string())?
+    };
+    if !target.starts_with(&root) || target == root {
+        return Err("ACP file access is limited to the project folder.".into());
+    }
+    let action = json!({
+        "kind": if write {"edit"} else {"read"},
+        "title": method,
+        "rawInput": {"file_path":target},
+    });
+    if !agent_gate::approve_acp(&cfg.gate_dir, &cfg.session, &action, cancel) {
+        return Err("Covalos denied access to this file.".into());
+    }
+    if write {
+        let content = params["content"]
+            .as_str()
+            .filter(|text| text.len() <= FILE_LIMIT)
+            .ok_or("ACP file content is missing or too large.")?;
+        let existing = std::fs::symlink_metadata(&target);
+        match existing {
+            Ok(info) if info.file_type().is_symlink() || !info.is_file() => {
+                return Err("ACP can only write regular project files.".into());
+            }
+            Ok(_) => std::fs::write(&target, content).map_err(|e| e.to_string())?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&target)
+                    .and_then(|mut file| file.write_all(content.as_bytes()))
+                    .map_err(|e| e.to_string())?;
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+        return Ok(json!({}));
+    }
+    let file = std::fs::File::open(&target).map_err(|e| e.to_string())?;
+    if !file
+        .metadata()
+        .is_ok_and(|meta| meta.is_file() && meta.len() <= FILE_LIMIT as u64)
+    {
+        return Err("ACP can only read regular text files up to 4 MiB.".into());
+    }
+    let mut content = String::new();
+    file.take(FILE_LIMIT as u64 + 1)
+        .read_to_string(&mut content)
+        .map_err(|e| e.to_string())?;
+    if content.len() > FILE_LIMIT {
+        return Err("ACP file content is too large.".into());
+    }
+    if params.get("line").is_some() || params.get("limit").is_some() {
+        let first = params["line"].as_u64().unwrap_or(1).saturating_sub(1);
+        let limit = params["limit"].as_u64().unwrap_or(u64::MAX);
+        let first = usize::try_from(first).unwrap_or(usize::MAX);
+        let limit = usize::try_from(limit).unwrap_or(usize::MAX);
+        content = content
+            .lines()
+            .skip(first)
+            .take(limit)
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+    Ok(json!({"content":content}))
+}
+
+fn acp_mode(
+    cfg: &AcpConfig,
+    result: &serde_json::Value,
+    session_id: &str,
+) -> Result<Option<serde_json::Value>, String> {
+    use agent_provider::rpc;
+    use serde_json::json;
+
+    // Gemini starts in its requested plan or default mode on the command line.
+    if cfg.provider == ProviderKind::Gemini {
+        return Ok(None);
+    }
+    let wanted: &[&str] = match cfg.preset {
+        Preset::ReadOnly => &["plan", "read-only", "readonly", "read_only"],
+        _ => &[
+            "default",
+            "normal",
+            "ask",
+            "supervised",
+            "approval-required",
+        ],
+    };
+    let config = result["configOptions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|option| option["category"] == "mode");
+    let values: Vec<_> = if let Some(option) = config {
+        option["options"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| entry["value"].as_str())
+            .collect()
+    } else {
+        result["modes"]["availableModes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| entry["id"].as_str())
+            .collect()
+    };
+    let current = config
+        .and_then(|option| option["currentValue"].as_str())
+        .or_else(|| result["modes"]["currentModeId"].as_str());
+    let Some(mode) = wanted.iter().find(|name| values.contains(name)) else {
+        if cfg.preset == Preset::ReadOnly || !values.is_empty() {
+            return Err("This runtime does not expose the requested permission mode.".into());
+        }
+        return Ok(None);
+    };
+    if current == Some(mode) {
+        return Ok(None);
+    }
+    Ok(Some(if let Some(config) = config {
+        rpc(
+            6,
+            "session/set_config_option",
+            json!({"sessionId":session_id,"configId":config["id"],"value":mode}),
+        )
+    } else {
+        rpc(
+            6,
+            "session/set_mode",
+            json!({"sessionId":session_id,"modeId":mode}),
+        )
+    }))
+}
+
+fn acp_message(
+    cfg: &AcpConfig,
+    message: &serde_json::Value,
+    session_id: &mut Option<String>,
+    session_state: &mut serde_json::Value,
+    prompt: &str,
+    cancel: &AtomicBool,
+) -> Result<AcpReply, String> {
+    use agent_provider::rpc;
+    use serde_json::json;
+
+    if let Some(method) = message["method"].as_str() {
+        let Some(id) = message.get("id") else {
+            return Ok(AcpReply::Continue);
+        };
+        let params = &message["params"];
+        if matches!(method, "fs/read_text_file" | "fs/write_text_file") {
+            let reply = match acp_file_request(cfg, method, params, cancel) {
+                Ok(result) => json!({"jsonrpc":"2.0","id":id,"result":result}),
+                Err(error) => {
+                    json!({"jsonrpc":"2.0","id":id,"error":{"code":-32000,"message":error}})
+                }
+            };
+            return Ok(AcpReply::Send(reply));
+        }
+        if method != "session/request_permission" {
+            return Ok(AcpReply::Send(
+                json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"Unsupported client request"}}),
+            ));
+        }
+        let tool = &params["toolCall"];
+        let allowed = (cfg.preset != Preset::ReadOnly || tool["kind"] == "read")
+            && !tool["toolCallId"]
+                .as_str()
+                .is_some_and(|id| id.starts_with("interaction_"))
+            && agent_gate::approve_acp(&cfg.gate_dir, &cfg.session, tool, cancel);
+        let options = params["options"].as_array().into_iter().flatten();
+        let kind = if allowed { "allow_once" } else { "reject_once" };
+        let selection = options
+            .filter(|option| option["kind"] == kind)
+            .find_map(|option| option["optionId"].as_str());
+        let outcome = selection.map_or_else(
+            || json!({"outcome":"cancelled"}),
+            |option| json!({"outcome":"selected","optionId":option}),
+        );
+        return Ok(AcpReply::Send(
+            json!({"jsonrpc":"2.0","id":id,"result":{"outcome":outcome}}),
+        ));
+    }
+    let Some(id) = message["id"].as_u64() else {
+        return Ok(AcpReply::Continue);
+    };
+    let result = agent_provider::response(message)?;
+    let prompt_request = |id: Option<&String>| {
+        id.map(|id| {
+            AcpReply::Send(rpc(
+                3,
+                "session/prompt",
+                json!({"sessionId":id,"prompt":[{"type":"text","text":prompt}]}),
+            ))
+        })
+        .ok_or_else(|| "The provider did not return a session ID.".into())
+    };
+    let effort_request = |session_id: Option<&String>, config: &serde_json::Value| {
+        if let (Some(session_id), Some(effort)) = (session_id, cfg.effort.as_ref()) {
+            if let Some(option) = agent_provider::thinking_option(config).filter(|option| {
+                agent_provider::option_values(option).any(|item| item["value"] == effort.as_str())
+            }) {
+                if option["currentValue"] == effort.as_str() {
+                    return prompt_request(Some(session_id));
+                }
+                return Ok(AcpReply::Send(rpc(
+                    5,
+                    "session/set_config_option",
+                    json!({"sessionId":session_id,"configId":option["id"],"value":effort}),
+                )));
+            }
+            return Err("The selected reasoning level is no longer available.".into());
+        }
+        prompt_request(session_id)
+    };
+    match id {
+        1 if result["protocolVersion"] == 1 && cfg.provider == ProviderKind::Antigravity => {
+            Ok(AcpReply::Send(rpc(
+                7,
+                "authenticate",
+                json!({"methodId":agent_provider::antigravity_auth_method(cfg.api_key)}),
+            )))
+        }
+        7 | 1 if id == 7 || result["protocolVersion"] == 1 => {
+            let cwd = &cfg.cwd;
+            if let Some(id) = &cfg.resume {
+                if cfg.provider == ProviderKind::Antigravity {
+                    return Ok(AcpReply::Send(rpc(
+                        2,
+                        "session/resume",
+                        json!({"sessionId":id,"cwd":cwd,"mcpServers":[]}),
+                    )));
+                }
+                if result["agentCapabilities"]["loadSession"] != true {
+                    return Err(
+                        "This runtime does not support loading its previous session.".into(),
+                    );
+                }
+                Ok(AcpReply::Send(rpc(
+                    2,
+                    "session/load",
+                    json!({"sessionId":id,"cwd":cwd,"mcpServers":[]}),
+                )))
+            } else {
+                Ok(AcpReply::Send(rpc(
+                    2,
+                    "session/new",
+                    json!({"cwd":cwd,"mcpServers":[]}),
+                )))
+            }
+        }
+        1 => Err("The provider did not confirm ACP protocol version 1.".into()),
+        2 => {
+            *session_id =
+                agent_provider::string(&result["sessionId"]).or_else(|| cfg.resume.clone());
+            let Some(id) = session_id.as_ref() else {
+                return Err("The provider did not return a session ID.".into());
+            };
+            *session_state = result.clone();
+            if let Some(request) = acp_mode(cfg, &result, id)? {
+                return Ok(AcpReply::Send(request));
+            }
+            select_acp_model(cfg, id, &result, &effort_request)
+        }
+        6 => {
+            let id = session_id
+                .as_deref()
+                .ok_or("The provider did not return a session ID.")?;
+            if result["configOptions"].is_array() {
+                session_state["configOptions"] = result["configOptions"].clone();
+            }
+            select_acp_model(cfg, id, session_state, &effort_request)
+        }
+        4 => {
+            if cfg.provider == ProviderKind::Antigravity
+                && cfg.model.as_ref().is_some_and(|m| m.config.is_some())
+                && !result["configOptions"].is_array()
+            {
+                return Err("The provider did not apply the selected model.".into());
+            }
+            if result["configOptions"].is_array() {
+                if let Some(model) = &cfg.model
+                    && !agent_provider::acp_session(&result)
+                        .iter()
+                        .any(|m| m.is_default && m.id == model.id)
+                {
+                    return Err("The provider did not apply the selected model.".into());
+                }
+                session_state["configOptions"] = result["configOptions"].clone();
+            }
+            effort_request(session_id.as_ref(), session_state)
+        }
+        5 => {
+            if agent_provider::thinking_option(&result).and_then(|o| o["currentValue"].as_str())
+                != cfg.effort.as_deref()
+            {
+                return Err("The provider did not apply the selected reasoning level.".into());
+            }
+            session_state["configOptions"] = result["configOptions"].clone();
+            prompt_request(session_id.as_ref())
+        }
+        3 if result["stopReason"] == "cancelled" => Err("The provider cancelled the turn.".into()),
+        3 if result["stopReason"].is_string() => Ok(AcpReply::Done),
+        3 => Err("The provider did not confirm turn completion.".into()),
+        _ => Ok(AcpReply::Continue),
+    }
+}
+
+fn select_acp_model(
+    cfg: &AcpConfig,
+    id: &str,
+    result: &serde_json::Value,
+    effort_request: &impl Fn(Option<&String>, &serde_json::Value) -> Result<AcpReply, String>,
+) -> Result<AcpReply, String> {
+    use agent_provider::rpc;
+    use serde_json::json;
+    let id = id.to_owned();
+    if let Some(model) = &cfg.model {
+        let fresh = agent_provider::acp_session(result);
+        let current = fresh.iter().find(|entry| entry.id == model.id);
+        if current.is_none() && !fresh.is_empty() {
+            return Err("This model is no longer available for the selected account.".into());
+        }
+        if current.is_some_and(|entry| {
+            entry.is_default
+                && (cfg.provider != ProviderKind::Antigravity
+                    || (cfg.resume.is_none() && entry.config.is_some()))
+        }) {
+            return effort_request(Some(&id), result);
+        }
+        let entry = current.unwrap_or(model);
+        let request = if let Some(config) = &entry.config {
+            rpc(
+                4,
+                "session/set_config_option",
+                json!({"sessionId":id,"configId":config,"value":entry.id}),
+            )
+        } else {
+            rpc(
+                4,
+                "session/set_model",
+                json!({"sessionId":id,"modelId":entry.id}),
+            )
+        };
+        return Ok(AcpReply::Send(request));
+    }
+    effort_request(Some(&id), result)
 }
 
 /// The outermost `{...}` in an agent answer, tolerating code fences and prose.
@@ -1730,6 +3129,58 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn claude_modes_require_matching_cli_model_and_provider() {
+        let temporary = tempfile::tempdir().unwrap();
+        let mut runtime = Runtime::open(temporary.path().to_owned(), Arc::new(|| {})).unwrap();
+        let codex = runtime.seed_review_accounts();
+        let claude = AccountId::new("claude-review").unwrap();
+        runtime.catalogs.get_mut(&claude).unwrap().models[0] = Model {
+            id: "opus".into(),
+            name: "Claude Opus 5.5".into(),
+            efforts: vec!["medium".into(), "xhigh".into()],
+            default_effort: Some("medium".into()),
+            config: None,
+            is_default: true,
+        };
+        let version = |runtime: &mut Runtime, value: &str| {
+            runtime
+                .detections
+                .get_mut(&ProviderKind::ClaudeCode)
+                .unwrap()
+                .version = Some(value.into());
+        };
+        version(&mut runtime, "2.1.204 (Claude Code)");
+        assert_eq!(
+            runtime.claude_mode_support(&claude, Some("opus")),
+            ClaudeModes::default()
+        );
+        version(&mut runtime, "2.1.230 (Claude Code)");
+        assert_eq!(
+            runtime.claude_mode_support(&claude, Some("opus")),
+            ClaudeModes {
+                fast: true,
+                ultracode: false
+            }
+        );
+        version(&mut runtime, "2.1.284 (Claude Code)");
+        assert_eq!(
+            runtime.claude_mode_support(&claude, Some("opus")),
+            ClaudeModes {
+                fast: true,
+                ultracode: true
+            }
+        );
+        assert_eq!(
+            runtime.claude_mode_support(&codex, Some("opus")),
+            ClaudeModes::default()
+        );
+        assert_eq!(
+            runtime.claude_mode_support(&claude, Some("example-fast")),
+            ClaudeModes::default()
+        );
+    }
+
     /// Bug 1: cancel a real Codex turn, resume the same thread at once, and
     /// expect an answer. Needs COVALOS_AGENT_RUN (a recorded config with the
     /// `codex-main` account) and COVALOS_AGENT_SANDBOX (a disposable repo).
@@ -1754,6 +3205,8 @@ mod tests {
                 title: "bug-1 resume".into(),
                 account: AccountId::new("codex-main").unwrap(),
                 model: None,
+                effort: None,
+                claude_modes: ClaudeModes::default(),
                 root,
                 worktree: false,
                 preset: Preset::ReadOnly,
@@ -1814,6 +3267,206 @@ mod tests {
     }
 
     #[test]
+    fn acp_negotiates_read_only_before_prompt_and_unavailable_mode_stops() {
+        use serde_json::json;
+        let mut cfg = AcpConfig {
+            cwd: PathBuf::from("workspace"),
+            resume: None,
+            model: None,
+            effort: None,
+            preset: Preset::ReadOnly,
+            gate_dir: PathBuf::new(),
+            session: SessionId::new("fixture").unwrap(),
+            provider: ProviderKind::Antigravity,
+            api_key: false,
+        };
+        let mut id = None;
+        let mut setup = json!({});
+        let AcpReply::Send(auth) = acp_message(
+            &cfg,
+            &json!({"id":1,"result":{"protocolVersion":1}}),
+            &mut id,
+            &mut setup,
+            "fixture",
+            &AtomicBool::new(false),
+        )
+        .unwrap() else {
+            panic!("Antigravity must authenticate first");
+        };
+        assert_eq!(auth["method"], "authenticate");
+        assert_eq!(auth["params"]["methodId"], "oauth-personal");
+        let AcpReply::Send(session) = acp_message(
+            &cfg,
+            &json!({"id":7,"result":null}),
+            &mut id,
+            &mut setup,
+            "fixture",
+            &AtomicBool::new(false),
+        )
+        .unwrap() else {
+            panic!("Antigravity must open the session after authentication");
+        };
+        assert_eq!(session["method"], "session/new");
+
+        let state = json!({"modes":{"currentModeId":"default","availableModes":[{"id":"default"},{"id":"plan"}]}});
+        let request = acp_mode(&cfg, &state, "fixture").unwrap().unwrap();
+        assert_eq!(request["method"], "session/set_mode");
+        assert_eq!(request["params"]["modeId"], "plan");
+        assert!(acp_mode(&cfg, &json!({}), "fixture").is_err());
+        cfg.provider = ProviderKind::Gemini;
+        assert!(acp_mode(&cfg, &json!({}), "fixture").unwrap().is_none());
+    }
+
+    #[test]
+    fn antigravity_selects_model_and_effort_edits_a_file_and_reuses_the_process() {
+        let temp = tempfile::tempdir().unwrap();
+        let cwd = plain(&temp.path().canonicalize().unwrap());
+        let fixture = cwd.join("provider.cjs");
+        std::fs::write(&fixture,r#"
+const fs = require('node:fs');
+const input = require('node:readline').createInterface({input:process.stdin});
+let model = 'flash', effort = 'low', turns = 0, target;
+const values = list => list.map(value => ({value,name:value}));
+const options = () => [{id:'model',category:'model',currentValue:model,options:values(['flash','hydrogen'])},
+ {id:'think',category:'thought_level',currentValue:effort,options:[{group:'levels',options:values(model==='flash'?['low']:['high','max'])}]}];
+const emit = x => console.log(JSON.stringify({jsonrpc:'2.0',...x}));
+input.on('line',line=>{
+ const m=JSON.parse(line),p=m.params||{},reply=result=>emit({id:m.id,result});
+ switch(m.method) {
+ case 'initialize': fs.appendFileSync('starts','1'); return reply({protocolVersion:1});
+ case 'authenticate': return reply(null);
+ case 'session/new': model='flash'; return reply({sessionId:'thread',configOptions:options(),models:{currentModelId:'flash-high'}});
+ case 'session/set_config_option':
+   if(p.configId==='model'){model=p.value;effort='low';} else effort=p.value;
+   return reply({configOptions:options()});
+ case 'session/prompt':
+   turns++;
+   if(model!=='hydrogen'||effort!==(turns===1?'max':'high')) return emit({id:3,error:{message:'wrong model or effort'}});
+   target=require('node:path').resolve('edited.txt');
+   return emit({id:90,method:'fs/write_text_file',params:{sessionId:'thread',path:target,content:effort}});
+ default:
+   if(m.id!==90||m.error) return emit({id:3,error:{message:'file edit failed'}});
+   emit({method:'session/update',params:{sessionId:'thread',update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'edited'}}}});
+   return emit({id:3,result:{stopReason:'end_turn'}});
+ }
+});
+"#).unwrap();
+        let make_command = || {
+            let mut c = Command::new("node");
+            c.arg(&fixture).current_dir(&cwd);
+            c
+        };
+        let session = SessionId::new("thread").unwrap();
+        let gate_dir = cwd.join("gate");
+        agent_gate::install(
+            &std::env::current_exe().unwrap(),
+            &gate_dir,
+            &session,
+            &GatePolicy {
+                root: cwd.clone(),
+                preset: Preset::Worktree,
+                grants: Vec::new(),
+                allow_safe_commands: false,
+            },
+        )
+        .unwrap();
+        let mut cfg = AcpConfig {
+            cwd: cwd.clone(),
+            resume: None,
+            model: Some(Model {
+                id: "hydrogen".into(),
+                name: "Hydrogen".into(),
+                efforts: vec!["high".into(), "max".into()],
+                default_effort: None,
+                config: Some("model".into()),
+                is_default: false,
+            }),
+            effort: None,
+            provider: ProviderKind::Antigravity,
+            api_key: false,
+            preset: Preset::Worktree,
+            gate_dir,
+            session,
+        };
+        for result in [
+            serde_json::json!({}),
+            serde_json::json!({"configOptions":[{"id":"model","currentValue":"flash","options":[{"value":"flash"},{"value":"hydrogen"}]}]}),
+        ] {
+            let mut id = Some("thread".into());
+            let mut state = serde_json::Value::Null;
+            assert!(
+                acp_message(
+                    &cfg,
+                    &serde_json::json!({"id":4,"result":result}),
+                    &mut id,
+                    &mut state,
+                    "edit",
+                    &AtomicBool::new(false)
+                )
+                .is_err()
+            );
+        }
+        let mut warm = Some(LaunchTicket::Draft(prepare_process(
+            make_command(),
+            cfg.preset,
+        )));
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !cwd.join("starts").is_file() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            cwd.join("starts").is_file(),
+            "transport must initialize before Send"
+        );
+        assert!(!cwd.join("edited.txt").exists());
+        for effort in ["max", "high"] {
+            cfg.effort = Some(effort.into());
+            let (tx, rx) = mpsc::channel();
+            spawn_turn(
+                warm.take(),
+                make_command(),
+                None,
+                "edit".into(),
+                Some(cfg.clone()),
+                Box::new(AcpDecoder::default()),
+                Arc::new(AtomicBool::new(false)),
+                tx,
+                Arc::new(|| {}),
+            );
+            let mut confirmed = None;
+            let mut streamed = false;
+            let mut sent = false;
+            loop {
+                match rx.recv_timeout(Duration::from_secs(12)).unwrap() {
+                    TurnMsg::Warm(ticket) => warm = Some(LaunchTicket::Conversation(ticket)),
+                    TurnMsg::Event(AgentEvent::Started {
+                        model: Some(model), ..
+                    }) => confirmed = Some(model),
+                    TurnMsg::PromptSent => sent = true,
+                    TurnMsg::Event(AgentEvent::TextDelta { text }) => {
+                        assert!(sent);
+                        streamed |= text == "edited";
+                    }
+                    TurnMsg::Event(AgentEvent::Failed { message }) => panic!("{message}"),
+                    TurnMsg::Exit { ok, detail } => {
+                        assert!(ok, "{detail}");
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            assert!(streamed && warm.is_some());
+            assert_eq!(confirmed.as_deref(), Some("hydrogen"));
+            assert_eq!(
+                std::fs::read_to_string(cwd.join("edited.txt")).unwrap(),
+                effort
+            );
+            cfg.resume = Some("thread".into());
+        }
+        assert_eq!(std::fs::read_to_string(cwd.join("starts")).unwrap(), "1");
+    }
+
+    #[test]
     fn verbatim_prefix_is_removed() {
         assert_eq!(
             plain(Path::new(r"\\?\C:\work\repo")),
@@ -1836,7 +3489,9 @@ mod tests {
 
     #[test]
     fn signed_out_status_is_recognized() {
-        assert!(signed_out("Login: Expired — log in again · Not logged in."));
+        assert!(signed_out(
+            "Login: Expired â€” log in again Â· Not logged in."
+        ));
         assert!(!signed_out("Logged in using ChatGPT"));
     }
 
@@ -1844,7 +3499,7 @@ mod tests {
     fn status_text_drops_identifiers() {
         assert_eq!(
             sanitize_status("Login method: Claude account\nEmail: someone@example.com\nOrg: x"),
-            "Login method: Claude account · Org: x"
+            "Login method: Claude account Â· Org: x"
         );
     }
 

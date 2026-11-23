@@ -57,12 +57,15 @@ pub(super) fn mark(painter: &Painter, rect: Rect, provider: Provider) {
             } else {
                 brand.color
             };
-            super::assets::tinted(
-                painter,
-                Rect::from_center_size(rect.center(), vec2(side, side)),
-                name,
-                tint,
-            );
+            let rect = Rect::from_center_size(rect.center(), vec2(side, side));
+            if provider == Provider::Codex {
+                // The official 716 px artboard surrounds the 360 px Blossom with
+                // display padding. Keep an inset inside the allocated icon slot.
+                let uv = Rect::from_min_max(egui::pos2(0.19, 0.19), egui::pos2(0.81, 0.81));
+                super::assets::tinted_region(painter, rect, name, uv, tint);
+            } else {
+                super::assets::tinted(painter, rect, name, tint);
+            }
         }
         None => {
             // Neutral terminal monogram: a prompt chevron and a cursor bar.

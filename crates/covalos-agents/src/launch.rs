@@ -28,6 +28,7 @@ pub enum Sandbox {
 pub struct Turn {
     pub resume: Option<String>,
     pub model: Option<String>,
+    pub effort: Option<String>,
     pub sandbox: Sandbox,
     /// Extra Claude Code settings JSON (`--settings`), used by the host to
     /// install its PreToolUse approval gate. Ignored by other providers.
@@ -39,6 +40,7 @@ pub enum Purpose {
     /// Needs a terminal: the provider may prompt or open a browser.
     Login,
     Probe,
+    Inspect,
     /// Headless turn; the prompt is written to stdin.
     Turn(Turn),
 }
@@ -144,6 +146,7 @@ pub fn plan(
     }
     let (args, interactive) = match purpose {
         Purpose::Probe => (vec!["--version".to_owned()], false),
+        Purpose::Inspect => (Vec::new(), false),
         Purpose::Login if account.method == ConnectionMethod::ApiKey => {
             return Err(Error::Invalid("API-key accounts do not sign in".into()));
         }
@@ -162,13 +165,38 @@ pub fn plan(
         env: Vec::new(),
         env_remove: Vec::new(),
     };
-    if account.method == ConnectionMethod::SystemCli {
-        return Ok(plan);
-    }
-    if let Some(var) = &spec.config_dir_var {
+    if account.method != ConnectionMethod::SystemCli
+        && let Some(var) = &spec.config_dir_var
+    {
         let dir = profiles.ensure_isolated_dir(&account.id)?;
         plan.env
             .push((var.clone(), EnvValue::Plain(dir.into_os_string())));
+        if spec.kind == crate::ProviderKind::Antigravity {
+            plan.env.push((
+                "AGY_ACP_FORCE_FILE_STORAGE".into(),
+                EnvValue::Plain("1".into()),
+            ));
+        }
+    }
+    if spec.kind == crate::ProviderKind::Codex {
+        if account.method != ConnectionMethod::SystemCli {
+            plan.args.splice(
+                ..0,
+                ["-c".into(), "cli_auth_credentials_store=\"file\"".into()],
+            );
+        }
+        if matches!(purpose, Purpose::Turn(_)) {
+            plan.args
+                .splice(..0, ["-c".into(), "model_provider=\"openai\"".into()]);
+        }
+    }
+    if account.method == ConnectionMethod::SystemCli {
+        if let Some(name) = &spec.config_dir_var
+            && let Some(dir) = std::env::var_os(name).filter(|dir| Path::new(dir).is_absolute())
+        {
+            plan.env.push((name.clone(), EnvValue::Plain(dir)));
+        }
+        return Ok(plan);
     }
     if let Some(var) = &spec.api_key_var {
         if let Some(key) = account.credential_key() {
@@ -220,6 +248,9 @@ fn turn_args(spec: &ProviderSpec, turn: &Turn) -> Result<Vec<String>> {
             if let Some(id) = &turn.resume {
                 args.extend(["--resume".into(), id.clone()]);
             }
+            if let Some(effort) = &turn.effort {
+                args.extend(["--effort".into(), effort.clone()]);
+            }
         }
         Headless::CodexExecJson => {
             // Projects are often not git repositories yet (a fresh `npm create`);
@@ -248,8 +279,41 @@ fn turn_args(spec: &ProviderSpec, turn: &Turn) -> Result<Vec<String>> {
             if let Some(id) = &turn.resume {
                 args.extend(["resume".into(), id.clone()]);
             }
+            if let Some(effort) = &turn.effort {
+                args.extend([
+                    "-c".into(),
+                    format!(
+                        "model_reasoning_effort={}",
+                        serde_json::Value::String(effort.clone())
+                    ),
+                ]);
+            }
             args.push("-".into());
         }
+        Headless::Acp => match spec.kind {
+            crate::ProviderKind::Gemini => {
+                args.push("--acp".into());
+                args.push("--approval-mode".into());
+                args.push(
+                    match turn.sandbox {
+                        Sandbox::ReadOnly => "plan",
+                        Sandbox::WorkspaceWrite => "default",
+                    }
+                    .into(),
+                );
+            }
+            crate::ProviderKind::Antigravity => {
+                if cfg!(target_os = "linux") {
+                    args.push("--uid=".into());
+                }
+            }
+            crate::ProviderKind::OpenCode => {
+                args.push("acp".into());
+            }
+            _ => {
+                args.push("--acp".into());
+            }
+        },
         Headless::Unsupported => {
             return Err(Error::Unsupported(format!("{} headless turns", spec.label)));
         }
@@ -288,6 +352,15 @@ fn fallback(spec: &ProviderSpec, names: &[String]) -> Option<PathBuf> {
         .iter()
         .map(|n| Path::new(&home).join(".local").join("bin").join(n))
         .find(|p| p.is_file())
+    {
+        return Some(path);
+    }
+    if cfg!(windows)
+        && let Some(appdata) = std::env::var_os("APPDATA")
+        && let Some(path) = names
+            .iter()
+            .map(|n| Path::new(&appdata).join("npm").join(n))
+            .find(|p| p.is_file())
     {
         return Some(path);
     }
@@ -379,6 +452,7 @@ mod tests {
         Purpose::Turn(Turn {
             resume: Some("abc".into()),
             model: Some("m".into()),
+            effort: None,
             sandbox,
             settings: None,
         })
@@ -400,7 +474,7 @@ mod tests {
         )
         .unwrap();
         assert!(plan.interactive);
-        assert!(plan.args.is_empty());
+        assert_eq!(plan.args, ["auth", "login"]);
         assert_eq!(plan.env_names().collect::<Vec<_>>(), ["CLAUDE_CONFIG_DIR"]);
         assert!(plan.removes("ANTHROPIC_API_KEY"));
         assert!(f.profiles.isolated_dir(&acc.id).is_dir());
@@ -521,7 +595,11 @@ mod tests {
             None,
         )
         .unwrap();
-        assert_eq!(codex.args.first().map(String::as_str), Some("exec"));
+        assert!(codex.args.starts_with(&[
+            "-c".into(),
+            "model_provider=\"openai\"".into(),
+            "exec".into()
+        ]));
         assert!(codex.args.iter().any(|a| a == "--skip-git-repo-check"));
         assert!(
             codex
@@ -543,12 +621,14 @@ mod tests {
             "gemini".into(),
             &turn(Sandbox::ReadOnly),
             None,
-        );
-        assert!(matches!(gemini, Err(Error::Unsupported(_))));
+        )
+        .unwrap();
+        assert_eq!(gemini.args, ["--acp", "--approval-mode", "plan"]);
 
         let mut bad = Turn {
             resume: Some("--dangerous".into()),
             model: None,
+            effort: None,
             sandbox: Sandbox::ReadOnly,
             settings: None,
         };
