@@ -8,6 +8,7 @@ mod agent_hub;
 mod assets;
 mod brands;
 mod clean;
+mod cloud_sync;
 mod companion;
 mod discord;
 mod dither;

@@ -30,6 +30,8 @@ pub(super) struct Preferences {
     pub(super) ui_scale: f32,
     pub(super) transitions: Transitions,
     pub(super) discord: super::discord::DiscordPreferences,
+    /// COVALOS cloud account options; tokens live in the OS credential store.
+    pub(super) cloud: super::cloud_sync::CloudPreferences,
     pub(super) guided: super::guided::GuidedPreferences,
     pub(super) language: super::i18n::Language,
     pub(super) identity: super::identity::IdentityPreferences,
@@ -92,6 +94,7 @@ impl Default for Preferences {
             ui_scale: 1.0,
             transitions: Transitions::Subtle,
             discord: super::discord::DiscordPreferences::default(),
+            cloud: super::cloud_sync::CloudPreferences::default(),
             guided: super::guided::GuidedPreferences::default(),
             language: super::i18n::Language::system(),
             identity: super::identity::IdentityPreferences::default(),
