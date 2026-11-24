@@ -58,6 +58,30 @@ pub(super) struct LumaChat {
 }
 
 impl LumaChat {
+    /// An order waits for the user to raise the effort ceiling.
+    pub(super) fn is_holding(&self) -> bool {
+        self.held.is_some()
+    }
+
+    /// Recent lines for the phone app, redacted like the audit log.
+    pub(super) fn remote_summary(&self, planning: bool) -> serde_json::Value {
+        let start = self.lines.len().saturating_sub(12);
+        let lines: Vec<_> = self.lines[start..]
+            .iter()
+            .map(|line| {
+                serde_json::json!({
+                    "tone": format!("{:?}", line.tone).to_ascii_lowercase(),
+                    "text": crate::agent_gate::redact(&line.text),
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "lines": lines,
+            "holding": self.held.is_some(),
+            "planning": planning,
+        })
+    }
+
     fn say(&mut self, tone: Tone, text: impl Into<String>) {
         self.say_with(tone, text, None);
     }

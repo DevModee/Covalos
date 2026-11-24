@@ -9,6 +9,7 @@ mod assets;
 mod brands;
 mod clean;
 mod cloud_sync;
+mod cloud_ui;
 mod companion;
 mod discord;
 mod dither;
@@ -159,6 +160,8 @@ pub struct Editor {
     notifications_query: String,
     notifications_filter: shell::NotificationFilter,
     discord: discord::Presence,
+    /// COVALOS account, Cloud Config Sync and the phone bridge.
+    cloud: cloud_ui::Cloud,
     guided: guided::GuidedController,
     session_started: u64,
     explorer_rect: Option<egui::Rect>,
@@ -258,6 +261,7 @@ impl Editor {
             notifications_query: String::new(),
             notifications_filter: shell::NotificationFilter::All,
             discord: discord::Presence::default(),
+            cloud: cloud_ui::Cloud::default(),
             guided: guided::GuidedController::default(),
             session_started: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -888,6 +892,7 @@ impl Editor {
         self.poll();
         self.poll_chats(ctx);
         self.poll_agent_runtime(ctx);
+        self.cloud_tick(ctx);
         self.tools.poll();
         self.terminals.poll();
         self.check_disk(ctx);
