@@ -2028,6 +2028,7 @@ impl Editor {
                                         }
                                     });
                                 }
+                                SettingsSection::Account => self.cloud_settings(ui),
                                 SettingsSection::Integrations => {
                                     let status = self.discord.status();
                                     let d = &mut self.preferences.discord;
@@ -2546,17 +2547,19 @@ enum SettingsSection {
     Editor,
     Notifications,
     Agents,
+    Account,
     Integrations,
 }
 
 impl SettingsSection {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::General,
         Self::Appearance,
         Self::Background,
         Self::Editor,
         Self::Notifications,
         Self::Agents,
+        Self::Account,
         Self::Integrations,
     ];
 
@@ -2568,6 +2571,7 @@ impl SettingsSection {
             Self::Editor => "Editor",
             Self::Notifications => "Notifications",
             Self::Agents => "Agents",
+            Self::Account => "COVALOS account",
             Self::Integrations => "Integrations",
         }
     }
@@ -2580,6 +2584,7 @@ impl SettingsSection {
             Self::Editor => Icon::Code,
             Self::Notifications => Icon::Bell,
             Self::Agents => Icon::Hub,
+            Self::Account => Icon::Refresh,
             Self::Integrations => Icon::Globe,
         }
     }
@@ -2592,6 +2597,7 @@ impl SettingsSection {
             Self::Editor => "editor font size syntax colors density compact",
             Self::Notifications => "notifications quiet taskbar attention",
             Self::Agents => "agents auto buffer edits",
+            Self::Account => "account cloud sync supabase sign in phone mobile remote",
             Self::Integrations => "integrations discord presence",
         };
         keywords.contains(query) || self.label().to_ascii_lowercase().contains(query)
@@ -2625,7 +2631,7 @@ fn format_tokens(n: u64) -> String {
     }
 }
 
-fn setting_row(ui: &mut Ui, title: &str, subtitle: &str, control: impl FnOnce(&mut Ui)) {
+pub(super) fn setting_row(ui: &mut Ui, title: &str, subtitle: &str, control: impl FnOnce(&mut Ui)) {
     let full_w = ui.available_width();
     let control_w = 156.0_f32.min(full_w * 0.40);
     let left_w = (full_w - control_w - 12.0).max(120.0);

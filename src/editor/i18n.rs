@@ -1758,6 +1758,122 @@ const SPANISH: &[(&str, &str)] = &[
         "Rated {rated}. One developer on {account} · {model} ({effort} effort) is working in the project.",
         "Evaluado como {rated}. Un desarrollador en {account} · {model} (esfuerzo {effort}) está trabajando en el proyecto.",
     ),
+    ("COVALOS account", "Cuenta COVALOS"),
+    ("Account", "Cuenta"),
+    (
+        "Sign in to keep your settings in sync and to reach this computer from the COVALOS phone app.",
+        "Iniciá sesión para sincronizar tu configuración y manejar esta computadora desde la app móvil de COVALOS.",
+    ),
+    (
+        "Opens your browser. COVALOS never sees your password.",
+        "Abre tu navegador. COVALOS nunca ve tu contraseña.",
+    ),
+    ("Signed in as {who}.", "Sesión iniciada como {who}."),
+    ("your account", "tu cuenta"),
+    ("Sign out", "Cerrar sesión"),
+    (
+        "Sign out to change the server.",
+        "Cerrá sesión para cambiar el servidor.",
+    ),
+    (
+        "Open the sign-in page again",
+        "Abrir de nuevo la página de inicio de sesión",
+    ),
+    (
+        "Finish signing in in your browser.",
+        "Terminá de iniciar sesión en tu navegador.",
+    ),
+    ("Sign-in cancelled.", "Inicio de sesión cancelado."),
+    ("Signed out.", "Sesión cerrada."),
+    (
+        "Your session ended. Sign in again.",
+        "Tu sesión terminó. Iniciá sesión de nuevo.",
+    ),
+    (
+        "This system has no supported credential store, so you stay signed in only until COVALOS closes.",
+        "Este sistema no tiene un almacén de credenciales compatible, así que la sesión dura hasta que cierres COVALOS.",
+    ),
+    ("Cloud Config Sync", "Sincronización en la nube"),
+    (
+        "Syncs theme, fonts, density, pinned and favorite chats, agent rules and skills. Folders, files, notes, provider accounts and API keys stay on this computer.",
+        "Sincroniza tema, fuentes, densidad, chats fijados y favoritos, reglas de agentes y skills. Las carpetas, archivos, notas, cuentas de proveedores y claves de API se quedan en esta computadora.",
+    ),
+    ("Upload settings", "Subir configuración"),
+    ("Download settings", "Bajar configuración"),
+    ("Sync automatically", "Sincronizar automáticamente"),
+    ("Settings uploaded.", "Configuración subida."),
+    (
+        "Settings downloaded from the cloud.",
+        "Configuración bajada de la nube.",
+    ),
+    ("Already in sync.", "Ya está sincronizado."),
+    (
+        "Nothing saved in the cloud yet. Upload first.",
+        "Todavía no hay nada guardado en la nube. Subí la configuración primero.",
+    ),
+    (
+        "Agent rules look like they contain a secret, so they were not uploaded.",
+        "Las reglas de agentes parecen contener un secreto, así que no se subieron.",
+    ),
+    ("Phone app", "App móvil"),
+    (
+        "While COVALOS is open, the phone app can see your agents and Luma, send them messages and deny pending requests. Commands follow the same approval rules as this computer.",
+        "Mientras COVALOS esté abierto, la app móvil puede ver tus agentes y a Luma, enviarles mensajes y denegar solicitudes pendientes. Los comandos siguen las mismas reglas de aprobación que esta computadora.",
+    ),
+    (
+        "Allow the phone app to reach this computer",
+        "Permitir que la app móvil se conecte a esta computadora",
+    ),
+    (
+        "Let the phone allow pending requests",
+        "Dejar que el celular permita solicitudes pendientes",
+    ),
+    (
+        "Sensitive actions are only approved on this computer, and nothing allowed from the phone is remembered.",
+        "Las acciones sensibles solo se aprueban en esta computadora, y nada de lo permitido desde el celular queda recordado.",
+    ),
+    ("Sign in to connect.", "Iniciá sesión para conectar."),
+    ("Connecting…", "Conectando…"),
+    ("Server", "Servidor"),
+    (
+        "Using {host} from {source}.",
+        "Usando {host} desde {source}.",
+    ),
+    ("settings", "la configuración"),
+    ("environment", "las variables de entorno"),
+    (
+        "Server address, empty for COVALOS_SUPABASE_URL",
+        "Dirección del servidor, vacía para usar COVALOS_SUPABASE_URL",
+    ),
+    ("Public anon key", "Clave anon pública"),
+    ("Phone app: {message}", "App móvil: {message}"),
+    ("Status sent.", "Estado enviado."),
+    (
+        "Open a project folder on the computer first.",
+        "Primero abrí una carpeta de proyecto en la computadora.",
+    ),
+    (
+        "Luma needs a higher effort ceiling. Confirm it on the computer.",
+        "Luma necesita un límite de esfuerzo más alto. Confirmalo en la computadora.",
+    ),
+    ("Luma took the order.", "Luma tomó la orden."),
+    ("Unknown conversation.", "Conversación desconocida."),
+    ("Message sent.", "Mensaje enviado."),
+    (
+        "This request is no longer pending.",
+        "Esta solicitud ya no está pendiente.",
+    ),
+    (
+        "Allowing from the phone is off. Turn it on in Settings or answer on the computer.",
+        "Permitir desde el celular está desactivado. Activalo en Configuración o respondé en la computadora.",
+    ),
+    (
+        "This is a sensitive action. Approve it on the computer.",
+        "Es una acción sensible. Aprobala en la computadora.",
+    ),
+    ("Allowed once.", "Permitido una vez."),
+    ("Denied.", "Denegado."),
+    ("project folder", "carpeta del proyecto"),
 ];
 
 #[cfg(test)]
@@ -1794,6 +1910,7 @@ mod tests {
             include_str!("lsp.rs"),
             include_str!("guided.rs"),
             include_str!("luma_ui.rs"),
+            include_str!("cloud_ui.rs"),
             include_str!("../editor.rs"),
         ];
         let table = spanish();
