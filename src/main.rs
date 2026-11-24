@@ -12,6 +12,7 @@ mod library;
 mod luma;
 mod paths;
 mod process;
+mod remote_bridge;
 mod runtime_install;
 mod workspace;
 
