@@ -629,6 +629,53 @@ mod tests {
     }
 
     #[test]
+    fn requests_reach_a_local_server_with_headers_and_body_intact() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut seen = Vec::new();
+            let mut chunk = [0u8; 4096];
+            while !String::from_utf8_lossy(&seen).contains("\"end\"}") {
+                let n = stream.read(&mut chunk).unwrap();
+                if n == 0 {
+                    break;
+                }
+                seen.extend_from_slice(&chunk[..n]);
+            }
+            let reply = "{\"ok\":true}";
+            write!(
+                stream,
+                "HTTP/1.1 201 Created\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                reply.len()
+            )
+            .unwrap();
+            String::from_utf8_lossy(&seen).into_owned()
+        });
+        let endpoint =
+            Endpoint::from_parts(&format!("http://127.0.0.1:{port}"), "anon", "settings").unwrap();
+        let body = json!({"text": "quote \" slash \\ line\nend", "z": "end"}).to_string();
+        let (status, text) = request(
+            &endpoint,
+            Some("access-1"),
+            "POST",
+            "/rest/v1/editor_configs?on_conflict=user_id",
+            &[("Prefer", "return=minimal")],
+            Some(&body),
+        )
+        .unwrap();
+        let seen = server.join().unwrap();
+        assert_eq!((status, text.as_str()), (201, "{\"ok\":true}"));
+        assert!(seen.starts_with("POST /rest/v1/editor_configs?on_conflict=user_id HTTP/1.1"));
+        assert!(seen.contains("apikey: anon") && seen.contains("Authorization: Bearer access-1"));
+        assert!(seen.contains("Prefer: return=minimal"));
+        assert!(seen.ends_with(&body), "body changed in transit: {seen}");
+    }
+
+    #[test]
     fn curl_config_values_are_escaped() {
         assert_eq!(quote(r#"{"a":"b\c"}"#), r#"{\"a\":\"b\\c\"}"#);
         assert_eq!(quote("x\ny"), "x\\ny");
