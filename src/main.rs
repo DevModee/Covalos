@@ -6,6 +6,7 @@ mod agent_provider;
 mod agents_runtime;
 mod assistant;
 mod brand;
+mod cloud;
 mod editor;
 mod library;
 mod luma;
