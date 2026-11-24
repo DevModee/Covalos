@@ -34,7 +34,7 @@ const PUBLISH_MAX: Duration = Duration::from_secs(30);
 const RETRY: Duration = Duration::from_secs(60);
 
 enum Job {
-    Session(Result<Session, String>),
+    Session(Result<Session, cloud::RefreshError>),
     Uploaded(Result<SyncedConfig, String>),
     Downloaded {
         manual: bool,
@@ -214,19 +214,19 @@ impl Editor {
                     }
                     self.cloud_first_sync(ctx);
                 }
-                Job::Session(Err(error)) => {
+                Job::Session(Err(cloud::RefreshError::Refused)) => {
                     self.cloud.renewing = false;
-                    // A refused token means signed out; a network error is retried.
-                    if error.contains("(4") {
-                        self.cloud.forget();
-                        self.cloud.status =
-                            Some((true, tr("Your session ended. Sign in again.").to_owned()));
-                    } else {
-                        self.cloud.session = None;
-                        self.cloud.bridge = None;
-                        self.cloud.retry_at = Some(Instant::now() + RETRY);
-                        self.cloud.status = Some((true, error));
-                    }
+                    self.cloud.forget();
+                    self.cloud.status =
+                        Some((true, tr("Your session ended. Sign in again.").to_owned()));
+                }
+                Job::Session(Err(cloud::RefreshError::Unavailable(error))) => {
+                    // Keep the stored token and try again later.
+                    self.cloud.renewing = false;
+                    self.cloud.session = None;
+                    self.cloud.bridge = None;
+                    self.cloud.retry_at = Some(Instant::now() + RETRY);
+                    self.cloud.status = Some((true, error));
                 }
                 Job::Uploaded(result) => {
                     self.cloud.syncing = false;

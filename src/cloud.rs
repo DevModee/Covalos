@@ -353,9 +353,17 @@ fn exchange_code(endpoint: &Endpoint, code: &str, verifier: &str) -> Result<Sess
     parse_session(&text)
 }
 
+/// Why a refresh failed: the server refused the token (sign in again) or
+/// could not be reached right now (try later, keep the token).
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum RefreshError {
+    Refused,
+    Unavailable(String),
+}
+
 /// Trades a refresh token for a new session. Supabase rotates refresh
 /// tokens, so the caller must store the new one.
-pub(crate) fn refresh(endpoint: &Endpoint, refresh_token: &str) -> Result<Session, String> {
+pub(crate) fn refresh(endpoint: &Endpoint, refresh_token: &str) -> Result<Session, RefreshError> {
     let body = json!({"refresh_token": refresh_token}).to_string();
     let (status, text) = request(
         endpoint,
@@ -364,11 +372,17 @@ pub(crate) fn refresh(endpoint: &Endpoint, refresh_token: &str) -> Result<Sessio
         "/auth/v1/token?grant_type=refresh_token",
         &[],
         Some(&body),
-    )?;
-    if status != 200 {
-        return Err(server_error("The session expired", status, &text));
+    )
+    .map_err(RefreshError::Unavailable)?;
+    match status {
+        200 => parse_session(&text).map_err(RefreshError::Unavailable),
+        400 | 401 | 403 => Err(RefreshError::Refused),
+        _ => Err(RefreshError::Unavailable(server_error(
+            "Could not renew the session",
+            status,
+            &text,
+        ))),
     }
-    parse_session(&text)
 }
 
 pub(crate) fn sign_out(endpoint: &Endpoint, access: &str) {
