@@ -77,6 +77,66 @@ pub(super) fn trf(template: &'static str, values: &[(&str, String)]) -> String {
 }
 
 const SPANISH: &[(&str, &str)] = &[
+    ("Open Luma Notch", "Abrir Luma"),
+    (
+        "Ask Luma or search files and commands",
+        "Decile a Luma o buscá archivos y comandos",
+    ),
+    ("Waiting for your OK", "Esperando tu OK"),
+    ("Search files (Ctrl+P)", "Buscar archivos (Ctrl+P)"),
+    ("Agents & sessions", "Agentes y sesiones"),
+    (
+        "Search files and commands (Ctrl+P)",
+        "Buscar archivos y comandos (Ctrl+P)",
+    ),
+    ("Open Agent Hub", "Abrir Agent Hub"),
+    ("Scale spring and hover animations.", "Escala las animaciones de interfaz."),
+    (
+        "Independent text and icon scale for the file tree.",
+        "Escala independiente para el árbol de archivos.",
+    ),
+    ("Scale the whole window interface.", "Escala toda la interfaz de la ventana."),
+    (
+        "How views enter when switching screens.",
+        "Cómo entran las vistas al cambiar de pantalla.",
+    ),
+    (
+        "Strengthen borders around panels and inputs.",
+        "Refuerza los bordes de paneles y campos.",
+    ),
+    ("Reset", "Restablecer"),
+    ("Good morning", "Buenos días"),
+    ("Good afternoon", "Buenas tardes"),
+    ("Good evening", "Buenas noches"),
+    ("Continue where you left off", "Continuar donde dejaste"),
+    ("Resume Guided Mode", "Retomar Modo Guiado"),
+    ("Continue", "Continuar"),
+    ("Pop out ↗", "Otra pantalla ↗"),
+    ("Dock ↙", "Acoplar ↙"),
+    (
+        "Dock Guided Mode back inside the editor window",
+        "Volver a acoplar el Modo Guiado dentro de la ventana del editor",
+    ),
+    (
+        "Open Guided Mode in its own window so you can move or maximize it on another screen",
+        "Abrir el Modo Guiado en una ventana propia para moverlo o maximizarlo en otra pantalla",
+    ),
+    ("Increase Guided Mode text size", "Aumentar tamaño del texto guiado"),
+    ("Decrease Guided Mode text size", "Reducir tamaño del texto guiado"),
+    ("Steps", "Pasos"),
+    ("Copy line", "Copiar línea"),
+    ("Minimap", "Minimapa"),
+    ("Code minimap", "Minimapa de código"),
+    (
+        "Show an interactive code overview on the right edge (hold Alt anytime to peek).",
+        "Mostrar un resumen interactivo del código a la derecha (mantené Alt en cualquier momento para espiar).",
+    ),
+    (
+        "Toggle code minimap (hold Alt anytime to peek)",
+        "Mostrar u ocultar el minimapa (mantené Alt en cualquier momento para espiar)",
+    ),
+    ("Lines", "Líneas"),
+    ("Click to jump", "Clic para ir"),
     ("+ Add provider", "+ Añadir proveedor"),
     ("Account storage", "Almacenamiento de la cuenta"),
     (

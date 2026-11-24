@@ -254,6 +254,15 @@ impl Tools {
     pub(super) fn showing_diff(&self) -> bool {
         matches!(self.git_mode, GitMode::Diff { .. })
     }
+
+    /// Cached branch name and pending change count from the last git status refresh.
+    pub(super) fn git_summary(&self) -> Option<(Option<String>, usize)> {
+        if self.git_status.is_empty() {
+            return None;
+        }
+        let status = parse_status(&self.git_status);
+        Some((status.branch, status.changes.len()))
+    }
 }
 
 enum Event {

@@ -1,6 +1,6 @@
 [package]
 name = "covalos"
-version = "0.8.3"
+version = "0.8.4"
 edition = "2024"
 description = "Native Rust IDE with multi-agent orchestration"
 publish = false
@@ -24,7 +24,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 syntect = { version = "5.3.0", default-features = false, features = ["default-fancy"] }
 tempfile = "3"
-time = { version = "0.3", features = ["parsing"] }
+time = { version = "0.3", features = ["parsing", "local-offset"] }
 sha2 = "0.10"
 base64 = "0.22"
 getrandom = "0.3"

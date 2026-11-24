@@ -520,21 +520,21 @@ impl Editor {
         });
     }
 
-    /// Minimalist project home shown once a workspace is open and no file tab is active.
+    /// Warm, contextual project home shown once a workspace is open and no file tab is active.
     fn project_session_home(&mut self, ui: &mut Ui, area: egui::Rect) {
         let width = (area.width() - 64.0).clamp(340.0, 680.0).min(area.width());
         let left = area.center().x - width * 0.5;
-        let top = ((area.height() - 400.0) * 0.34).clamp(36.0, 170.0);
+        let top = ((area.height() - 480.0) * 0.28).clamp(24.0, 140.0);
         let rect = egui::Rect::from_min_size(
             egui::pos2(left, area.top() + top),
-            egui::vec2(width, (area.height() - top).max(1.0)),
+            egui::vec2(width, (area.height() - top - 16.0).max(1.0)),
         );
         // Soft reading scrim keeps ASCII / Dither background visible around the edges.
         super::mascot::soft_ellipse(
             ui.painter(),
-            egui::pos2(rect.center().x, area.top() + top + 140.0),
-            egui::vec2(width * 0.85, 240.0),
-            colors().inset.gamma_multiply(0.85),
+            egui::pos2(rect.center().x, area.top() + top + 160.0),
+            egui::vec2(width * 0.88, 280.0),
+            colors().inset.gamma_multiply(0.86),
         );
         let auto_skill_id = Id::new("home-auto-skill");
         let usage_modal_id = Id::new("agent-usage-open");
@@ -546,175 +546,420 @@ impl Editor {
         let mut send_prompt_now = false;
         let mut open_add_ai = false;
         let mut quick_action: Option<&str> = None;
+        let mut open_resume_file: Option<PathBuf> = None;
+        let mut resume_guided: Option<String> = None;
+
+        let project_name = self
+            .root
+            .as_deref()
+            .map(workspace::filename)
+            .unwrap_or_default();
+        let git_summary = self.tools.git_summary();
+        let resume_files: Vec<PathBuf> = self
+            .root
+            .as_deref()
+            .map(|root| {
+                let mut files: Vec<PathBuf> = self
+                    .preferences
+                    .workspace_files(root)
+                    .map(|s| {
+                        s.files
+                            .iter()
+                            .filter(|p| p.is_file())
+                            .take(3)
+                            .cloned()
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if files.is_empty()
+                    && let Some(super::DirectoryLoad::Ready(Ok(entries))) =
+                        self.directories.get(root)
+                {
+                    files = entries
+                        .iter()
+                        .filter(|e| !e.directory)
+                        .take(3)
+                        .map(|e| e.path.clone())
+                        .collect();
+                }
+                files
+            })
+            .unwrap_or_default();
+        let guided_resume = self.guided.session.as_ref().and_then(|s| {
+            let step = s.plan.steps.get(s.step_index)?;
+            Some((
+                s.plan.title.clone(),
+                s.step_index + 1,
+                s.plan.steps.len(),
+                step.path.clone(),
+            ))
+        });
+        let greeting = time_of_day_greeting();
 
         ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
             ui.set_width(width);
-            ui.vertical_centered(|ui| {
-                ui.label(
-                    RichText::new(tr("Where should we begin?"))
-                        .size(26.0)
-                        .strong()
-                        .color(colors().text),
-                );
-            });
-            ui.add_space(20.0);
-            // Floating rounded prompt composer.
-            egui::Frame::new()
-                .fill(colors().surface)
-                .corner_radius(14)
-                .stroke(egui::Stroke::new(1.0_f32, colors().border))
-                .inner_margin(egui::Margin::symmetric(16, 14))
+            ScrollArea::vertical()
+                .id_salt("project-session-home-scroll")
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                 .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    let prompt_id = ui.make_persistent_id("home-prompt");
-                    if ui.memory(|memory| memory.has_focus(prompt_id))
-                        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, Key::Enter))
-                    {
-                        send_prompt_now = true;
-                    }
-                    let prompt_field = ui.add(
-                        TextEdit::multiline(&mut self.chat.prompt)
-                            .id(prompt_id)
-                            .return_key(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, Key::Enter))
-                            .hint_text(tr("Ask anything. @ files, $ skills, / commands"))
-                            .frame(false)
-                            .desired_rows(3)
-                            .desired_width(f32::INFINITY)
-                            .char_limit(12_000),
-                    );
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 6.0;
-                        if icon_button(ui, Icon::Add, "Open file", false).clicked() {
-                            self.pick_file();
+                    ui.vertical_centered(|ui| {
+                        // Subtle workspace + branch context pill
+                        if !project_name.is_empty() {
+                            let mut pill_text = project_name.clone();
+                            if let Some((Some(branch), changes)) = &git_summary {
+                                pill_text.push_str("  ·  ");
+                                pill_text.push_str(branch);
+                                if *changes > 0 {
+                                    pill_text.push_str(&format!(" ({changes})"));
+                                }
+                            }
+                            egui::Frame::new()
+                                .fill(colors().surface.gamma_multiply(0.92))
+                                .stroke(egui::Stroke::new(1.0_f32, colors().border))
+                                .corner_radius(14)
+                                .inner_margin(egui::Margin::symmetric(12, 4))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 6.0;
+                                        let (dot, _) = ui.allocate_exact_size(
+                                            egui::vec2(6.0, 6.0),
+                                            egui::Sense::hover(),
+                                        );
+                                        ui.painter().circle_filled(
+                                            dot.center(),
+                                            3.0,
+                                            colors().accent,
+                                        );
+                                        ui.label(
+                                            RichText::new(pill_text)
+                                                .size(SMALL)
+                                                .color(colors().secondary),
+                                        );
+                                    });
+                                });
+                            ui.add_space(10.0);
                         }
-                        if icon_button(ui, Icon::Chart, "View usage", false).clicked() {
-                            usage_open = true;
-                        }
-                        let skill_pill = egui::Button::new(
-                            RichText::new(if auto_skill {
-                                tr("Auto skills")
-                            } else {
-                                tr("Manual skills")
-                            })
-                            .size(SMALL)
-                            .color(if auto_skill {
-                                colors().accent
-                            } else {
-                                colors().muted
-                            }),
-                        )
-                        .fill(if auto_skill {
-                            colors().accent_bg
-                        } else {
-                            egui::Color32::TRANSPARENT
-                        })
-                        .stroke(egui::Stroke::new(1.0_f32, colors().border))
-                        .corner_radius(8);
-                        if ui
-                            .add(skill_pill)
-                            .on_hover_text(tr(
-                                "Automatically attach matching enabled skills without asking.",
-                            ))
-                            .clicked()
-                        {
-                            auto_skill = !auto_skill;
-                        }
-                        let guided_armed = self.guided.armed;
-                        let guided_pill = egui::Button::new(
-                            RichText::new(tr("Guided Mode"))
-                                .size(SMALL)
-                                .color(if guided_armed {
-                                    colors().accent
-                                } else {
-                                    colors().muted
-                                }),
-                        )
-                        .fill(if guided_armed {
-                            colors().accent_bg
-                        } else {
-                            egui::Color32::TRANSPARENT
-                        })
-                        .stroke(egui::Stroke::new(1.0_f32, colors().border))
-                        .corner_radius(8);
-                        if ui
-                            .add(guided_pill)
-                            .on_hover_text(tr(
-                                "Ask the AI for a step-by-step lyric code-along with dependency-safe file order.",
-                            ))
-                            .clicked()
-                        {
-                            self.guided.armed = !self.guided.armed;
-                        }
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let can_send = !self.chat.prompt.trim().is_empty();
-                            let send_btn = egui::Button::new(
-                                RichText::new("↑").strong().color(if can_send {
-                                    colors().canvas
-                                } else {
-                                    colors().muted
-                                }),
-                            )
-                            .fill(if can_send {
-                                colors().accent
-                            } else {
-                                colors().elevated
-                            })
-                            .stroke(egui::Stroke::NONE)
-                            .corner_radius(14)
-                            .min_size(egui::vec2(28.0, 28.0));
-                            if ui.add_enabled(can_send, send_btn).clicked() {
+                        ui.label(
+                            RichText::new(tr(greeting))
+                                .size(28.0)
+                                .strong()
+                                .color(colors().text),
+                        );
+                        ui.add_space(2.0);
+                        ui.label(
+                            RichText::new(tr("Where should we begin?"))
+                                .size(BODY)
+                                .color(colors().muted),
+                        );
+                    });
+                    ui.add_space(18.0);
+                    // Floating rounded prompt composer with delicate ambient top highlight.
+                    let composer = egui::Frame::new()
+                        .fill(colors().surface)
+                        .corner_radius(14)
+                        .stroke(egui::Stroke::new(1.0_f32, colors().control_border))
+                        .shadow(floating_shadow(active(), 22))
+                        .inner_margin(egui::Margin::symmetric(16, 14))
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            let prompt_id = ui.make_persistent_id("home-prompt");
+                            if ui.memory(|memory| memory.has_focus(prompt_id))
+                                && ui.input_mut(|input| {
+                                    input.consume_key(egui::Modifiers::NONE, Key::Enter)
+                                })
+                            {
                                 send_prompt_now = true;
                             }
-                            if self.hub.agents.runtime.is_some() {
-                                let (runtime, chat) = self.hub.agents.runtime_and_chat();
-                                open_add_ai |= super::agent_chat::draft_picker(ui, runtime, chat, self.root.as_deref(), prompt_field.gained_focus() || prompt_field.changed());
-                            } else if ui.button(tr("Manage providers")).clicked() {
-                                open_add_ai = true;
+                            let prompt_field = ui.add(
+                                TextEdit::multiline(&mut self.chat.prompt)
+                                    .id(prompt_id)
+                                    .return_key(egui::KeyboardShortcut::new(
+                                        egui::Modifiers::SHIFT,
+                                        Key::Enter,
+                                    ))
+                                    .hint_text(tr("Ask anything. @ files, $ skills, / commands"))
+                                    .frame(false)
+                                    .desired_rows(3)
+                                    .desired_width(f32::INFINITY)
+                                    .char_limit(12_000),
+                            );
+                            ui.add_space(8.0);
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 6.0;
+                                if icon_button(ui, Icon::Add, "Open file", false).clicked() {
+                                    self.pick_file();
+                                }
+                                if icon_button(ui, Icon::Chart, "View usage", false).clicked() {
+                                    usage_open = true;
+                                }
+                                let skill_pill = egui::Button::new(
+                                    RichText::new(if auto_skill {
+                                        tr("Auto skills")
+                                    } else {
+                                        tr("Manual skills")
+                                    })
+                                    .size(SMALL)
+                                    .color(if auto_skill {
+                                        colors().accent
+                                    } else {
+                                        colors().muted
+                                    }),
+                                )
+                                .fill(if auto_skill {
+                                    colors().accent_bg
+                                } else {
+                                    egui::Color32::TRANSPARENT
+                                })
+                                .stroke(egui::Stroke::new(1.0_f32, colors().border))
+                                .corner_radius(8);
+                                if ui
+                                    .add(skill_pill)
+                                    .on_hover_text(tr(
+                                        "Automatically attach matching enabled skills without asking.",
+                                    ))
+                                    .clicked()
+                                {
+                                    auto_skill = !auto_skill;
+                                }
+                                let guided_armed = self.guided.armed;
+                                let guided_pill = egui::Button::new(
+                                    RichText::new(tr("Guided Mode"))
+                                        .size(SMALL)
+                                        .color(if guided_armed {
+                                            colors().accent
+                                        } else {
+                                            colors().muted
+                                        }),
+                                )
+                                .fill(if guided_armed {
+                                    colors().accent_bg
+                                } else {
+                                    egui::Color32::TRANSPARENT
+                                })
+                                .stroke(egui::Stroke::new(1.0_f32, colors().border))
+                                .corner_radius(8);
+                                if ui
+                                    .add(guided_pill)
+                                    .on_hover_text(tr(
+                                        "Ask the AI for a step-by-step lyric code-along with dependency-safe file order.",
+                                    ))
+                                    .clicked()
+                                {
+                                    self.guided.armed = !self.guided.armed;
+                                }
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        let can_send = !self.chat.prompt.trim().is_empty();
+                                        let send_btn = egui::Button::new(
+                                            RichText::new("↑").strong().color(if can_send {
+                                                colors().canvas
+                                            } else {
+                                                colors().muted
+                                            }),
+                                        )
+                                        .fill(if can_send {
+                                            colors().accent
+                                        } else {
+                                            colors().elevated
+                                        })
+                                        .stroke(egui::Stroke::NONE)
+                                        .corner_radius(14)
+                                        .min_size(egui::vec2(28.0, 28.0));
+                                        if ui.add_enabled(can_send, send_btn).clicked() {
+                                            send_prompt_now = true;
+                                        }
+                                        if self.hub.agents.runtime.is_some() {
+                                            let (runtime, chat) =
+                                                self.hub.agents.runtime_and_chat();
+                                            open_add_ai |= super::agent_chat::draft_picker(
+                                                ui,
+                                                runtime,
+                                                chat,
+                                                self.root.as_deref(),
+                                                prompt_field.gained_focus()
+                                                    || prompt_field.changed(),
+                                            );
+                                        } else if ui.button(tr("Manage providers")).clicked() {
+                                            open_add_ai = true;
+                                        }
+                                    },
+                                );
+                            });
+                        });
+                    ambient_top_glow(ui.painter(), composer.response.rect, 18.0);
+
+                    // Resume Guided Mode banner if a guided session is in progress
+                    if let Some((title, step_num, total_steps, path)) = &guided_resume {
+                        ui.add_space(12.0);
+                        let banner = egui::Frame::new()
+                            .fill(colors().accent_bg)
+                            .corner_radius(12)
+                            .stroke(egui::Stroke::new(
+                                1.0_f32,
+                                colors().accent.gamma_multiply(0.55),
+                            ))
+                            .inner_margin(egui::Margin::symmetric(14, 10))
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                ui.horizontal(|ui| {
+                                    let (ic, _) = ui.allocate_exact_size(
+                                        egui::vec2(16.0, 16.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    draw_icon_sized(
+                                        ui.painter(),
+                                        ic.center(),
+                                        Icon::Sparkles,
+                                        colors().accent,
+                                        15.0,
+                                    );
+                                    ui.vertical(|ui| {
+                                        ui.label(
+                                            RichText::new(format!(
+                                                "{} · {title}",
+                                                tr("Resume Guided Mode")
+                                            ))
+                                            .size(BODY)
+                                            .strong()
+                                            .color(colors().text),
+                                        );
+                                        ui.label(
+                                            RichText::new(format!(
+                                                "{} {step_num}/{total_steps} · {path}",
+                                                tr("Step")
+                                            ))
+                                            .size(SMALL)
+                                            .color(colors().secondary),
+                                        );
+                                    });
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if pointer(ui.add(primary(tr("Continue")))).clicked() {
+                                                resume_guided = Some(path.clone());
+                                            }
+                                        },
+                                    );
+                                });
+                            });
+                        let _ = banner;
+                    }
+
+                    // Continue where you left off: quick file chips
+                    if !resume_files.is_empty() {
+                        ui.add_space(12.0);
+                        ui.label(
+                            RichText::new(tr("Continue where you left off"))
+                                .size(SMALL)
+                                .color(colors().muted),
+                        );
+                        ui.add_space(6.0);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(8.0, 6.0);
+                            for file in &resume_files {
+                                let name = workspace::filename(file);
+                                let rel = self
+                                    .root
+                                    .as_deref()
+                                    .and_then(|r| file.strip_prefix(r).ok())
+                                    .map(|p| p.display().to_string())
+                                    .unwrap_or_else(|| name.clone());
+                                let galley = ui.painter().layout_no_wrap(
+                                    name.clone(),
+                                    egui::FontId::proportional(SMALL),
+                                    colors().text,
+                                );
+                                let chip_w = (galley.size().x + 40.0).clamp(90.0, 210.0);
+                                let (chip_rect, resp) = ui.allocate_exact_size(
+                                    egui::vec2(chip_w, 30.0),
+                                    egui::Sense::click(),
+                                );
+                                let hover = super::motion::state(
+                                    ui,
+                                    resp.id.with("resume-chip-hover"),
+                                    resp.hovered(),
+                                    super::motion::HOVER,
+                                );
+                                let fill = super::motion::blend(
+                                    colors().surface,
+                                    colors().elevated,
+                                    hover,
+                                );
+                                let stroke = super::motion::blend(
+                                    colors().border,
+                                    colors().accent.gamma_multiply(0.7),
+                                    hover,
+                                );
+                                ui.painter().rect(
+                                    chip_rect,
+                                    9,
+                                    fill,
+                                    egui::Stroke::new(1.0_f32, stroke),
+                                    egui::StrokeKind::Inside,
+                                );
+                                super::assets::file(
+                                    ui,
+                                    chip_rect.left_center() + egui::vec2(14.0, 0.0),
+                                    file,
+                                );
+                                ui.painter()
+                                    .with_clip_rect(chip_rect.shrink2(egui::vec2(26.0, 0.0)))
+                                    .text(
+                                        chip_rect.left_center() + egui::vec2(26.0, 0.0),
+                                        egui::Align2::LEFT_CENTER,
+                                        &name,
+                                        egui::FontId::proportional(SMALL),
+                                        colors().text,
+                                    );
+                                if pointer(resp).on_hover_text(rel).clicked() {
+                                    open_resume_file = Some(file.clone());
+                                }
                             }
                         });
-                    });
-                });
-            ui.add_space(12.0);
-            // Readable quick-start rows inside a frosted card over the background.
-            egui::Frame::new()
-                .fill(colors().surface)
-                .corner_radius(12)
-                .stroke(egui::Stroke::new(1.0_f32, colors().border))
-                .inner_margin(egui::Margin::symmetric(6, 6))
-                .show(ui, |ui| {
-                    let inner_w = ui.available_width();
-                    for (icon, color, label) in [
-                        (Icon::Compare, colors().accent, "Review my changes"),
-                        (Icon::Search, colors().success, "Plan an implementation"),
-                        (Icon::Terminal, colors().warning, "Find and fix a bug"),
-                        (Icon::Book, colors().error, "Write tests for a change"),
-                    ] {
-                        let (row_rect, resp) = ui.allocate_exact_size(
-                            egui::vec2(inner_w, 32.0),
-                            egui::Sense::click(),
-                        );
-                        if resp.hovered() {
-                            ui.painter().rect_filled(row_rect, 7, colors().hover);
-                        }
-                        draw_icon_sized(
-                            ui.painter(),
-                            row_rect.left_center() + egui::vec2(14.0, 0.0),
-                            icon,
-                            color,
-                            14.0,
-                        );
-                        ui.painter().text(
-                            row_rect.left_center() + egui::vec2(34.0, 0.0),
-                            egui::Align2::LEFT_CENTER,
-                            tr(label),
-                            egui::FontId::proportional(BODY),
-                            colors().text,
-                        );
-                        if resp.clicked() {
-                            quick_action = Some(label);
-                        }
                     }
+
+                    ui.add_space(12.0);
+                    // Readable quick-start rows inside a frosted card over the background.
+                    egui::Frame::new()
+                        .fill(colors().surface)
+                        .corner_radius(12)
+                        .stroke(egui::Stroke::new(1.0_f32, colors().border))
+                        .inner_margin(egui::Margin::symmetric(6, 6))
+                        .show(ui, |ui| {
+                            let inner_w = ui.available_width();
+                            for (icon, color, label) in [
+                                (Icon::Compare, colors().accent, "Review my changes"),
+                                (Icon::Search, colors().success, "Plan an implementation"),
+                                (Icon::Terminal, colors().warning, "Find and fix a bug"),
+                                (Icon::Book, colors().error, "Write tests for a change"),
+                            ] {
+                                let (row_rect, resp) = ui.allocate_exact_size(
+                                    egui::vec2(inner_w, 32.0),
+                                    egui::Sense::click(),
+                                );
+                                if resp.hovered() {
+                                    ui.painter().rect_filled(row_rect, 7, colors().hover);
+                                }
+                                draw_icon_sized(
+                                    ui.painter(),
+                                    row_rect.left_center() + egui::vec2(14.0, 0.0),
+                                    icon,
+                                    color,
+                                    14.0,
+                                );
+                                ui.painter().text(
+                                    row_rect.left_center() + egui::vec2(34.0, 0.0),
+                                    egui::Align2::LEFT_CENTER,
+                                    tr(label),
+                                    egui::FontId::proportional(BODY),
+                                    colors().text,
+                                );
+                                if pointer(resp).clicked() {
+                                    quick_action = Some(label);
+                                }
+                            }
+                        });
                 });
         });
         ui.ctx().data_mut(|d| {
@@ -722,6 +967,13 @@ impl Editor {
             d.insert_temp(usage_modal_id, usage_open);
         });
         self.remember_chat_layout();
+        if let Some(file) = open_resume_file {
+            self.open_file(file);
+        }
+        if let Some(path) = resume_guided {
+            self.guided.open = true;
+            self.open_guided_file(&path);
+        }
         if open_add_ai {
             self.open_providers();
         }
@@ -1246,19 +1498,21 @@ impl Editor {
                     self.preferences.brightness.to_bits(),
                 );
                 let old_fonts = (self.preferences.ubuntu_interface,self.preferences.hack_editor);
-                let nav_w = 176.0;
+                let nav_w = 196.0;
                 let content_h = (height - 46.0).max(220.0);
                 ui.horizontal_top(|ui| {
-                    // Left navigation column with search and clean sections.
+                    // Left navigation column with styled search field and clean sections.
                     ui.allocate_ui_with_layout(
                         egui::vec2(nav_w, content_h),
                         egui::Layout::top_down(egui::Align::Min),
                         |ui| {
-                            ui.add(
-                                TextEdit::singleline(&mut search)
-                                    .hint_text(tr("Search settings"))
-                                    .desired_width(nav_w - 8.0)
-                                    .char_limit(80),
+                            ui.set_width(nav_w - 8.0);
+                            search_field(
+                                ui,
+                                "settings-search",
+                                &mut search,
+                                "Search settings",
+                                80,
                             );
                             ui.add_space(10.0);
                             let needle = search.trim().to_ascii_lowercase();
@@ -1268,13 +1522,13 @@ impl Editor {
                                 }
                                 let selected = active_tab == item;
                                 let (rect, response) = ui.allocate_exact_size(
-                                    egui::vec2(nav_w - 8.0, 28.0),
+                                    egui::vec2(nav_w - 8.0, 31.0),
                                     egui::Sense::click(),
                                 );
                                 if selected || response.hovered() {
                                     ui.painter().rect_filled(
                                         rect,
-                                        6,
+                                        8,
                                         if selected {
                                             colors().elevated
                                         } else {
@@ -1282,19 +1536,29 @@ impl Editor {
                                         },
                                     );
                                 }
+                                if selected {
+                                    ui.painter().rect_filled(
+                                        egui::Rect::from_min_size(
+                                            rect.left_top() + egui::vec2(0.0, 6.0),
+                                            egui::vec2(2.5, rect.height() - 12.0),
+                                        ),
+                                        2,
+                                        colors().accent,
+                                    );
+                                }
                                 draw_icon_sized(
                                     ui.painter(),
                                     rect.left_center() + egui::vec2(14.0, 0.0),
                                     item.icon(),
                                     if selected {
-                                        colors().text
+                                        colors().accent
                                     } else {
                                         colors().muted
                                     },
                                     14.0,
                                 );
                                 ui.painter().text(
-                                    rect.left_center() + egui::vec2(28.0, 0.0),
+                                    rect.left_center() + egui::vec2(30.0, 0.0),
                                     egui::Align2::LEFT_CENTER,
                                     tr(item.label()),
                                     egui::FontId::proportional(BODY),
@@ -1304,7 +1568,7 @@ impl Editor {
                                         colors().secondary
                                     },
                                 );
-                                if response.clicked() {
+                                if pointer(response).clicked() {
                                     active_tab = item;
                                 }
                             }
@@ -1518,66 +1782,142 @@ impl Editor {
                                             }
                                         }
                                     });
-                                    ui.add_space(10.0);
-                                    ui.add(
-                                        egui::Slider::new(
-                                            &mut self.preferences.brightness,
-                                            0.0..=1.0,
-                                        )
-                                        .step_by(0.05)
-                                        .text(tr("Surface brightness")),
-                                    );
-                                    ui.add(
-                                        egui::Slider::new(&mut self.preferences.motion, 0.0..=1.0)
-                                            .step_by(0.05)
-                                            .text(tr("Motion intensity")),
-                                    );
-                                    ui.add(
-                                        egui::Slider::new(
-                                            &mut self.preferences.explorer_zoom,
-                                            super::preferences::EXPLORER_ZOOM.0
-                                                ..=super::preferences::EXPLORER_ZOOM.1,
-                                        )
-                                        .step_by(0.05)
-                                        .text(tr("Explorer zoom")),
-                                    );
-                                    ui.add(
-                                        egui::Slider::new(
-                                            &mut self.preferences.ui_scale,
-                                            super::preferences::UI_SCALE.0
-                                                ..=super::preferences::UI_SCALE.1,
-                                        )
-                                        .step_by(0.05)
-                                        .text(tr("Interface scale")),
-                                    );
-                                    ui.horizontal_wrapped(|ui| {
-                                        if ui.button(tr("Reset Explorer zoom")).clicked() {
-                                            self.preferences.explorer_zoom = 1.0;
-                                        }
-                                        if ui.button(tr("Reset interface scale")).clicked() {
-                                            self.preferences.ui_scale = 1.0;
-                                        }
-                                    });
-                                    ui.add_space(6.0);
-                                    ui.horizontal(|ui| {
-                                        ui.label(secondary(tr("Navigation transitions")));
-                                        for t in super::preferences::Transitions::ALL {
-                                            ui.selectable_value(
-                                                &mut self.preferences.transitions,
-                                                t,
-                                                tr(t.name()),
+                                    ui.add_space(12.0);
+                                    setting_row(
+                                        ui,
+                                        "Surface brightness",
+                                        "Adjust background clarity across chrome, Explorer, and editor.",
+                                        |ui| {
+                                            ui.label(muted(format!(
+                                                "{:.0}%",
+                                                self.preferences.brightness * 100.0
+                                            )));
+                                            ui.add(
+                                                egui::Slider::new(
+                                                    &mut self.preferences.brightness,
+                                                    0.0..=1.0,
+                                                )
+                                                .step_by(0.05)
+                                                .show_value(false),
                                             );
-                                        }
-                                    });
-                                    checkbox(
-                                        ui,
-                                        &mut self.preferences.high_contrast,
-                                        tr("High contrast controls"),
+                                        },
                                     );
-                                    checkbox(
+                                    setting_row(
                                         ui,
-                                        &mut self.preferences.reduce_motion,
-                                        tr("Reduce motion"),
+                                        "Motion intensity",
+                                        "Scale spring and hover animations.",
+                                        |ui| {
+                                            ui.label(muted(format!(
+                                                "{:.0}%",
+                                                self.preferences.motion * 100.0
+                                            )));
+                                            ui.add(
+                                                egui::Slider::new(
+                                                    &mut self.preferences.motion,
+                                                    0.0..=1.0,
+                                                )
+                                                .step_by(0.05)
+                                                .show_value(false),
+                                            );
+                                        },
+                                    );
+                                    setting_row(
+                                        ui,
+                                        "Explorer zoom",
+                                        "Independent text and icon scale for the file tree.",
+                                        |ui| {
+                                            if (self.preferences.explorer_zoom - 1.0).abs() > 0.01
+                                                && ui
+                                                    .add(
+                                                        egui::Button::new(muted(tr("Reset")))
+                                                            .frame(false),
+                                                    )
+                                                    .clicked()
+                                            {
+                                                self.preferences.explorer_zoom = 1.0;
+                                            }
+                                            ui.label(muted(format!(
+                                                "{:.0}%",
+                                                self.preferences.explorer_zoom * 100.0
+                                            )));
+                                            ui.add(
+                                                egui::Slider::new(
+                                                    &mut self.preferences.explorer_zoom,
+                                                    super::preferences::EXPLORER_ZOOM.0
+                                                        ..=super::preferences::EXPLORER_ZOOM.1,
+                                                )
+                                                .step_by(0.05)
+                                                .show_value(false),
+                                            );
+                                        },
+                                    );
+                                    setting_row(
+                                        ui,
+                                        "Interface scale",
+                                        "Scale the whole window interface.",
+                                        |ui| {
+                                            if (self.preferences.ui_scale - 1.0).abs() > 0.01
+                                                && ui
+                                                    .add(
+                                                        egui::Button::new(muted(tr("Reset")))
+                                                            .frame(false),
+                                                    )
+                                                    .clicked()
+                                            {
+                                                self.preferences.ui_scale = 1.0;
+                                            }
+                                            ui.label(muted(format!(
+                                                "{:.0}%",
+                                                self.preferences.ui_scale * 100.0
+                                            )));
+                                            ui.add(
+                                                egui::Slider::new(
+                                                    &mut self.preferences.ui_scale,
+                                                    super::preferences::UI_SCALE.0
+                                                        ..=super::preferences::UI_SCALE.1,
+                                                )
+                                                .step_by(0.05)
+                                                .show_value(false),
+                                            );
+                                        },
+                                    );
+                                    setting_row(
+                                        ui,
+                                        "Navigation transitions",
+                                        "How views enter when switching screens.",
+                                        |ui| {
+                                            for t in super::preferences::Transitions::ALL.into_iter().rev() {
+                                                ui.selectable_value(
+                                                    &mut self.preferences.transitions,
+                                                    t,
+                                                    tr(t.name()),
+                                                );
+                                            }
+                                        },
+                                    );
+                                    setting_row(
+                                        ui,
+                                        "High contrast controls",
+                                        "Strengthen borders around panels and inputs.",
+                                        |ui| {
+                                            checkbox(
+                                                ui,
+                                                &mut self.preferences.high_contrast,
+                                                tr("Enabled"),
+                                            );
+                                        },
+                                    );
+                                    setting_row(
+                                        ui,
+                                        "Reduce motion",
+                                        "Disable animations and ambient transitions.",
+                                        |ui| {
+                                            checkbox(
+                                                ui,
+                                                &mut self.preferences.reduce_motion,
+                                                tr("Enabled"),
+                                            );
+                                        },
                                     );
                                 }
                                 SettingsSection::Background => {
@@ -1714,6 +2054,9 @@ impl Editor {
                                     });
                                     setting_row(ui, "Word wrap", "Wrap long lines at the editor width (Alt+Z).", |ui| {
                                         checkbox(ui, &mut self.preferences.word_wrap, tr("Enabled"));
+                                    });
+                                    setting_row(ui, "Code minimap", "Show an interactive code overview on the right edge (hold Alt anytime to peek).", |ui| {
+                                        checkbox(ui, &mut self.preferences.minimap, tr("Enabled"));
                                     });
                                     setting_row(ui, "Inline suggestions", "Dimmed completion after the caret. Tab accepts, Ctrl+Right accepts a word, Esc dismisses.", |ui| {
                                         checkbox(ui, &mut self.preferences.inline_suggestions, tr("Enabled"));
@@ -2754,6 +3097,17 @@ fn home_card(ui: &mut Ui, width: f32, icon: Icon, title: &str, detail: &str) -> 
     ));
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, title));
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+fn time_of_day_greeting() -> &'static str {
+    let hour = time::OffsetDateTime::now_local()
+        .map(|dt| dt.hour())
+        .unwrap_or_else(|_| time::OffsetDateTime::now_utc().hour());
+    match hour {
+        5..=11 => "Good morning",
+        12..=18 => "Good afternoon",
+        _ => "Good evening",
+    }
 }
 
 #[cfg(test)]

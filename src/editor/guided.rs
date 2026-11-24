@@ -40,6 +40,10 @@ pub(super) struct GuidedPreferences {
     /// Expanded explanation of what the active line or block does; off by default.
     pub(super) show_detail: bool,
     pub(super) floating: bool,
+    /// Open Guided Mode in an independent native OS window (movable across monitors).
+    pub(super) detached: bool,
+    /// Font size scale percentage for the Guided teleprompter (85..=180).
+    pub(super) font_scale_pct: u16,
 }
 
 impl Default for GuidedPreferences {
@@ -50,6 +54,8 @@ impl Default for GuidedPreferences {
             show_why: true,
             show_detail: false,
             floating: true,
+            detached: false,
+            font_scale_pct: 100,
         }
     }
 }
@@ -354,6 +360,24 @@ impl GuidedController {
         let session = self.session.as_mut()?;
         if session.step_index > 0 {
             session.step_index -= 1;
+            session.line_index = 0;
+            session.skip_blank_lines();
+            let path = session.plan.steps[session.step_index].path.clone();
+            self.save_to_disk(workspace);
+            Some(path)
+        } else {
+            None
+        }
+    }
+
+    pub(super) fn jump_to_step(
+        &mut self,
+        index: usize,
+        workspace: Option<&Path>,
+    ) -> Option<String> {
+        let session = self.session.as_mut()?;
+        if index < session.plan.steps.len() {
+            session.step_index = index;
             session.line_index = 0;
             session.skip_blank_lines();
             let path = session.plan.steps[session.step_index].path.clone();
@@ -986,7 +1010,8 @@ impl super::Editor {
         self.open_file(full);
     }
 
-    /// Renders the minimalist Spotify-Lyrics-style Guided Mode floating window.
+    /// Renders the Studio / Teleprompter Guided Mode surface, either as an in-app floating
+    /// window or detached into an independent native OS window (movable across monitors).
     pub(super) fn guided_overlay(&mut self, ctx: &egui::Context) {
         if !self.guided.open {
             return;
@@ -995,279 +1020,110 @@ impl super::Editor {
             self.guided.open = false;
             return;
         };
-        let step_idx = session_clone.step_index;
-        let line_idx = session_clone.line_index;
-        let Some(step) = session_clone.plan.steps.get(step_idx) else {
+        if session_clone.plan.steps.get(session_clone.step_index).is_none() {
             return;
-        };
-        let total_steps = session_clone.plan.steps.len();
-        let (done_steps, _) = step_progress_counts(&session_clone);
+        }
         let sync = self.guided.sync.clone();
-        let next_step_path = session_clone
-            .plan
-            .steps
-            .get(step_idx + 1)
-            .map(|s| s.path.clone());
-
         let mut open = self.guided.open;
-        let mut open_path: Option<String> = None;
-        let mut advance_now = false;
-        let mut prev_now = false;
-        let mut skip_line_now = false;
-        let mut clear_now = false;
-        let mut toggle_mode = false;
-        let mut toggle_why = false;
-        let mut toggle_detail = false;
+        let mut actions = GuidedUiActions::default();
 
-        let show_why = self.preferences.guided.show_why;
-        let show_detail = self.preferences.guided.show_detail;
-        let match_mode = self.preferences.guided.match_mode;
-        let (anchor, pivot) = self.guided_anchor(ctx);
+        let prefs = &self.preferences.guided;
+        let view = GuidedViewConfig {
+            show_why: prefs.show_why,
+            show_detail: prefs.show_detail,
+            match_mode: prefs.match_mode,
+            detached: prefs.detached,
+            font_scale: (f32::from(prefs.font_scale_pct.clamp(85, 180)) / 100.0),
+        };
 
-        egui::Window::new(tr("Guided Mode"))
-            .id(Id::new("covalos-guided-lyrics"))
-            .open(&mut open)
-            .resizable(true)
-            .collapsible(true)
-            .constrain(true)
-            .default_width(440.0)
-            .min_width(320.0)
-            .pivot(pivot)
-            .default_pos(anchor)
-            .frame(
-                Frame::new()
-                    .fill(colors().elevated)
-                    .stroke(egui::Stroke::new(1.0_f32, colors().control_border))
-                    .corner_radius(14)
-                    .inner_margin(Margin::same(14))
-                    .shadow(super::theme::floating_shadow(super::theme::active(), 28)),
-            )
-            .show(ctx, |ui| {
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(&session_clone.plan.title)
-                            .size(LEAD)
-                            .strong()
-                            .color(colors().text),
-                    )
-                    .wrap(),
-                );
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let mode_lbl = match match_mode {
-                            MatchMode::Flexible => tr("Flexible"),
-                            MatchMode::Strict => tr("Strict"),
-                        };
-                        if pill(ui, mode_lbl, false)
-                            .on_hover_text(tr("Switch between flexible and strict line matching"))
-                            .clicked()
-                        {
-                            toggle_mode = true;
-                        }
-                        if pill(ui, tr("Detail"), show_detail)
-                            .on_hover_text(tr("Explain what each line of the active block does"))
-                            .clicked()
-                        {
-                            toggle_detail = true;
-                        }
-                        if pill(ui, tr("Why?"), show_why)
-                            .on_hover_text(tr("Show why this block is written now"))
-                            .clicked()
-                        {
-                            toggle_why = true;
-                        }
-                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(format!(
-                                        "{} {}/{} · {}",
-                                        tr("Step"),
-                                        step_idx + 1,
-                                        total_steps,
-                                        step.path
-                                    ))
-                                    .size(SMALL)
-                                    .color(colors().secondary),
-                                )
-                                .truncate(),
-                            )
-                            .on_hover_text(&step.path);
-                        });
+        if view.detached {
+            let viewport_id = egui::ViewportId::from_hash_of("covalos-guided-viewport");
+            let title = format!("{} — {}", tr("Guided Mode"), session_clone.plan.title);
+            let builder = egui::ViewportBuilder::default()
+                .with_title(title)
+                .with_inner_size([820.0, 560.0])
+                .with_min_inner_size([380.0, 340.0])
+                .with_resizable(true);
+            ctx.show_viewport_immediate(viewport_id, builder, |vctx, _class| {
+                if vctx.input(|i| i.viewport().close_requested()) {
+                    open = false;
+                }
+                egui::CentralPanel::default()
+                    .frame(Frame::new().fill(colors().canvas).inner_margin(Margin::same(18)))
+                    .show(vctx, |ui| {
+                        super::theme::ambient_top_glow(ui.painter(), ui.max_rect(), 16.0);
+                        render_guided_body(ui, &session_clone, &sync, &view, &mut actions);
                     });
-                });
-                ui.add_space(4.0);
-                let (prog_rect, _) = ui.allocate_exact_size(
-                    egui::vec2(ui.available_width(), 3.0),
-                    egui::Sense::hover(),
-                );
-                ui.painter().rect_filled(prog_rect, 2, colors().hover);
-                let step_ratio = (done_steps as f32 / total_steps.max(1) as f32).clamp(0.0, 1.0);
-                if step_ratio > 0.0 {
-                    let fill = egui::Rect::from_min_size(
-                        prog_rect.min,
-                        egui::vec2(prog_rect.width() * step_ratio, prog_rect.height()),
-                    );
-                    ui.painter().rect_filled(fill, 2, colors().accent);
-                }
-
-                // Target file prompt when user is on another tab
-                if !sync.on_target_file {
-                    ui.add_space(10.0);
-                    Frame::new()
-                        .fill(colors().accent_bg)
-                        .corner_radius(9)
-                        .inner_margin(Margin::symmetric(10, 8))
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            ui.horizontal_wrapped(|ui| {
-                                ui.label(
-                                    RichText::new(format!("{}: {}", tr("Target file"), step.path))
-                                        .size(SMALL)
-                                        .color(colors().text),
-                                );
-                                if super::theme::pointer(
-                                    ui.add(
-                                        egui::Button::new(
-                                            RichText::new(tr("Open file →"))
-                                                .size(SMALL)
-                                                .strong()
-                                                .color(colors().canvas),
-                                        )
-                                        .fill(colors().accent)
-                                        .corner_radius(7),
-                                    ),
-                                )
-                                .clicked()
-                                {
-                                    open_path = Some(step.path.clone());
-                                }
-                            });
-                        });
-                }
-
-                // Optional 1-line explanation
-                if show_why && let Some(why) = step.why.as_deref().filter(|w| !w.trim().is_empty())
-                {
-                    ui.add_space(8.0);
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(why)
-                                .size(SMALL)
-                                .italics()
-                                .color(colors().secondary),
-                        )
-                        .wrap(),
-                    );
-                }
-
-                // Lyrics-style synced code block
-                ui.add_space(10.0);
-                Frame::new()
-                    .fill(colors().inset)
-                    .corner_radius(10)
-                    .stroke(egui::Stroke::new(1.0_f32, colors().border))
-                    .inner_margin(Margin::symmetric(12, 10))
-                    .show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        let start = line_idx.saturating_sub(2);
-                        let end = (line_idx + 4).min(step.lines.len());
-                        for (idx, code_line) in step.lines.iter().enumerate().take(end).skip(start)
-                        {
-                            if idx < line_idx {
-                                ui.label(
-                                    RichText::new(format!("✓  {code_line}"))
-                                        .monospace()
-                                        .size(SMALL)
-                                        .color(colors().muted),
-                                );
-                            } else if idx == line_idx && !sync.step_complete {
-                                ui.add_space(4.0);
-                                active_line_card(ui, code_line, sync.line_progress);
-                                ui.add_space(4.0);
-                            } else {
-                                ui.label(
-                                    RichText::new(format!("   {code_line}"))
-                                        .monospace()
-                                        .size(SMALL)
-                                        .color(colors().secondary.gamma_multiply(0.75)),
-                                );
-                            }
-                        }
-                        if sync.step_complete {
-                            ui.add_space(6.0);
-                            ui.label(
-                                RichText::new(if sync.all_complete {
-                                    tr("All guided steps completed!")
-                                } else {
-                                    tr("Step completed!")
-                                })
-                                .size(BODY)
-                                .strong()
-                                .color(colors().success),
-                            );
-                        }
-                    });
-
-                if show_detail {
-                    ui.add_space(8.0);
-                    detail_card(ui, step, line_idx, sync.step_complete);
-                }
-
-                ui.add_space(10.0);
-                let next_label = next_step_path.as_ref().map(|next_path| {
-                    if next_path == &step.path {
-                        tr("Next step →").to_owned()
-                    } else {
-                        format!("{}: {} →", tr("Next file"), next_path)
-                    }
-                });
-                let action = footer(
-                    ui,
-                    step_idx > 0,
-                    !sync.step_complete,
-                    next_label.as_deref(),
-                    sync.step_complete,
-                );
-                match action {
-                    Some(FooterAction::Prev) => prev_now = true,
-                    Some(FooterAction::SkipLine) => skip_line_now = true,
-                    Some(FooterAction::Finish) => clear_now = true,
-                    Some(FooterAction::Next) => advance_now = true,
-                    None => {}
-                }
             });
+        } else {
+            let (anchor, pivot) = self.guided_anchor(ctx);
+            egui::Window::new(tr("Guided Mode"))
+                .id(Id::new("covalos-guided-lyrics"))
+                .open(&mut open)
+                .resizable(true)
+                .collapsible(true)
+                .constrain(true)
+                .default_width(480.0)
+                .min_width(340.0)
+                .pivot(pivot)
+                .default_pos(anchor)
+                .frame(
+                    Frame::new()
+                        .fill(colors().elevated)
+                        .stroke(egui::Stroke::new(1.0_f32, colors().control_border))
+                        .corner_radius(14)
+                        .inner_margin(Margin::same(14))
+                        .shadow(super::theme::floating_shadow(super::theme::active(), 28)),
+                )
+                .show(ctx, |ui| {
+                    super::theme::ambient_top_glow(ui.painter(), ui.max_rect(), 10.0);
+                    render_guided_body(ui, &session_clone, &sync, &view, &mut actions);
+                });
+        }
 
         let prev_open = self.guided.open;
         self.guided.open = open;
         if prev_open != open {
             self.guided.save_to_disk(self.root.as_deref());
         }
-        if toggle_why {
+        if actions.toggle_detached {
+            self.preferences.guided.detached = !self.preferences.guided.detached;
+        }
+        if actions.font_delta != 0 {
+            let next = (i32::from(self.preferences.guided.font_scale_pct) + actions.font_delta)
+                .clamp(85, 180) as u16;
+            self.preferences.guided.font_scale_pct = next;
+        }
+        if actions.toggle_why {
             self.preferences.guided.show_why = !self.preferences.guided.show_why;
         }
-        if toggle_detail {
+        if actions.toggle_detail {
             self.preferences.guided.show_detail = !self.preferences.guided.show_detail;
         }
-        if toggle_mode {
+        if actions.toggle_mode {
             self.preferences.guided.match_mode = match self.preferences.guided.match_mode {
                 MatchMode::Flexible => MatchMode::Strict,
                 MatchMode::Strict => MatchMode::Flexible,
             };
         }
-        if let Some(path) = open_path {
+        if let Some(path) = actions.open_path {
             self.open_guided_file(&path);
         }
-        if prev_now && let Some(path) = self.guided.prev_step(self.root.as_deref()) {
+        if let Some(idx) = actions.jump_step
+            && let Some(path) = self.guided.jump_to_step(idx, self.root.as_deref())
+        {
             self.open_guided_file(&path);
         }
-        if skip_line_now {
+        if actions.prev_now && let Some(path) = self.guided.prev_step(self.root.as_deref()) {
+            self.open_guided_file(&path);
+        }
+        if actions.skip_line_now {
             self.guided.skip_line(self.root.as_deref());
         }
-        if advance_now && let Some(path) = self.guided.advance_step(self.root.as_deref()) {
+        if actions.advance_now && let Some(path) = self.guided.advance_step(self.root.as_deref()) {
             self.open_guided_file(&path);
         }
-        if clear_now {
+        if actions.clear_now {
             self.guided.clear(self.root.as_deref());
         }
     }
@@ -1284,6 +1140,510 @@ impl super::Editor {
         let right = (screen.right() - dock - 16.0).max(screen.left() + 360.0);
         let bottom = screen.bottom() - super::theme::STATUS_HEIGHT - 16.0;
         (egui::pos2(right, bottom), egui::Align2::RIGHT_BOTTOM)
+    }
+}
+
+struct GuidedViewConfig {
+    show_why: bool,
+    show_detail: bool,
+    match_mode: MatchMode,
+    detached: bool,
+    font_scale: f32,
+}
+
+#[derive(Default)]
+struct GuidedUiActions {
+    open_path: Option<String>,
+    jump_step: Option<usize>,
+    advance_now: bool,
+    prev_now: bool,
+    skip_line_now: bool,
+    clear_now: bool,
+    toggle_mode: bool,
+    toggle_why: bool,
+    toggle_detail: bool,
+    toggle_detached: bool,
+    font_delta: i32,
+}
+
+fn render_guided_body(
+    ui: &mut egui::Ui,
+    session: &GuidedSession,
+    sync: &SyncSnapshot,
+    view: &GuidedViewConfig,
+    actions: &mut GuidedUiActions,
+) {
+    let step_idx = session.step_index;
+    let line_idx = session.line_index;
+    let Some(step) = session.plan.steps.get(step_idx) else {
+        return;
+    };
+    let total_steps = session.plan.steps.len();
+    let (done_steps, _) = step_progress_counts(session);
+    let next_step_path = session.plan.steps.get(step_idx + 1).map(|s| s.path.clone());
+    let wide = ui.available_width() >= 680.0;
+
+    // Header row: title + window controls (zoom, pop-out / dock)
+    ui.horizontal(|ui| {
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            let detach_lbl = if view.detached {
+                tr("Dock ↙")
+            } else {
+                tr("Pop out ↗")
+            };
+            let detach_tip = if view.detached {
+                tr("Dock Guided Mode back inside the editor window")
+            } else {
+                tr("Open Guided Mode in its own window so you can move or maximize it on another screen")
+            };
+            if pill(ui, detach_lbl, view.detached)
+                .on_hover_text(detach_tip)
+                .clicked()
+            {
+                actions.toggle_detached = true;
+            }
+            if pill(ui, "A+", false)
+                .on_hover_text(tr("Increase Guided Mode text size"))
+                .clicked()
+            {
+                actions.font_delta = 15;
+            }
+            if pill(ui, "A-", false)
+                .on_hover_text(tr("Decrease Guided Mode text size"))
+                .clicked()
+            {
+                actions.font_delta = -15;
+            }
+            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(&session.plan.title)
+                            .size(LEAD * view.font_scale.min(1.35))
+                            .strong()
+                            .color(colors().text),
+                    )
+                    .truncate(),
+                );
+            });
+        });
+    });
+
+    ui.add_space(5.0);
+    // Meta & toggles row
+    ui.horizontal(|ui| {
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            let mode_lbl = match view.match_mode {
+                MatchMode::Flexible => tr("Flexible"),
+                MatchMode::Strict => tr("Strict"),
+            };
+            if pill(ui, mode_lbl, false)
+                .on_hover_text(tr("Switch between flexible and strict line matching"))
+                .clicked()
+            {
+                actions.toggle_mode = true;
+            }
+            if pill(ui, tr("Detail"), view.show_detail)
+                .on_hover_text(tr("Explain what each line of the active block does"))
+                .clicked()
+            {
+                actions.toggle_detail = true;
+            }
+            if pill(ui, tr("Why?"), view.show_why)
+                .on_hover_text(tr("Show why this block is written now"))
+                .clicked()
+            {
+                actions.toggle_why = true;
+            }
+            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(format!(
+                            "{} {}/{} · {}",
+                            tr("Step"),
+                            step_idx + 1,
+                            total_steps,
+                            step.path
+                        ))
+                        .size(SMALL)
+                        .color(colors().secondary),
+                    )
+                    .truncate(),
+                )
+                .on_hover_text(&step.path);
+            });
+        });
+    });
+
+    ui.add_space(6.0);
+    let (prog_rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 4.0), egui::Sense::hover());
+    ui.painter().rect_filled(prog_rect, 2, colors().hover);
+    let step_ratio = (done_steps as f32 / total_steps.max(1) as f32).clamp(0.0, 1.0);
+    if step_ratio > 0.0 {
+        let fill = egui::Rect::from_min_size(
+            prog_rect.min,
+            egui::vec2(prog_rect.width() * step_ratio, prog_rect.height()),
+        );
+        ui.painter().rect_filled(fill, 2, colors().accent);
+    }
+
+    ui.add_space(10.0);
+
+    if wide {
+        let total_w = ui.available_width();
+        let roadmap_w = (total_w * 0.30).clamp(200.0, 270.0);
+        let main_w = (total_w - roadmap_w - 14.0).max(320.0);
+        let avail_h = ui.available_height().max(200.0);
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 14.0;
+            ui.allocate_ui_with_layout(
+                egui::vec2(roadmap_w, avail_h),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    step_roadmap(ui, session, actions);
+                },
+            );
+            ui.allocate_ui_with_layout(
+                egui::vec2(main_w, avail_h),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    teleprompter_column(
+                        ui,
+                        step,
+                        step_idx,
+                        line_idx,
+                        sync,
+                        view,
+                        next_step_path.as_deref(),
+                        actions,
+                    );
+                },
+            );
+        });
+    } else {
+        teleprompter_column(
+            ui,
+            step,
+            step_idx,
+            line_idx,
+            sync,
+            view,
+            next_step_path.as_deref(),
+            actions,
+        );
+    }
+}
+
+/// Sidebar roadmap shown automatically when Guided Mode is wide (e.g. on a second monitor).
+fn step_roadmap(ui: &mut egui::Ui, session: &GuidedSession, actions: &mut GuidedUiActions) {
+    Frame::new()
+        .fill(colors().surface)
+        .stroke(egui::Stroke::new(1.0_f32, colors().border))
+        .corner_radius(11)
+        .inner_margin(Margin::same(10))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(
+                RichText::new(tr("Steps"))
+                    .size(SMALL)
+                    .strong()
+                    .color(colors().muted),
+            );
+            ui.add_space(6.0);
+            egui::ScrollArea::vertical()
+                .id_salt("guided-roadmap-scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 4.0;
+                    for (idx, step) in session.plan.steps.iter().enumerate() {
+                        let is_active = idx == session.step_index;
+                        let is_done = session.completed_steps.get(idx).copied().unwrap_or(false);
+                        let file_name = Path::new(&step.path)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or(&step.path);
+                        let (rect, resp) = ui.allocate_exact_size(
+                            egui::vec2(ui.available_width(), 38.0),
+                            egui::Sense::click(),
+                        );
+                        let bg = if is_active {
+                            colors().accent_bg
+                        } else if resp.hovered() {
+                            colors().hover
+                        } else {
+                            Color32::TRANSPARENT
+                        };
+                        ui.painter().rect_filled(rect, 8, bg);
+                        if is_active {
+                            ui.painter().rect_stroke(
+                                rect,
+                                8,
+                                egui::Stroke::new(1.0_f32, colors().accent.gamma_multiply(0.55)),
+                                egui::StrokeKind::Inside,
+                            );
+                        }
+                        let badge_center = rect.left_center() + egui::vec2(14.0, 0.0);
+                        if is_done {
+                            ui.painter().circle_filled(
+                                badge_center,
+                                8.0,
+                                colors().success.gamma_multiply(0.22),
+                            );
+                            ui.painter().text(
+                                badge_center,
+                                egui::Align2::CENTER_CENTER,
+                                "✓",
+                                egui::FontId::proportional(11.0),
+                                colors().success,
+                            );
+                        } else {
+                            ui.painter().circle_filled(
+                                badge_center,
+                                8.0,
+                                if is_active {
+                                    colors().accent
+                                } else {
+                                    colors().elevated
+                                },
+                            );
+                            ui.painter().text(
+                                badge_center,
+                                egui::Align2::CENTER_CENTER,
+                                format!("{}", idx + 1),
+                                egui::FontId::proportional(10.5),
+                                if is_active {
+                                    colors().canvas
+                                } else {
+                                    colors().muted
+                                },
+                            );
+                        }
+                        let text_rect = egui::Rect::from_min_max(
+                            rect.left_top() + egui::vec2(28.0, 4.0),
+                            rect.right_bottom() - egui::vec2(6.0, 4.0),
+                        );
+                        let p = ui.painter().with_clip_rect(text_rect);
+                        p.text(
+                            text_rect.left_top(),
+                            egui::Align2::LEFT_TOP,
+                            file_name,
+                            egui::FontId::proportional(SMALL),
+                            if is_active {
+                                colors().text
+                            } else if is_done {
+                                colors().secondary
+                            } else {
+                                colors().muted
+                            },
+                        );
+                        p.text(
+                            text_rect.left_bottom(),
+                            egui::Align2::LEFT_BOTTOM,
+                            &step.path,
+                            egui::FontId::proportional(10.5),
+                            colors().muted,
+                        );
+                        if super::theme::pointer(resp)
+                            .on_hover_text(&step.path)
+                            .clicked()
+                        {
+                            actions.jump_step = Some(idx);
+                        }
+                    }
+                });
+        });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn teleprompter_column(
+    ui: &mut egui::Ui,
+    step: &GuidedStep,
+    step_idx: usize,
+    line_idx: usize,
+    sync: &SyncSnapshot,
+    view: &GuidedViewConfig,
+    next_step_path: Option<&str>,
+    actions: &mut GuidedUiActions,
+) {
+    // Target file prompt when user is on another tab
+    if !sync.on_target_file {
+        Frame::new()
+            .fill(colors().accent_bg)
+            .stroke(egui::Stroke::new(
+                1.0_f32,
+                colors().accent.gamma_multiply(0.45),
+            ))
+            .corner_radius(9)
+            .inner_margin(Margin::symmetric(10, 8))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        RichText::new(format!("{}: {}", tr("Target file"), step.path))
+                            .size(SMALL)
+                            .color(colors().text),
+                    );
+                    if super::theme::pointer(
+                        ui.add(
+                            egui::Button::new(
+                                RichText::new(tr("Open file →"))
+                                    .size(SMALL)
+                                    .strong()
+                                    .color(colors().canvas),
+                            )
+                            .fill(colors().accent)
+                            .corner_radius(7),
+                        ),
+                    )
+                    .clicked()
+                    {
+                        actions.open_path = Some(step.path.clone());
+                    }
+                });
+            });
+        ui.add_space(8.0);
+    }
+
+    // Optional 1-line explanation
+    if view.show_why
+        && let Some(why) = step.why.as_deref().filter(|w| !w.trim().is_empty())
+    {
+        Frame::new()
+            .fill(colors().surface)
+            .corner_radius(9)
+            .inner_margin(Margin::symmetric(10, 7))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(why)
+                            .size(SMALL * view.font_scale.min(1.25))
+                            .italics()
+                            .color(colors().secondary),
+                    )
+                    .wrap(),
+                );
+            });
+        ui.add_space(8.0);
+    }
+
+    // Lyrics-style synced code block with syntax colors & karaoke active line
+    let lang = Path::new(&step.path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    let context_before = if view.detached { 3 } else { 2 };
+    let context_after = if view.detached { 6 } else { 4 };
+    let code_small = (SMALL * view.font_scale).clamp(11.0, 22.0);
+    let code_active = ((BODY + 1.5) * view.font_scale).clamp(13.0, 27.0);
+
+    Frame::new()
+        .fill(colors().inset)
+        .corner_radius(11)
+        .stroke(egui::Stroke::new(1.0_f32, colors().border))
+        .inner_margin(Margin::symmetric(14, 12))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            let start = line_idx.saturating_sub(context_before);
+            let end = (line_idx + context_after).min(step.lines.len());
+            for (idx, code_line) in step.lines.iter().enumerate().take(end).skip(start) {
+                if idx < line_idx {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new("✓")
+                                .monospace()
+                                .size(code_small)
+                                .color(colors().success.gamma_multiply(0.85)),
+                        );
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(code_line)
+                                    .monospace()
+                                    .size(code_small)
+                                    .color(colors().muted),
+                            )
+                            .wrap(),
+                        );
+                    });
+                } else if idx == line_idx && !sync.step_complete {
+                    ui.add_space(5.0);
+                    active_line_card(ui, code_line, sync.line_progress, code_active);
+                    ui.add_space(5.0);
+                } else {
+                    let job = if !lang.is_empty() {
+                        let mut job = super::syntax::highlight(
+                            ui.ctx(),
+                            code_line,
+                            lang,
+                            code_small,
+                            code_small * 1.32,
+                        );
+                        for sec in &mut job.sections {
+                            sec.format.color = sec.format.color.gamma_multiply(0.68);
+                        }
+                        job
+                    } else {
+                        egui::text::LayoutJob::simple(
+                            code_line.to_owned(),
+                            egui::FontId::monospace(code_small),
+                            colors().secondary.gamma_multiply(0.75),
+                            f32::INFINITY,
+                        )
+                    };
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(format!("{:>2}", idx + 1))
+                                .monospace()
+                                .size((code_small - 1.5).max(9.5))
+                                .color(colors().disabled),
+                        );
+                        ui.add(egui::Label::new(job).wrap());
+                    });
+                }
+            }
+            if sync.step_complete {
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(if sync.all_complete {
+                        tr("All guided steps completed!")
+                    } else {
+                        tr("Step completed!")
+                    })
+                    .size(BODY * view.font_scale.min(1.3))
+                    .strong()
+                    .color(colors().success),
+                );
+            }
+        });
+
+    if view.show_detail {
+        ui.add_space(8.0);
+        detail_card(ui, step, line_idx, sync.step_complete);
+    }
+
+    ui.add_space(10.0);
+    let next_label = next_step_path.map(|next_path| {
+        if next_path == step.path {
+            tr("Next step →").to_owned()
+        } else {
+            format!("{}: {} →", tr("Next file"), next_path)
+        }
+    });
+    let action = footer(
+        ui,
+        step_idx > 0,
+        !sync.step_complete,
+        next_label.as_deref(),
+        sync.step_complete,
+    );
+    match action {
+        Some(FooterAction::Prev) => actions.prev_now = true,
+        Some(FooterAction::SkipLine) => actions.skip_line_now = true,
+        Some(FooterAction::Finish) => actions.clear_now = true,
+        Some(FooterAction::Next) => actions.advance_now = true,
+        None => {}
     }
 }
 
@@ -1315,32 +1675,94 @@ fn pill(ui: &mut egui::Ui, label: &str, active: bool) -> egui::Response {
     super::theme::pointer(response)
 }
 
-/// The line being typed now, large, with its live match progress underneath.
-fn active_line_card(ui: &mut egui::Ui, code_line: &str, progress: f32) {
+/// The line being typed now, large, with karaoke character-by-character lighting,
+/// a subtle copy button, and its live match progress underneath.
+fn active_line_card(ui: &mut egui::Ui, code_line: &str, progress: f32, font_size: f32) {
+    let clamped = progress.clamp(0.0, 1.0);
+    let chars: Vec<char> = code_line.chars().collect();
+    let trimmed_start = code_line.len() - code_line.trim_start().len();
+    let leading_chars = code_line[..trimmed_start].chars().count();
+    let content_chars = chars.len().saturating_sub(leading_chars);
+    let matched_content = ((content_chars as f32) * clamped).round() as usize;
+    let split_char = (leading_chars + matched_content).min(chars.len());
+    let split_byte = code_line
+        .char_indices()
+        .nth(split_char)
+        .map_or(code_line.len(), |(b, _)| b);
+    let typed_part = &code_line[..split_byte];
+    let rest_part = &code_line[split_byte..];
+
+    let mut job = egui::text::LayoutJob::default();
+    let font = egui::FontId::monospace(font_size);
+    if !typed_part.is_empty() && clamped > 0.01 {
+        job.append(
+            typed_part,
+            0.0,
+            egui::text::TextFormat {
+                font_id: font.clone(),
+                color: colors().success,
+                ..Default::default()
+            },
+        );
+    } else if !typed_part.is_empty() {
+        job.append(
+            typed_part,
+            0.0,
+            egui::text::TextFormat {
+                font_id: font.clone(),
+                color: colors().text,
+                ..Default::default()
+            },
+        );
+    }
+    if !rest_part.is_empty() {
+        job.append(
+            rest_part,
+            0.0,
+            egui::text::TextFormat {
+                font_id: font,
+                color: colors().text,
+                ..Default::default()
+            },
+        );
+    }
+
     Frame::new()
         .fill(colors().accent_bg)
-        .corner_radius(7)
-        .inner_margin(Margin::symmetric(8, 6))
+        .stroke(egui::Stroke::new(
+            1.0_f32,
+            colors().accent.gamma_multiply(0.55),
+        ))
+        .corner_radius(9)
+        .inner_margin(Margin::symmetric(10, 8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.add(
-                egui::Label::new(
-                    RichText::new(code_line)
-                        .monospace()
-                        .size(BODY + 1.0)
-                        .strong()
-                        .color(colors().text),
-                )
-                .wrap(),
-            );
-            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                    if super::theme::icon_button_sized(
+                        ui,
+                        super::theme::Icon::Copy,
+                        "Copy line",
+                        false,
+                        22.0,
+                    )
+                    .clicked()
+                    {
+                        ui.ctx().copy_text(code_line.to_owned());
+                    }
+                    ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
+                        ui.add(egui::Label::new(job).wrap());
+                    });
+                });
+            });
+            ui.add_space(6.0);
             let (bar, _) =
-                ui.allocate_exact_size(egui::vec2(ui.available_width(), 3.0), egui::Sense::hover());
+                ui.allocate_exact_size(egui::vec2(ui.available_width(), 3.5), egui::Sense::hover());
             ui.painter().rect_filled(bar, 2, colors().hover);
-            if progress > 0.01 {
+            if clamped > 0.01 {
                 let filled = egui::Rect::from_min_size(
                     bar.min,
-                    egui::vec2(bar.width() * progress.clamp(0.0, 1.0), bar.height()),
+                    egui::vec2(bar.width() * clamped, bar.height()),
                 );
                 ui.painter().rect_filled(filled, 2, colors().accent);
             }

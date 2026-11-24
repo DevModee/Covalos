@@ -323,13 +323,64 @@ impl Hub {
                     chat.activity.into()
                 },
                 scope: if id == "workspace" {
-                    root.map(|p| p.display().to_string()).unwrap_or_default()
+                    root.map(|p| {
+                        let s = p.display().to_string();
+                        s.strip_prefix(r"\\?\").unwrap_or(&s).to_owned()
+                    })
+                    .unwrap_or_default()
                 } else {
                     "Isolated conversation · workspace tools disabled".into()
                 },
                 file,
                 external: None,
             });
+        }
+        // Surface real active Agent Hub sessions with their connected provider (Claude, Gemini, etc.)
+        if let Some(runtime) = &self.agents.runtime {
+            for s in &runtime.sessions {
+                let has_approval = runtime
+                    .approvals
+                    .iter()
+                    .any(|a| a.session == s.meta.id.as_str());
+                let state = if has_approval {
+                    State::Waiting
+                } else {
+                    match s.meta.status {
+                        crate::agents_runtime::Status::Running => State::Running,
+                        crate::agents_runtime::Status::Failed => State::Failed,
+                        _ => continue,
+                    }
+                };
+                let provider_label = runtime
+                    .profiles
+                    .accounts()
+                    .iter()
+                    .find(|a| a.id == s.meta.account)
+                    .map(|a| a.label.clone())
+                    .unwrap_or_else(|| format!("{:?}", s.meta.provider));
+                let scope = root
+                    .map(|p| {
+                        let s = p.display().to_string();
+                        s.strip_prefix(r"\\?\").unwrap_or(&s).to_owned()
+                    })
+                    .unwrap_or_default();
+                sessions.push(super::companion::Snapshot {
+                    id: s.meta.id.as_str().to_owned(),
+                    label: format!("{} · {}", provider_label, s.meta.title),
+                    state,
+                    operation: s
+                        .meta
+                        .log
+                        .iter()
+                        .rev()
+                        .find(|l| l.kind == "tool" || l.kind == "status")
+                        .map(|l| l.text.clone())
+                        .unwrap_or_default(),
+                    scope,
+                    file: None,
+                    external: None,
+                });
+            }
         }
         sessions
     }

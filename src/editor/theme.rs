@@ -137,28 +137,30 @@ impl Theme {
                 control_border: Color32::from_rgb(80, 74, 98),
                 ..Self::Nocturne.colors()
             },
+            // Warm twilight velvet: softer dark surfaces with a subtle plum-charcoal warmth,
+            // creamy ivory ink, gentle hairline borders and an inviting lilac accent.
             Self::Nocturne => Palette {
-                canvas: Color32::from_rgb(9, 8, 13),
-                surface: Color32::from_rgb(17, 15, 23),
-                inset: Color32::from_rgb(13, 11, 19),
-                elevated: Color32::from_rgb(26, 23, 35),
-                hover: Color32::from_rgb(36, 32, 48),
-                border: Color32::from_rgb(42, 37, 55),
-                control_border: Color32::from_rgb(66, 59, 83),
-                text: Color32::from_rgb(232, 228, 240),
-                secondary: Color32::from_rgb(170, 164, 186),
-                muted: Color32::from_rgb(140, 133, 158),
-                disabled: Color32::from_rgb(98, 92, 112),
-                accent: Color32::from_rgb(201, 164, 255),
-                accent_hover: Color32::from_rgb(222, 197, 255),
-                accent_bg: Color32::from_rgb(40, 31, 60),
-                success: Color32::from_rgb(126, 220, 190),
-                error: Color32::from_rgb(255, 138, 158),
-                warning: Color32::from_rgb(245, 199, 126),
-                syntax_string: Color32::from_rgb(134, 225, 193),
-                syntax_number: Color32::from_rgb(247, 168, 124),
-                caret: Color32::from_rgb(255, 122, 198),
-                selection: Color32::from_rgba_unmultiplied(150, 104, 255, 72),
+                canvas: Color32::from_rgb(18, 16, 24),
+                surface: Color32::from_rgb(25, 22, 33),
+                inset: Color32::from_rgb(15, 13, 21),
+                elevated: Color32::from_rgb(35, 31, 46),
+                hover: Color32::from_rgb(46, 41, 60),
+                border: Color32::from_rgb(56, 50, 72),
+                control_border: Color32::from_rgb(82, 74, 104),
+                text: Color32::from_rgb(241, 236, 245),
+                secondary: Color32::from_rgb(186, 179, 200),
+                muted: Color32::from_rgb(156, 148, 172),
+                disabled: Color32::from_rgb(108, 101, 124),
+                accent: Color32::from_rgb(212, 178, 255),
+                accent_hover: Color32::from_rgb(232, 208, 255),
+                accent_bg: Color32::from_rgb(49, 39, 72),
+                success: Color32::from_rgb(134, 224, 192),
+                error: Color32::from_rgb(255, 146, 164),
+                warning: Color32::from_rgb(247, 204, 134),
+                syntax_string: Color32::from_rgb(142, 228, 196),
+                syntax_number: Color32::from_rgb(249, 178, 136),
+                caret: Color32::from_rgb(255, 142, 208),
+                selection: Color32::from_rgba_unmultiplied(166, 122, 255, 76),
             },
             Self::Dark => Palette {
                 canvas: Color32::from_rgb(16, 19, 24),
@@ -1038,6 +1040,30 @@ pub(super) fn modal_frame() -> Frame {
         .corner_radius(MODAL_RADIUS)
         .stroke(Stroke::new(1.0_f32, colors().control_border))
         .shadow(floating_shadow(active(), 32))
+}
+
+/// Delicate top rim highlight tinted with the theme accent so cards and editor surfaces
+/// feel warm and softly lit rather than flat technical boxes.
+pub(super) fn ambient_top_glow(painter: &egui::Painter, rect: egui::Rect, inset: f32) {
+    if !active().is_dark() || active() == Theme::HighContrast {
+        return;
+    }
+    let width = (rect.width() - inset * 2.0).max(0.0);
+    if width < 24.0 {
+        return;
+    }
+    let y = rect.top() + 1.0;
+    let center = rect.center().x;
+    let half = width * 0.42;
+    painter.line_segment(
+        [egui::pos2(center - half, y), egui::pos2(center + half, y)],
+        Stroke::new(1.0_f32, colors().accent.gamma_multiply(0.22)),
+    );
+    let inner = half * 0.45;
+    painter.line_segment(
+        [egui::pos2(center - inner, y), egui::pos2(center + inner, y)],
+        Stroke::new(1.0_f32, colors().accent_hover.gamma_multiply(0.18)),
+    );
 }
 
 #[cfg(test)]

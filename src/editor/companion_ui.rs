@@ -8,7 +8,7 @@ use eframe::egui::{self, Align, Layout, RichText, ScrollArea, Ui};
 use std::time::{Duration, Instant};
 
 const ISLAND_COMPACT: egui::Vec2 = egui::vec2(232.0, 21.0);
-const ISLAND_WIDTH: f32 = 468.0;
+const ISLAND_WIDTH: f32 = 564.0;
 
 fn provider_of(label: &str) -> Option<Provider> {
     let l = label.to_ascii_lowercase();
@@ -164,83 +164,183 @@ impl Editor {
             .count();
         let mood = self.agent_mood(true);
         let mut close = false;
+        let mut open_palette_now = false;
+        let mut open_hub_now = false;
+
+        // Coucou-style top toolbar inside the Notch: quick mode icons on the left,
+        // Luma effort pills + close on the right.
         ui.horizontal(|ui| {
-            let (art, _) = ui.allocate_exact_size(egui::vec2(64.0, 64.0), egui::Sense::hover());
-            self.identity.portrait(
-                ui,
-                art,
-                &self.preferences.identity,
-                mood,
-                self.preferences.reduce_motion,
-            );
-            ui.add_space(4.0);
-            ui.vertical(|ui| {
-                ui.add_space(6.0);
-                ui.label(
-                    RichText::new(tr("LUMA  ·  LEAD DEVELOPER"))
-                        .size(10.0)
-                        .color(colors().muted),
-                );
-                ui.label(
-                    RichText::new(tr(if waiting > 0 {
-                        "Your decision is needed"
-                    } else if running > 0 {
-                        "Work in motion"
+            ui.spacing_mut().item_spacing.x = 6.0;
+            let pill_icon = |ui: &mut Ui, icon: Icon, tip: &str, active: bool| -> egui::Response {
+                let (r, resp) = ui.allocate_exact_size(egui::vec2(30.0, 26.0), egui::Sense::click());
+                let bg = if active {
+                    colors().elevated
+                } else if resp.hovered() {
+                    colors().hover
+                } else {
+                    egui::Color32::TRANSPARENT
+                };
+                ui.painter().rect_filled(r, 13, bg);
+                draw_icon_sized(
+                    ui.painter(),
+                    r.center(),
+                    icon,
+                    if active || resp.hovered() {
+                        colors().text
                     } else {
-                        "A quiet workspace"
-                    }))
-                    .size(20.0)
-                    .strong(),
+                        colors().muted
+                    },
+                    14.0,
                 );
-                ui.add_space(2.0);
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    chip(
-                        ui,
-                        &trf("{n} running", &[("n", running.to_string())]),
-                        colors().accent,
-                    );
-                    chip(
-                        ui,
-                        &trf("{n} waiting", &[("n", waiting.to_string())]),
-                        colors().warning,
-                    );
-                    chip(
-                        ui,
-                        &trf("{n} done", &[("n", completed.to_string())]),
-                        colors().success,
-                    );
-                });
-            });
-            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                if icon_button(ui, Icon::Close, "Close companion", false).clicked() {
+                pointer(resp).on_hover_text(tr(tip))
+            };
+            let _ = pill_icon(ui, Icon::Sparkles, "Luma", true);
+            if pill_icon(ui, Icon::Search, "Search files and commands (Ctrl+P)", false).clicked() {
+                open_palette_now = true;
+            }
+            if pill_icon(ui, Icon::Hub, "Open Agent Hub", false).clicked() {
+                open_hub_now = true;
+            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if icon_button_sized(ui, Icon::Close, "Close companion", false, 26.0).clicked() {
                     close = true;
                 }
+                ui.add_space(4.0);
+                self.luma_effort_pills(ui);
             });
         });
-        ui.add_space(12.0);
-        self.luma_panel(ui);
-        ui.add_space(12.0);
-        if self.companion.sessions.is_empty() {
+
+        ui.add_space(10.0);
+
+        // Coucou-style split hero: Luma expressive status card on the left,
+        // quick actions / live status chips on the right.
+        let total_w = ui.available_width();
+        let left_w = (total_w * 0.56).max(240.0);
+        let right_w = (total_w - left_w - 10.0).max(160.0);
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 10.0;
             egui::Frame::new()
-                .fill(colors().inset)
-                .corner_radius(12)
-                .inner_margin(egui::Margin::same(16))
+                .fill(colors().surface)
+                .stroke(egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.75)))
+                .corner_radius(14)
+                .inner_margin(egui::Margin::same(12))
                 .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.label(RichText::new(tr("No agents running")).strong());
-                    ui.add_space(4.0);
-                    ui.add(
-                        egui::Label::new(secondary(
-                            "Sessions from Agent Hub and connected tools appear here with live status, approvals and results.",
-                        ))
-                        .wrap(),
-                    );
+                    ui.set_width((left_w - 24.0).max(160.0));
+                    ui.horizontal(|ui| {
+                        let (art, _) =
+                            ui.allocate_exact_size(egui::vec2(62.0, 62.0), egui::Sense::hover());
+                        self.identity.portrait(
+                            ui,
+                            art,
+                            &self.preferences.identity,
+                            mood,
+                            self.preferences.reduce_motion,
+                        );
+                        ui.add_space(6.0);
+                        ui.vertical(|ui| {
+                            ui.add_space(2.0);
+                            ui.label(
+                                RichText::new(tr("LUMA  ·  LEAD DEVELOPER"))
+                                    .size(10.0)
+                                    .color(colors().muted),
+                            );
+                            ui.label(
+                                RichText::new(tr(if waiting > 0 {
+                                    "Waiting for your OK"
+                                } else if running > 0 {
+                                    "Work in motion"
+                                } else {
+                                    "A quiet workspace"
+                                }))
+                                .size(17.0)
+                                .strong(),
+                            );
+                            ui.add_space(4.0);
+                            ui.horizontal_wrapped(|ui| {
+                                ui.spacing_mut().item_spacing = egui::vec2(5.0, 4.0);
+                                chip(
+                                    ui,
+                                    &trf("{n} running", &[("n", running.to_string())]),
+                                    colors().accent,
+                                );
+                                if waiting > 0 {
+                                    chip(
+                                        ui,
+                                        &trf("{n} waiting", &[("n", waiting.to_string())]),
+                                        colors().warning,
+                                    );
+                                }
+                                if completed > 0 {
+                                    chip(
+                                        ui,
+                                        &trf("{n} done", &[("n", completed.to_string())]),
+                                        colors().success,
+                                    );
+                                }
+                            });
+                        });
+                    });
                 });
-            ui.add_space(12.0);
-        }
+
+            egui::Frame::new()
+                .fill(colors().surface)
+                .stroke(egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.75)))
+                .corner_radius(14)
+                .inner_margin(egui::Margin::same(10))
+                .show(ui, |ui| {
+                    ui.set_width((right_w - 20.0).max(120.0));
+                    ui.spacing_mut().item_spacing.y = 6.0;
+                    let pill_row =
+                        |ui: &mut Ui, icon: Icon, color: egui::Color32, label: &str| -> bool {
+                            let (r, resp) = ui.allocate_exact_size(
+                                egui::vec2(ui.available_width(), 28.0),
+                                egui::Sense::click(),
+                            );
+                            ui.painter().rect(
+                                r,
+                                10,
+                                if resp.hovered() {
+                                    colors().hover
+                                } else {
+                                    colors().elevated
+                                },
+                                egui::Stroke::new(1.0_f32, color.gamma_multiply(0.32)),
+                                egui::StrokeKind::Inside,
+                            );
+                            draw_icon_sized(
+                                ui.painter(),
+                                r.left_center() + egui::vec2(14.0, 0.0),
+                                icon,
+                                color,
+                                13.0,
+                            );
+                            ui.painter().text(
+                                r.left_center() + egui::vec2(28.0, 0.0),
+                                egui::Align2::LEFT_CENTER,
+                                tr(label),
+                                egui::FontId::proportional(SMALL),
+                                colors().text,
+                            );
+                            pointer(resp).clicked()
+                        };
+                    if pill_row(ui, Icon::Search, colors().accent, "Search files (Ctrl+P)") {
+                        open_palette_now = true;
+                    }
+                    if pill_row(ui, Icon::Hub, colors().success, "Agents & sessions") {
+                        open_hub_now = true;
+                    }
+                });
+        });
+
+        ui.add_space(10.0);
+        self.luma_panel(ui);
         let mut action = None;
-        for session in &self.companion.sessions {
+        for session in self
+            .companion
+            .sessions
+            .iter()
+            .filter(|s| s.state != State::Idle || s.external.is_some())
+        {
             ui.push_id(&session.id, |ui| {
                 super::super::motion::enter(ui, ui.id().with("card"), super::super::motion::PANEL);
                 let color = state_color(session.state);
@@ -302,10 +402,12 @@ impl Editor {
                     }
                     ui.add_space(6.0);
                     if let Some(file) = &session.file {
-                        ui.add(egui::Label::new(muted(file)).truncate());
+                        let clean = file.strip_prefix(r"\\?\").unwrap_or(file);
+                        ui.add(egui::Label::new(muted(clean)).truncate());
                     }
                     if !session.scope.is_empty() {
-                        ui.add(egui::Label::new(muted(&session.scope)).truncate());
+                        let clean = session.scope.strip_prefix(r"\\?\").unwrap_or(&session.scope);
+                        ui.add(egui::Label::new(muted(clean)).truncate());
                     }
                     if let Some(external) = &session.external {
                         ui.label(muted(format!(
@@ -317,34 +419,34 @@ impl Editor {
                             ui.add_space(8.0);
                             if external.approvable && external.deadline_ms > agent_bridge::now_ms()
                             {
-                                ui.label(
-                                    RichText::new(
-                                        "Review the operation above. Allowing applies once.",
-                                    )
-                                    .size(SMALL)
-                                    .color(colors().warning),
-                                );
-                                ui.add_space(6.0);
                                 ui.horizontal(|ui| {
-                                    if ui
-                                        .add(
-                                            primary(tr("Allow once"))
-                                                .min_size(egui::vec2(96.0, 30.0)),
-                                        )
-                                        .clicked()
-                                    {
-                                        action =
-                                            Some(CompanionAction::Decide(external.clone(), true));
-                                    }
-                                    if ui
-                                        .add(
-                                            egui::Button::new(tr("Deny"))
-                                                .min_size(egui::vec2(72.0, 30.0)),
-                                        )
-                                        .clicked()
-                                    {
+                                    ui.spacing_mut().item_spacing.x = 8.0;
+                                    // Coucou-style red Deny & green Allow pills
+                                    let deny = egui::Button::new(
+                                        RichText::new(format!("×  {}", tr("Deny")))
+                                            .strong()
+                                            .color(egui::Color32::from_rgb(255, 224, 224)),
+                                    )
+                                    .fill(egui::Color32::from_rgb(92, 34, 38))
+                                    .stroke(egui::Stroke::NONE)
+                                    .corner_radius(15)
+                                    .min_size(egui::vec2(104.0, 30.0));
+                                    if pointer(ui.add(deny)).clicked() {
                                         action =
                                             Some(CompanionAction::Decide(external.clone(), false));
+                                    }
+                                    let allow = egui::Button::new(
+                                        RichText::new(format!("✓  {}", tr("Allow once")))
+                                            .strong()
+                                            .color(egui::Color32::from_rgb(10, 32, 16)),
+                                    )
+                                    .fill(egui::Color32::from_rgb(56, 214, 108))
+                                    .stroke(egui::Stroke::NONE)
+                                    .corner_radius(15)
+                                    .min_size(egui::vec2(120.0, 30.0));
+                                    if pointer(ui.add(allow)).clicked() {
+                                        action =
+                                            Some(CompanionAction::Decide(external.clone(), true));
                                     }
                                 });
                             } else {
@@ -402,14 +504,14 @@ impl Editor {
             ui.add_space(8.0);
         }
         if !self.companion.history.is_empty() {
-            ui.add_space(6.0);
+            ui.add_space(4.0);
             ui.label(
                 RichText::new(tr("ACTIVITY"))
                     .size(10.0)
                     .color(colors().muted),
             );
             ui.add_space(4.0);
-            for notice in self.companion.history.iter().take(6) {
+            for notice in self.companion.history.iter().take(4) {
                 ui.horizontal(|ui| {
                     let (dot, _) =
                         ui.allocate_exact_size(egui::vec2(10.0, 16.0), egui::Sense::hover());
@@ -423,12 +525,18 @@ impl Editor {
             }
         }
         ui.add_space(8.0);
-        ui.add(
-            egui::Label::new(muted(
-                "Connected tools report their own activity. Approvals stay in the original tool unless a request appears here.",
-            ))
-            .wrap(),
-        );
+        // Coucou-style sleek order input anchored at the bottom of the Notch
+        self.luma_composer(ui);
+
+        if open_palette_now {
+            self.companion.open = false;
+            self.open_palette(ui.ctx());
+        }
+        if open_hub_now {
+            self.companion.open = false;
+            self.hub_open = true;
+            self.studio_open = false;
+        }
         if close {
             self.companion.open = false;
         }
@@ -519,16 +627,17 @@ impl Editor {
             .unwrap_or(320.0)
             .min(screen.height() - CHROME_HEIGHT - 72.0)
             .max(ISLAND_COMPACT.y);
-        // The compact pill lives inside the status bar, centred, so it never covers tabs
-        // or code. The expanded card rises from it and keeps its bottom edge anchored.
+        // Coucou-style top-center Dynamic Notch: anchored flush at the top edge of the
+        // window and expanding downward smoothly on a spring.
         let width = egui::lerp(ISLAND_COMPACT.x..=full_width, eased);
         let height = egui::lerp(ISLAND_COMPACT.y..=target_h, eased);
-        let rise = (1.0 - presence.max(p)) * 10.0;
-        let compact_bottom = screen.bottom() - (STATUS_HEIGHT - ISLAND_COMPACT.y) / 2.0 + rise;
-        let card_bottom = screen.bottom() - STATUS_HEIGHT - 8.0;
-        let bottom = egui::lerp(compact_bottom..=card_bottom, eased);
+        let top = if eased > 0.05 {
+            screen.top() + (1.0 - eased) * 6.0
+        } else {
+            screen.top() + 6.0 - (1.0 - presence) * 10.0
+        };
         let rect = egui::Rect::from_min_size(
-            egui::pos2(screen.center().x - width / 2.0, bottom - height),
+            egui::pos2(screen.center().x - width / 2.0, top),
             egui::vec2(width, height),
         );
         let area = egui::Area::new(id)
@@ -539,21 +648,33 @@ impl Editor {
                 let (outer, response) = ui.allocate_exact_size(rect.size(), egui::Sense::click());
                 #[cfg(test)]
                 super::super::motion::record(ui, "Companion island", outer);
-                let radius = egui::lerp((ISLAND_COMPACT.y / 2.0)..=16.0, eased) as u8;
+                let bottom_r = egui::lerp((ISLAND_COMPACT.y / 2.0)..=20.0, eased) as u8;
+                let top_r = egui::lerp((ISLAND_COMPACT.y / 2.0)..=0.0, eased) as u8;
+                let corner = egui::CornerRadius {
+                    nw: top_r,
+                    ne: top_r,
+                    sw: bottom_r,
+                    se: bottom_r,
+                };
                 ui.painter().add(
                     egui::Shadow {
-                        offset: [0, 10],
-                        blur: 32,
+                        offset: [0, 14],
+                        blur: 36,
                         spread: 0,
-                        color: egui::Color32::from_black_alpha(110),
+                        color: egui::Color32::from_black_alpha(150),
                     }
-                    .as_shape(outer, radius),
+                    .as_shape(outer, corner),
                 );
+                let notch_fill = if active().is_dark() {
+                    egui::Color32::from_rgb(13, 12, 18)
+                } else {
+                    colors().surface
+                };
                 ui.painter().rect(
                     outer,
-                    radius,
-                    colors().surface,
-                    egui::Stroke::new(1.0_f32, colors().control_border),
+                    corner,
+                    notch_fill,
+                    egui::Stroke::new(1.0_f32, colors().control_border.gamma_multiply(0.85)),
                     egui::StrokeKind::Inside,
                 );
                 if eased < 0.999 {
@@ -594,7 +715,7 @@ impl Editor {
                     if response.hovered() {
                         ui.painter().rect_stroke(
                             outer,
-                            radius,
+                            corner,
                             egui::Stroke::new(1.0_f32, colors().accent.gamma_multiply(0.6)),
                             egui::StrokeKind::Inside,
                         );

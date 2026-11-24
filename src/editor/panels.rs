@@ -270,7 +270,8 @@ impl Editor {
                             command.size(),
                             egui::Button::new("")
                                 .fill(colors().inset)
-                                .stroke(egui::Stroke::new(1.0_f32, colors().border)),
+                                .stroke(egui::Stroke::new(1.0_f32, colors().border))
+                                .corner_radius(15),
                         );
                         let hover = super::motion::state(
                             ui,
@@ -281,7 +282,7 @@ impl Editor {
                         if hover > 0.01 {
                             ui.painter().rect_stroke(
                                 response.rect,
-                                CONTROL_RADIUS,
+                                15,
                                 egui::Stroke::new(
                                     1.0_f32,
                                     colors().control_border.gamma_multiply(hover),
@@ -289,17 +290,36 @@ impl Editor {
                                 egui::StrokeKind::Inside,
                             );
                         }
-                        draw_icon(
-                            ui.painter(),
-                            response.rect.left_center() + egui::vec2(16.0, 0.0),
-                            Icon::Search,
-                            colors().muted,
+                        // Interactive Luma avatar inside the left edge of the top-center pill
+                        let luma_rect = egui::Rect::from_center_size(
+                            response.rect.left_center() + egui::vec2(18.0, 0.0),
+                            egui::vec2(26.0, 26.0),
                         );
+                        let luma_click = ui.interact(
+                            luma_rect,
+                            Id::new("top-bar-luma-trigger"),
+                            egui::Sense::click(),
+                        );
+                        let mood = self.agent_mood(ui.input(|i| i.focused));
+                        self.identity.portrait(
+                            ui,
+                            luma_rect,
+                            &self.preferences.identity,
+                            mood,
+                            self.preferences.reduce_motion,
+                        );
+                        if luma_click
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .on_hover_text(tr("Open Luma Notch"))
+                            .clicked()
+                        {
+                            self.companion.open = !self.companion.open;
+                        }
                         ui.painter().text(
-                            response.rect.left_center() + egui::vec2(32.0, 0.0),
+                            response.rect.left_center() + egui::vec2(38.0, 0.0),
                             egui::Align2::LEFT_CENTER,
-                            if command_width > 320.0 {
-                                tr("Search files and commands")
+                            if command_width > 340.0 {
+                                tr("Ask Luma or search files and commands")
                             } else {
                                 tr("Quick access")
                             },
@@ -307,7 +327,7 @@ impl Editor {
                             colors().secondary,
                         );
                         ui.painter().text(
-                            response.rect.right_center() - egui::vec2(12.0, 0.0),
+                            response.rect.right_center() - egui::vec2(14.0, 0.0),
                             egui::Align2::RIGHT_CENTER,
                             if cfg!(target_os = "macos") {
                                 "⌘ P"
@@ -325,7 +345,7 @@ impl Editor {
                             )
                         });
                         if response.clicked() {
-                            self.open_palette(ctx);
+                            self.companion.open = true;
                         }
                     });
                     // Back and forward sit just left of the command field, like a browser.
@@ -958,7 +978,6 @@ impl Editor {
         let mut detach_active = false;
         let mut open_find = false;
         let mut toggle_terminal = false;
-        let mut toggle_wrap = false;
         let mut reveal = None;
         let doc = &self.documents[index];
         let breadcrumb = self
@@ -971,7 +990,6 @@ impl Editor {
             .map(|part| part.as_os_str().to_string_lossy().into_owned())
             .collect();
         let doc_path = doc.path.clone();
-        let wrap = self.preferences.word_wrap;
         egui::Frame::new()
             .inner_margin(Margin::symmetric(12, 0))
             .show(ui, |ui| {
@@ -1001,13 +1019,6 @@ impl Editor {
                             {
                                 open_find = true;
                             }
-                            if ui
-                                .selectable_label(wrap, RichText::new(tr("Wrap")).size(SMALL))
-                                .on_hover_text(tr("Toggle word wrap (Alt+Z)"))
-                                .clicked()
-                            {
-                                toggle_wrap = true;
-                            }
                             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                                 ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
                                 ui.spacing_mut().item_spacing.x = 0.0;
@@ -1035,9 +1046,6 @@ impl Editor {
                     },
                 );
             });
-        if toggle_wrap {
-            self.preferences.word_wrap = !self.preferences.word_wrap;
-        }
         if let Some(depth) = reveal {
             if depth + 1 >= parts.len() {
                 self.focus_editor = true;
@@ -1093,7 +1101,7 @@ impl Editor {
         let suggestions = self.preferences.inline_suggestions;
         let caret_before = self.cursor;
         let mut laid_ligatures = Vec::new();
-        let scroll = ScrollArea::new([!wrap, true])
+        let mut scroll = ScrollArea::new([!wrap, true])
             .id_salt(id.with("scroll"))
             .auto_shrink([false, false])
             .show(ui, |ui| {
@@ -1153,7 +1161,12 @@ impl Editor {
                         .id(id)
                         .code_editor()
                         .frame(false)
-                        .margin(Margin::symmetric(8, 8))
+                        .margin(Margin {
+                            left: 12,
+                            right: 12,
+                            top: 12,
+                            bottom: 24,
+                        })
                         .desired_rows(18)
                         .desired_width(ui.available_width())
                         .layouter(&mut layouter)
@@ -1229,7 +1242,7 @@ impl Editor {
                     ui.painter().set(decorations, egui::Shape::Vec(shapes));
                 });
             });
-        self.overview_ruler(ui, scroll.inner_rect, index);
+        self.minimap_visor(ui, &mut scroll, index);
         if let Some(action) = context_action {
             self.tree_action(action, ui.ctx());
         }
@@ -1740,18 +1753,30 @@ fn decorate(
     let lines = row_lines(rows);
     let active_line = lines.get(active_row).copied().unwrap_or(0);
     let mut shapes = Vec::new();
-    // Active line band across gutter and text, covering every wrapped row of the line.
+    // Active line band across gutter and text, covering every wrapped row of the line,
+    // with soft rounded edges and a warm accent bookmark pill in the gutter.
     for (i, row) in rows.iter().enumerate().take(last).skip(first) {
         if lines[i] == active_line {
             let y = origin.y + row.pos.y;
             shapes.push(egui::Shape::rect_filled(
                 egui::Rect::from_min_max(
-                    egui::pos2(gutter.left(), y),
-                    egui::pos2(clip.right(), y + row.size.y),
+                    egui::pos2(gutter.left() + 2.0, y),
+                    egui::pos2(clip.right() - 4.0, y + row.size.y),
                 ),
-                0,
+                4,
                 palette.active_line,
             ));
+            let starts_line = i == 0 || lines[i - 1] != active_line;
+            if starts_line {
+                shapes.push(egui::Shape::rect_filled(
+                    egui::Rect::from_min_size(
+                        egui::pos2(gutter.left() + 3.0, y + 3.0),
+                        egui::vec2(2.5, (row.size.y - 6.0).max(4.0)),
+                    ),
+                    2,
+                    colors().accent.gamma_multiply(0.85),
+                ));
+            }
         }
     }
     let view = Viewport {
@@ -2025,6 +2050,273 @@ impl Editor {
         }
     }
 
+    /// Interactive code minimap along the right edge of the editor, with click/drag
+    /// scrubbing, syntax-tinted line silhouettes, and an Alt-peek / hover code loupe.
+    fn minimap_visor<R>(
+        &self,
+        ui: &mut Ui,
+        scroll: &mut egui::scroll_area::ScrollAreaOutput<R>,
+        index: usize,
+    ) {
+        let rect = scroll.inner_rect;
+        let Some(doc) = self.documents.get(index) else {
+            return;
+        };
+        let alt_held = ui.input(|i| i.modifiers.alt && !i.modifiers.ctrl && !i.modifiers.shift);
+        let want_open = (self.preferences.minimap || alt_held)
+            && rect.width() >= 280.0
+            && rect.height() >= 80.0;
+        let reveal = super::motion::spring(
+            ui.ctx(),
+            Id::new(("minimap-reveal", &doc.path)),
+            if want_open { 1.0 } else { 0.0 },
+            super::motion::Spring::SNAPPY,
+        )
+        .clamp(0.0, 1.0);
+        if reveal < 0.04 {
+            self.overview_ruler(ui, rect, index);
+            return;
+        }
+        let lines: Vec<&str> = doc.text.lines().collect();
+        let total_lines = lines.len().max(1);
+        let target_w = if alt_held { 108.0 } else { 88.0 };
+        let width = (target_w * reveal).max(8.0);
+        let max_h = (rect.height() - 16.0).max(40.0);
+        // Natural fixed line pitch (3.2px per line) so short files stay compact at the top-right
+        // instead of stretching 8 lines across the whole screen; long files compress to fit.
+        let natural_pitch = 3.2_f32;
+        let max_inner_h = (max_h - 14.0).max(20.0);
+        let used_h = (total_lines as f32 * natural_pitch).min(max_inner_h);
+        let card_h = (used_h + 14.0).clamp(44.0, max_h);
+        let map_rect = egui::Rect::from_min_max(
+            egui::pos2(rect.right() - width - 10.0, rect.top() + 8.0),
+            egui::pos2(rect.right() - 10.0, rect.top() + 8.0 + card_h),
+        );
+        let interact = ui.interact(
+            map_rect,
+            Id::new(("minimap-interact", &doc.path)),
+            egui::Sense::click_and_drag(),
+        );
+        if alt_held && reveal > 0.3 {
+            ui.painter().add(
+                floating_shadow(active(), 18).as_shape(map_rect, 10),
+            );
+        }
+        let painter = ui.painter().with_clip_rect(map_rect);
+        // Clean frosted card backdrop
+        painter.rect(
+            map_rect,
+            10,
+            colors().elevated.gamma_multiply(0.92 * reveal),
+            egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.75 * reveal)),
+            egui::StrokeKind::Inside,
+        );
+        let inner = egui::Rect::from_min_size(
+            map_rect.min + egui::vec2(7.0, 7.0),
+            egui::vec2((map_rect.width() - 14.0).max(4.0), used_h.max(1.0)),
+        );
+        let max_samples = ((inner.height() / 2.2) as usize).clamp(1, 320);
+        let step = (total_lines as f32 / max_samples as f32).max(1.0);
+        let pitch = (inner.height() / total_lines as f32).min(natural_pitch);
+        let bar_h = (pitch * 0.62).clamp(1.2, 2.1);
+        let samples = (total_lines as f32 / step).ceil() as usize;
+
+        for s in 0..samples {
+            let line_idx = ((s as f32) * step).floor() as usize;
+            let Some(line) = lines.get(line_idx) else {
+                break;
+            };
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let indent = line
+                .chars()
+                .take_while(|c| *c == ' ' || *c == '\t')
+                .map(|c| if c == '\t' { 4 } else { 1 })
+                .sum::<usize>();
+            let base_x = inner.left() + ((indent as f32) * 1.1).min(inner.width() * 0.42);
+            let y = inner.top() + (line_idx as f32) * pitch;
+            let color = minimap_line_color(trimmed).gamma_multiply(0.72 * reveal);
+            // Draw up to 4 miniature token segments per line so it reads like real mini-code
+            let mut cursor_x = base_x;
+            for word in trimmed.split_whitespace().take(4) {
+                let seg_w = (word.chars().count() as f32 * 1.15).clamp(2.5, 22.0);
+                let avail = inner.right() - cursor_x;
+                if avail < 2.0 {
+                    break;
+                }
+                painter.rect_filled(
+                    egui::Rect::from_min_size(
+                        egui::pos2(cursor_x, y),
+                        egui::vec2(seg_w.min(avail), bar_h),
+                    ),
+                    0.8,
+                    color,
+                );
+                cursor_x += seg_w + 2.2;
+            }
+        }
+
+        // Diagnostics & find match ticks on the right edge of the minimap
+        let y_for_line = |line: usize| inner.top() + (line as f32 + 0.5) * pitch;
+        if self.find_open && !self.find_query.is_empty() {
+            let matcher = workspace::literal_query(&self.find_query);
+            let mut line = 0;
+            let mut scanned = 0;
+            for found in matcher.find_iter(&doc.text).take(500) {
+                line += doc.text[scanned..found.start()].matches('\n').count();
+                scanned = found.start();
+                painter.rect_filled(
+                    egui::Rect::from_min_size(
+                        egui::pos2(inner.right() - 5.0, y_for_line(line) - 1.0),
+                        egui::vec2(5.0, 2.0),
+                    ),
+                    1,
+                    colors().accent,
+                );
+            }
+        }
+        let diagnostics = self
+            .lsp
+            .diagnostics
+            .get(&crate::agents_runtime::plain(&doc.path));
+        for diag in diagnostics.into_iter().flatten().take(300) {
+            let color = match diag.severity {
+                1 => colors().error,
+                2 => colors().warning,
+                _ => continue,
+            };
+            painter.rect_filled(
+                egui::Rect::from_min_size(
+                    egui::pos2(inner.right() - 6.0, y_for_line(diag.start.0 as usize) - 1.5),
+                    egui::vec2(6.0, 3.0),
+                ),
+                1,
+                color,
+            );
+        }
+
+        // Active caret indicator line
+        let (caret_line, _) = workspace::cursor_position(&doc.text, self.cursor);
+        let caret_y = y_for_line(caret_line.saturating_sub(1));
+        painter.hline(
+            inner.x_range(),
+            caret_y,
+            egui::Stroke::new(1.5_f32, colors().accent.gamma_multiply(0.9 * reveal)),
+        );
+
+        // Visible viewport slider band
+        let content_h = scroll.content_size.y.max(rect.height()).max(1.0);
+        let view_h = rect.height().min(content_h);
+        let max_offset = (content_h - view_h).max(0.0);
+        let top_frac = (scroll.state.offset.y / content_h).clamp(0.0, 1.0);
+        let frac_h = (view_h / content_h).clamp(0.06, 1.0);
+        let slider = egui::Rect::from_min_max(
+            egui::pos2(map_rect.left() + 2.0, inner.top() + top_frac * inner.height()),
+            egui::pos2(
+                map_rect.right() - 2.0,
+                (inner.top() + (top_frac + frac_h) * inner.height()).min(inner.bottom()),
+            ),
+        );
+        let slider_alpha = if interact.hovered() || interact.dragged() {
+            0.22
+        } else {
+            0.13
+        };
+        painter.rect(
+            slider,
+            4,
+            colors().accent.gamma_multiply(slider_alpha * reveal),
+            egui::Stroke::new(1.0_f32, colors().accent.gamma_multiply(0.38 * reveal)),
+            egui::StrokeKind::Inside,
+        );
+
+        // Click or drag on the minimap to jump/scrub immediately
+        if (interact.clicked() || interact.dragged())
+            && let Some(pos) = interact.interact_pointer_pos()
+            && max_offset > 0.0
+        {
+            let ratio = ((pos.y - inner.top()) / inner.height().max(1.0)).clamp(0.0, 1.0);
+            let target_y = (ratio * content_h - view_h * 0.5).clamp(0.0, max_offset);
+            scroll.state.offset.y = target_y;
+            scroll.state.store(ui.ctx(), scroll.id);
+            ui.ctx().request_repaint();
+        }
+
+        // Hover / Alt-peek floating code preview loupe
+        let hover_pos = interact
+            .hover_pos()
+            .or_else(|| interact.dragged().then(|| interact.interact_pointer_pos()).flatten());
+        if let Some(pos) = hover_pos
+            && reveal > 0.7
+            && !lines.is_empty()
+        {
+            let ratio = ((pos.y - inner.top()) / inner.height().max(1.0)).clamp(0.0, 1.0);
+            let target_line = ((ratio * (total_lines.saturating_sub(1)) as f32).round() as usize)
+                .min(total_lines.saturating_sub(1));
+            let start = target_line.saturating_sub(4);
+            let end = (start + 9).min(total_lines);
+            let snippet = lines[start..end].join("\n");
+            let lang = doc
+                .path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("");
+            let loupe_w = 340.0_f32.min((rect.width() - width - 36.0).max(180.0));
+            let loupe_x = (map_rect.left() - loupe_w - 10.0).max(rect.left() + 12.0);
+            let loupe_y = (pos.y - 84.0).clamp(rect.top() + 8.0, (rect.bottom() - 180.0).max(rect.top() + 8.0));
+            egui::Area::new(Id::new(("minimap-loupe", &doc.path)))
+                .order(egui::Order::Tooltip)
+                .fixed_pos(egui::pos2(loupe_x, loupe_y))
+                .interactable(false)
+                .show(ui.ctx(), |ui| {
+                    egui::Frame::new()
+                        .fill(colors().elevated)
+                        .stroke(egui::Stroke::new(1.0_f32, colors().control_border))
+                        .corner_radius(10)
+                        .shadow(floating_shadow(active(), 22))
+                        .inner_margin(Margin::symmetric(12, 9))
+                        .show(ui, |ui| {
+                            ui.set_width(loupe_w);
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{} {}–{}",
+                                        tr("Lines"),
+                                        start + 1,
+                                        end
+                                    ))
+                                    .size(11.0)
+                                    .strong()
+                                    .color(colors().accent),
+                                );
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    ui.label(
+                                        RichText::new(tr("Click to jump"))
+                                            .size(10.5)
+                                            .color(colors().muted),
+                                    );
+                                });
+                            });
+                            ui.add_space(5.0);
+                            let job = if !lang.is_empty() {
+                                super::syntax::highlight(ui.ctx(), &snippet, lang, 11.5, 15.0)
+                            } else {
+                                LayoutJob::simple(
+                                    snippet,
+                                    egui::FontId::monospace(11.5),
+                                    colors().text,
+                                    loupe_w,
+                                )
+                            };
+                            ui.add(egui::Label::new(job).truncate());
+                        });
+                });
+        }
+        interact.on_hover_cursor(egui::CursorIcon::PointingHand);
+    }
+
     /// Colour marks along the right edge of the editor: diagnostics, find matches and the
     /// caret line, placed by their position in the file.
     fn overview_ruler(&self, ui: &Ui, rect: egui::Rect, index: usize) {
@@ -2084,6 +2376,39 @@ impl Editor {
 
 const TREE_INDENT: f32 = 13.0;
 const TREE_ROW: f32 = 24.0;
+
+/// Fast semantic tint for a minimap silhouette bar so structure is readable at a glance.
+fn minimap_line_color(trimmed: &str) -> egui::Color32 {
+    if trimmed.starts_with("//")
+        || trimmed.starts_with("/*")
+        || trimmed.starts_with('*')
+        || trimmed.starts_with('#') && !trimmed.starts_with("#[") && !trimmed.starts_with("#include")
+    {
+        colors().muted
+    } else if trimmed.starts_with("fn ")
+        || trimmed.starts_with("pub ")
+        || trimmed.starts_with("struct ")
+        || trimmed.starts_with("enum ")
+        || trimmed.starts_with("impl ")
+        || trimmed.starts_with("function ")
+        || trimmed.starts_with("export ")
+        || trimmed.starts_with("class ")
+        || trimmed.starts_with("def ")
+        || trimmed.starts_with("async ")
+    {
+        colors().accent
+    } else if trimmed.starts_with("use ")
+        || trimmed.starts_with("import ")
+        || trimmed.starts_with("from ")
+        || trimmed.starts_with("#include")
+    {
+        colors().syntax_string
+    } else if trimmed.contains('"') || trimmed.contains('\'') {
+        colors().syntax_number
+    } else {
+        colors().secondary
+    }
+}
 
 thread_local! {
     static EXPLORER_ZOOM: std::cell::Cell<f32> = const { std::cell::Cell::new(1.0) };

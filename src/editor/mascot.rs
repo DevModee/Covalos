@@ -269,6 +269,18 @@ pub(super) fn paint(painter: &Painter, rect: Rect, pose: Pose) {
     };
     let eye_w = size * 0.062;
     let eye_h = size * 0.135 * (1.0 + pose.hover * 0.08);
+    // Soft rosy/lilac cheeks for warm, cozy expressions
+    if matches!(
+        pose.mood,
+        Mood::Idle | Mood::Success | Mood::Approval | Mood::Sleeping | Mood::Error
+    ) {
+        let blush_color = Color32::from_rgba_unmultiplied(248, 150, 198, 72);
+        for side in [-1.0_f32, 1.0] {
+            let cheek = face + vec2(side * (spread + eye_w * 0.65), eye_h * 0.48);
+            painter.circle_filled(cheek, eye_w * 0.58, blush_color);
+        }
+    }
+
     for side in [-1.0_f32, 1.0] {
         // The far eye shrinks slightly when Luma turns.
         let depth = 1.0 - (side * yaw).max(0.0) * 0.22;
@@ -285,35 +297,111 @@ pub(super) fn paint(painter: &Painter, rect: Rect, pose: Pose) {
             ),
             Mood::Success => arc(
                 painter,
-                c + vec2(0.0, eye_h * 0.12),
-                ew * 0.95,
+                c + vec2(0.0, eye_h * 0.14),
+                ew * 1.0,
                 PI,
                 TAU,
-                Stroke::new(ew * 0.5, pal.eye),
+                Stroke::new(ew * 0.52, pal.eye),
             ),
             Mood::Error => {
-                let k = ew * 0.75;
-                let s = Stroke::new(ew * 0.42, pal.eye);
-                painter.line_segment([c + vec2(-k, -k), c + vec2(k, k)], s);
-                painter.line_segment([c + vec2(-k, k), c + vec2(k, -k)], s);
+                // Dizzy spiral eyes (Coucou-inspired)
+                let pts: Vec<Pos2> = (0..=18)
+                    .map(|i| {
+                        let frac = i as f32 / 18.0;
+                        let angle = frac * TAU * 1.75 + t * 3.0 * side;
+                        let rad = ew * 0.85 * frac;
+                        c + vec2(angle.cos() * rad, angle.sin() * rad)
+                    })
+                    .collect();
+                painter.add(Shape::line(pts, Stroke::new((ew * 0.28).max(1.0), pal.eye)));
             }
             Mood::Approval => {
-                let r = ew * (0.78 + pulse * 0.08);
+                let r = ew * (0.82 + pulse * 0.08);
                 painter.circle_filled(c, r, pal.eye);
-                painter.circle_filled(c + vec2(-r * 0.3, -r * 0.35), r * 0.28, Color32::WHITE);
+                painter.circle_filled(c + vec2(-r * 0.3, -r * 0.35), r * 0.30, Color32::WHITE);
             }
             _ => {
-                let narrow = if pose.mood == Mood::Coding { 0.55 } else { 1.0 };
+                let narrow = if pose.mood == Mood::Coding { 0.62 } else { 1.0 };
                 let eh = (eye_h * narrow * blink).max(ew * 0.5);
                 let eye = Rect::from_center_size(c, vec2(ew, eh));
                 painter.rect_filled(eye, ew * 0.5, pal.eye);
                 // A small catch light keeps the pills alive.
                 painter.circle_filled(
                     eye.center_top() + vec2(-ew * 0.12, ew * 0.55),
-                    ew * 0.16,
-                    Color32::from_white_alpha(200),
+                    ew * 0.18,
+                    Color32::from_white_alpha(220),
                 );
             }
+        }
+    }
+
+    // Subtle expressive mouth below the eyes
+    let mouth_c = face + vec2(0.0, eye_h * 0.62);
+    match pose.mood {
+        Mood::Idle | Mood::Success => {
+            arc(
+                painter,
+                mouth_c - vec2(0.0, eye_w * 0.22),
+                eye_w * if pose.mood == Mood::Success { 0.72 } else { 0.48 },
+                0.22 * PI,
+                0.78 * PI,
+                Stroke::new((eye_w * 0.26).max(1.0), pal.eye.gamma_multiply(0.85)),
+            );
+        }
+        Mood::Approval => {
+            painter.circle_stroke(
+                mouth_c,
+                eye_w * 0.28,
+                Stroke::new((eye_w * 0.22).max(1.0), pal.eye.gamma_multiply(0.85)),
+            );
+        }
+        Mood::Coding | Mood::Searching => {
+            painter.line_segment(
+                [mouth_c + vec2(-eye_w * 0.3, 0.0), mouth_c + vec2(eye_w * 0.3, 0.0)],
+                Stroke::new((eye_w * 0.22).max(1.0), pal.eye.gamma_multiply(0.75)),
+            );
+        }
+        _ => {}
+    }
+
+    // Floating mood badge in the top-left corner of Luma (Coucou-style thinking dots / amber OK dot)
+    if size >= 24.0 {
+        let badge_pos = center + vec2(-w * 0.78, -h * 0.72);
+        match pose.mood {
+            Mood::Thinking | Mood::Coding | Mood::Searching => {
+                let badge_r = (size * 0.13).clamp(4.0, 9.5);
+                painter.circle_filled(badge_pos, badge_r, pal.signal);
+                for i in 0..3 {
+                    let phase = ((t * 5.0 - i as f32 * 0.7).sin() * 0.5 + 0.5).clamp(0.25, 1.0);
+                    let dx = (i as f32 - 1.0) * badge_r * 0.48;
+                    painter.circle_filled(
+                        badge_pos + vec2(dx, 0.0),
+                        (badge_r * 0.18).max(1.0),
+                        Color32::from_white_alpha((phase * 255.0) as u8),
+                    );
+                }
+            }
+            Mood::Approval => {
+                let badge_r = (size * 0.11).clamp(3.5, 8.0) * (0.92 + pulse * 0.14);
+                painter.circle_filled(badge_pos, badge_r, pal.signal);
+                painter.circle_stroke(
+                    badge_pos,
+                    badge_r,
+                    Stroke::new(1.0_f32, pal.edge),
+                );
+            }
+            Mood::Sleeping => {
+                let drift = ((t * 0.9).fract()) * size * 0.12;
+                let alpha = (1.0 - (t * 0.9).fract()) * 0.85;
+                painter.text(
+                    badge_pos + vec2(w * 1.45, -drift),
+                    egui::Align2::CENTER_CENTER,
+                    "z",
+                    egui::FontId::proportional((size * 0.18).clamp(8.0, 14.0)),
+                    pal.eye.gamma_multiply(alpha),
+                );
+            }
+            _ => {}
         }
     }
 

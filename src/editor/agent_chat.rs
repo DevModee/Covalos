@@ -1814,17 +1814,127 @@ fn timeline(ui: &mut Ui, session: &LiveSession, actions: &mut Vec<Action>) {
             } else {
                 tr("Preparing session")
             };
-            let (path, _) = agent_message(
-                ui,
-                &meta.provider,
-                &session.streaming,
-                Some((phase, elapsed)),
-                Some((&meta.workdir, 0)),
-            );
-            if let Some(path) = path {
-                actions.push(Action::Open(path));
+            // Collect steps since the last user prompt for the Antigravity-style checklist card
+            let turn_start = last_user.map_or(0, |i| i + 1);
+            let mut done_steps: Vec<String> = meta.log[turn_start..]
+                .iter()
+                .filter(|l| l.kind == "tool" || l.kind == "status")
+                .map(|l| l.text.trim().chars().take(72).collect::<String>())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if done_steps.len() > 6 {
+                let keep = done_steps.len() - 6;
+                done_steps.drain(..keep);
+            }
+            antigravity_progress_card(ui, &done_steps, phase, elapsed);
+            if !session.streaming.is_empty() {
+                let (path, _) = agent_message(
+                    ui,
+                    &meta.provider,
+                    &session.streaming,
+                    Some((phase, elapsed)),
+                    Some((&meta.workdir, 0)),
+                );
+                if let Some(path) = path {
+                    actions.push(Action::Open(path));
+                }
             }
         }
+    }
+}
+
+/// Antigravity-style live processing card: rounded hairline container with circular
+/// checkmarks for completed steps, a 2x2 pulsing four-dot grid for the active step in
+/// bold, and a quiet focus + elapsed timer footer underneath.
+fn antigravity_progress_card(ui: &mut Ui, done_steps: &[String], active_step: &str, elapsed: u64) {
+    ui.add_space(6.0);
+    let live = ui.style().animation_time > 0.0;
+    let t = ui.input(|i| i.time) as f32;
+    Frame::new()
+        .fill(colors().inset)
+        .stroke(egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.85)))
+        .corner_radius(12)
+        .inner_margin(Margin::symmetric(14, 12))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = 7.0;
+            for step in done_steps {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 10.0;
+                    let (icon_r, _) =
+                        ui.allocate_exact_size(egui::vec2(15.0, 15.0), egui::Sense::hover());
+                    let c = icon_r.center();
+                    let stroke_col = colors().muted.gamma_multiply(0.85);
+                    ui.painter()
+                        .circle_stroke(c, 6.2, egui::Stroke::new(1.1_f32, stroke_col));
+                    ui.painter().line_segment(
+                        [c + egui::vec2(-2.6, 0.2), c + egui::vec2(-0.6, 2.2)],
+                        egui::Stroke::new(1.2_f32, stroke_col),
+                    );
+                    ui.painter().line_segment(
+                        [c + egui::vec2(-0.6, 2.2), c + egui::vec2(3.0, -2.0)],
+                        egui::Stroke::new(1.2_f32, stroke_col),
+                    );
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(step).size(BODY).color(colors().muted),
+                        )
+                        .truncate(),
+                    );
+                });
+            }
+            // Active step row with animated 2x2 four-dot pulse + bold label
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 10.0;
+                let (icon_r, _) =
+                    ui.allocate_exact_size(egui::vec2(15.0, 15.0), egui::Sense::hover());
+                let c = icon_r.center();
+                let offsets = [
+                    egui::vec2(-2.6, -2.6),
+                    egui::vec2(2.6, -2.6),
+                    egui::vec2(2.6, 2.6),
+                    egui::vec2(-2.6, 2.6),
+                ];
+                for (i, off) in offsets.iter().enumerate() {
+                    let phase = if live {
+                        ((t * 4.2 - i as f32 * 0.9).sin() * 0.5 + 0.5).clamp(0.28, 1.0)
+                    } else {
+                        0.75
+                    };
+                    ui.painter().circle_filled(
+                        c + *off,
+                        1.7,
+                        colors().text.gamma_multiply(phase),
+                    );
+                }
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(active_step)
+                            .size(BODY)
+                            .strong()
+                            .color(colors().text),
+                    )
+                    .truncate(),
+                );
+            });
+        });
+    ui.add_space(5.0);
+    let time_str = if elapsed >= 60 {
+        format!("{}m {:02}s", elapsed / 60, elapsed % 60)
+    } else {
+        format!("{elapsed}s")
+    };
+    ui.horizontal(|ui| {
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new(format!("{active_step}   {time_str}  ›"))
+                .size(SMALL)
+                .color(colors().muted),
+        );
+    });
+    if live {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(50));
     }
 }
 

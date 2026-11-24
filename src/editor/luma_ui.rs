@@ -416,33 +416,48 @@ impl Editor {
         }
     }
 
-    /// Luma's chat: order box, effort ceiling, team status and log.
+    /// Luma's chat log, confirmations and team status (rendered inside the Coucou Notch).
     pub(super) fn luma_panel(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
         self.ensure_runtime(&ctx);
-        self.luma_effort_row(ui);
-        ui.add_space(6.0);
-        self.luma_input(ui);
-        ui.add_space(8.0);
         self.luma_held(ui);
         self.luma_confirmations(ui);
         self.luma_team(ui);
         self.luma_log(ui);
     }
 
-    fn luma_effort_row(&mut self, ui: &mut Ui) {
+    /// Compact effort pill bar for the Notch header.
+    pub(super) fn luma_effort_pills(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
-            ui.label(muted("Max effort"));
+            ui.spacing_mut().item_spacing.x = 3.0;
             for effort in Effort::ALL {
                 let selected = self.preferences.luma_effort == effort;
-                let response = ui
-                    .selectable_label(selected, effort_name(effort))
-                    .on_hover_text(tr(
-                        "Luma never uses more effort than this. Medium suits most work.",
-                    ));
-                if response.hovered() {
-                    pointer_cursor(ui.ctx());
-                }
+                let btn = egui::Button::new(
+                    RichText::new(effort_name(effort))
+                        .size(11.0)
+                        .color(if selected {
+                            colors().text
+                        } else {
+                            colors().muted
+                        }),
+                )
+                .fill(if selected {
+                    colors().elevated
+                } else {
+                    egui::Color32::TRANSPARENT
+                })
+                .stroke(egui::Stroke::new(
+                    1.0_f32,
+                    if selected {
+                        colors().border
+                    } else {
+                        egui::Color32::TRANSPARENT
+                    },
+                ))
+                .corner_radius(8);
+                let response = pointer(ui.add(btn)).on_hover_text(tr(
+                    "Luma never uses more effort than this. Medium suits most work.",
+                ));
                 if response.clicked() {
                     self.preferences.luma_effort = effort;
                 }
@@ -450,30 +465,66 @@ impl Editor {
         });
     }
 
-    fn luma_input(&mut self, ui: &mut Ui) {
+    /// Coucou-style sleek dark bottom composer bar for giving orders to Luma.
+    pub(super) fn luma_composer(&mut self, ui: &mut Ui) {
+        let ctx = ui.ctx().clone();
+        self.ensure_runtime(&ctx);
         let chat = &mut self.hub.agents.luma;
+        let id = ui.make_persistent_id("luma-notch-composer");
+        let focused = ui.memory(|m| m.has_focus(id));
+        let focus_t =
+            super::motion::state(ui, id.with("focus"), focused, super::motion::CONTROL);
+        let border = super::motion::blend(colors().border, colors().accent, focus_t);
         let mut send = None;
-        ui.horizontal(|ui| {
-            let width = (ui.available_width() - 72.0).max(80.0);
-            let response = ui.add(
-                TextEdit::singleline(&mut chat.draft)
-                    .hint_text(tr("Tell Luma what to build or fix"))
-                    .desired_width(width),
-            );
-            if chat.focus {
-                response.request_focus();
-                chat.focus = false;
-            }
-            let entered = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            let ready = !chat.draft.trim().is_empty();
-            let button = ui.add_enabled(ready, primary("Send"));
-            if button.hovered() {
-                pointer_cursor(ui.ctx());
-            }
-            if ready && (entered || button.clicked()) {
-                send = Some(std::mem::take(&mut chat.draft));
-            }
-        });
+        Frame::new()
+            .fill(colors().elevated)
+            .stroke(egui::Stroke::new(1.0_f32, border))
+            .corner_radius(14)
+            .inner_margin(Margin {
+                left: 14,
+                right: 6,
+                top: 6,
+                bottom: 6,
+            })
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    let ready = !chat.draft.trim().is_empty();
+                    let field_w = (ui.available_width() - 36.0).max(80.0);
+                    let response = ui.add(
+                        TextEdit::singleline(&mut chat.draft)
+                            .id(id)
+                            .frame(false)
+                            .hint_text(tr("Tell Luma what to build or fix"))
+                            .desired_width(field_w),
+                    );
+                    if chat.focus {
+                        response.request_focus();
+                        chat.focus = false;
+                    }
+                    let entered =
+                        response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    let send_btn = egui::Button::new(
+                        RichText::new("↑").size(14.0).strong().color(if ready {
+                            colors().canvas
+                        } else {
+                            colors().muted
+                        }),
+                    )
+                    .fill(if ready {
+                        colors().text
+                    } else {
+                        colors().hover
+                    })
+                    .stroke(egui::Stroke::NONE)
+                    .corner_radius(14)
+                    .min_size(egui::vec2(26.0, 26.0));
+                    let button = pointer(ui.add_enabled(ready, send_btn));
+                    if ready && (entered || button.clicked()) {
+                        send = Some(std::mem::take(&mut chat.draft));
+                    }
+                });
+            });
         if let Some(order) = send {
             self.luma_order(&order);
         }
@@ -570,39 +621,138 @@ impl Editor {
         ui.add_space(6.0);
     }
 
-    /// One row per active agent: who it is, its state, what it last did.
+    /// Antigravity-style checklist card for Luma's active plan tasks and running sessions.
     fn luma_team(&mut self, ui: &mut Ui) {
         let Some(runtime) = self.hub.agents.runtime.as_ref() else {
             return;
         };
-        let mut rows: Vec<(String, egui::Color32, String)> = Vec::new();
+        enum StepVisual {
+            Done,
+            Active,
+            Pending,
+            Failed,
+        }
+        let mut rows: Vec<(StepVisual, String, String)> = Vec::new();
         if let Some(run) = &runtime.plan
             && !run.engine.plan().state.is_settled()
         {
             for task in run.engine.plan().tasks() {
-                rows.push((
-                    task.spec.title.clone(),
-                    super::agent_hub::task_color(&task.status),
-                    task_brief(&task.status),
-                ));
+                let kind = match &task.status {
+                    TaskStatus::Succeeded => StepVisual::Done,
+                    TaskStatus::Running | TaskStatus::Retrying { .. } => StepVisual::Active,
+                    TaskStatus::Failed { .. } => StepVisual::Failed,
+                    _ => StepVisual::Pending,
+                };
+                rows.push((kind, task.spec.title.clone(), task_brief(&task.status)));
             }
         }
         for session in runtime.sessions.iter().filter(|s| s.running()) {
             let doing = last_log(session, &["agent", "tool", "started"])
                 .map_or_else(|| tr("Starting…").to_owned(), |t| luma::brief(&t, 90));
-            rows.push((session.meta.title.clone(), colors().accent, doing));
+            rows.push((StepVisual::Active, session.meta.title.clone(), doing));
         }
         if rows.is_empty() {
             return;
         }
-        section_label(ui, "TEAM", colors().muted);
-        for (name, color, doing) in rows {
-            ui.horizontal(|ui| {
-                let (dot, _) = ui.allocate_exact_size(egui::vec2(10.0, 16.0), egui::Sense::hover());
-                ui.painter().circle_filled(dot.center(), 3.0, color);
-                ui.add(egui::Label::new(RichText::new(name).strong()).truncate());
+        let live = ui.style().animation_time > 0.0;
+        let t = ui.input(|i| i.time) as f32;
+        let mut has_active = false;
+        Frame::new()
+            .fill(colors().surface)
+            .stroke(egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.85)))
+            .corner_radius(12)
+            .inner_margin(Margin::symmetric(12, 10))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.spacing_mut().item_spacing.y = 6.0;
+                for (kind, name, doing) in rows {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 9.0;
+                        let (icon_r, _) =
+                            ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+                        let c = icon_r.center();
+                        match kind {
+                            StepVisual::Done => {
+                                let col = colors().muted.gamma_multiply(0.85);
+                                ui.painter()
+                                    .circle_stroke(c, 5.8, egui::Stroke::new(1.1_f32, col));
+                                ui.painter().line_segment(
+                                    [c + egui::vec2(-2.4, 0.2), c + egui::vec2(-0.5, 2.0)],
+                                    egui::Stroke::new(1.2_f32, col),
+                                );
+                                ui.painter().line_segment(
+                                    [c + egui::vec2(-0.5, 2.0), c + egui::vec2(2.8, -1.8)],
+                                    egui::Stroke::new(1.2_f32, col),
+                                );
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(name).size(SMALL).color(colors().muted),
+                                    )
+                                    .truncate(),
+                                );
+                            }
+                            StepVisual::Active => {
+                                has_active = true;
+                                let offsets = [
+                                    egui::vec2(-2.4, -2.4),
+                                    egui::vec2(2.4, -2.4),
+                                    egui::vec2(2.4, 2.4),
+                                    egui::vec2(-2.4, 2.4),
+                                ];
+                                for (i, off) in offsets.iter().enumerate() {
+                                    let phase = if live {
+                                        ((t * 4.2 - i as f32 * 0.9).sin() * 0.5 + 0.5)
+                                            .clamp(0.28, 1.0)
+                                    } else {
+                                        0.75
+                                    };
+                                    ui.painter().circle_filled(
+                                        c + *off,
+                                        1.5,
+                                        colors().text.gamma_multiply(phase),
+                                    );
+                                }
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(name)
+                                            .size(SMALL)
+                                            .strong()
+                                            .color(colors().text),
+                                    )
+                                    .truncate(),
+                                )
+                                .on_hover_text(doing);
+                            }
+                            StepVisual::Failed => {
+                                ui.painter().circle_filled(c, 3.5, colors().error);
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(name).size(SMALL).color(colors().error),
+                                    )
+                                    .truncate(),
+                                )
+                                .on_hover_text(doing);
+                            }
+                            StepVisual::Pending => {
+                                ui.painter().circle_stroke(
+                                    c,
+                                    5.2,
+                                    egui::Stroke::new(1.0_f32, colors().disabled),
+                                );
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(name).size(SMALL).color(colors().secondary),
+                                    )
+                                    .truncate(),
+                                );
+                            }
+                        }
+                    });
+                }
             });
-            ui.add(egui::Label::new(muted(doing)).wrap());
+        if has_active && live {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(50));
         }
         ui.add_space(8.0);
     }

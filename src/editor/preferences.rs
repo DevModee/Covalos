@@ -42,6 +42,8 @@ pub(super) struct Preferences {
     pub(super) font_ligatures: bool,
     /// Wraps long lines at the editor width instead of scrolling horizontally.
     pub(super) word_wrap: bool,
+    /// Interactive code minimap along the right edge of the editor (hold Alt to peek when off).
+    pub(super) minimap: bool,
     /// Dimmed inline completion after the caret, accepted with Tab.
     pub(super) inline_suggestions: bool,
     pub(super) compact: bool,
@@ -103,6 +105,7 @@ impl Default for Preferences {
             hack_editor: false,
             font_ligatures: true,
             word_wrap: false,
+            minimap: false,
             inline_suggestions: true,
             compact: false,
             reduce_motion: false,

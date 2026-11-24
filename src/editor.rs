@@ -164,6 +164,7 @@ pub struct Editor {
     cloud: cloud_ui::Cloud,
     guided: guided::GuidedController,
     session_started: u64,
+    splash_started: Option<std::time::Instant>,
     explorer_rect: Option<egui::Rect>,
     disk_checked: Option<std::time::Instant>,
     /// Open files changed on disk while they had unsaved edits.
@@ -266,6 +267,11 @@ impl Editor {
             session_started: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs()),
+            splash_started: if cfg!(test) {
+                None
+            } else {
+                Some(std::time::Instant::now())
+            },
             explorer_rect: None,
             disk_checked: None,
             disk_conflicts: Vec::new(),
@@ -992,8 +998,108 @@ impl Editor {
         self.conversation_close_modal(ctx);
         self.file_dialogs(ctx);
         self.companion_surface(ctx);
+        self.startup_splash(ctx);
         self.end_navigation(ctx);
         theme::pointer_cursor(ctx);
+    }
+
+    /// Brief atmospheric ASCII 'C' loading splash on launch, fading smoothly into the editor.
+    fn startup_splash(&mut self, ctx: &egui::Context) {
+        let Some(started) = self.splash_started else {
+            return;
+        };
+        if self.preferences.reduce_motion
+            || ctx.input(|i| i.pointer.any_pressed() || !i.keys_down.is_empty())
+        {
+            self.splash_started = None;
+            return;
+        }
+        const HOLD: f32 = 0.78;
+        const FADE: f32 = 0.37;
+        const TOTAL: f32 = HOLD + FADE;
+        let elapsed = started.elapsed().as_secs_f32();
+        if elapsed >= TOTAL {
+            self.splash_started = None;
+            return;
+        }
+        let fade = if elapsed <= HOLD {
+            1.0
+        } else {
+            1.0 - egui::emath::easing::cubic_out(((elapsed - HOLD) / FADE).clamp(0.0, 1.0))
+        };
+        let load_t = (elapsed / HOLD).clamp(0.0, 1.0);
+        let screen = ctx.content_rect();
+        egui::Area::new(egui::Id::new("covalos-startup-splash"))
+            .order(egui::Order::Tooltip)
+            .fixed_pos(screen.min)
+            .interactable(false)
+            .show(ctx, |ui| {
+                let painter = ui.painter();
+                painter.rect_filled(
+                    screen,
+                    0,
+                    egui::Color32::from_rgba_unmultiplied(8, 7, 12, (255.0 * fade) as u8),
+                );
+                const LOGO: &[&str] = &[
+                    "      ░▒▓███████▓▒░      ",
+                    "    ░▓█████████████▓░    ",
+                    "   ▓█████▓▒░░░▒▓█████░   ",
+                    "  ▓████▒         ░▒▓▒░   ",
+                    "  ████▓                  ",
+                    "  ████▓                  ",
+                    "  ▓████▒         ░▒▓▒░   ",
+                    "   ▓█████▓▒░░░▒▓█████░   ",
+                    "    ░▓█████████████▓░    ",
+                    "      ░▒▓███████▓▒░      ",
+                ];
+                let accent = theme::colors().accent;
+                let text_col = theme::colors().text;
+                let line_h = 16.0_f32;
+                let total_h = LOGO.len() as f32 * line_h;
+                let top_y = screen.center().y - total_h * 0.5 - 18.0;
+                for (idx, row) in LOGO.iter().enumerate() {
+                    let row_t = ((load_t * (LOGO.len() as f32 + 2.5)) - idx as f32).clamp(0.0, 1.0);
+                    if row_t <= 0.01 {
+                        continue;
+                    }
+                    let shimmer = (1.0 - (idx as f32 / LOGO.len() as f32 - load_t).abs() * 3.0)
+                        .clamp(0.0, 1.0);
+                    let col = motion::blend(accent.gamma_multiply(0.75), text_col, shimmer * 0.85)
+                        .gamma_multiply(row_t * fade);
+                    painter.text(
+                        egui::pos2(screen.center().x, top_y + idx as f32 * line_h),
+                        egui::Align2::CENTER_CENTER,
+                        *row,
+                        egui::FontId::monospace(14.0),
+                        col,
+                    );
+                }
+                // Thin progress bar underneath
+                let bar_w = 132.0;
+                let bar_rect = egui::Rect::from_center_size(
+                    egui::pos2(screen.center().x, top_y + total_h + 18.0),
+                    egui::vec2(bar_w, 2.5),
+                );
+                painter.rect_filled(
+                    bar_rect,
+                    2,
+                    egui::Color32::from_white_alpha((28.0 * fade) as u8),
+                );
+                let fill_w = bar_w * egui::emath::easing::cubic_in_out(load_t);
+                painter.rect_filled(
+                    egui::Rect::from_min_size(bar_rect.min, egui::vec2(fill_w, 2.5)),
+                    2,
+                    accent.gamma_multiply(fade),
+                );
+                painter.text(
+                    egui::pos2(screen.center().x, bar_rect.bottom() + 16.0),
+                    egui::Align2::CENTER_CENTER,
+                    "C O V A L O S",
+                    egui::FontId::proportional(11.5),
+                    theme::colors().muted.gamma_multiply(fade * 0.9),
+                );
+            });
+        ctx.request_repaint_after(std::time::Duration::from_millis(16));
     }
 }
 impl Editor {
