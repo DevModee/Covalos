@@ -300,10 +300,7 @@ impl Editor {
             self.preferences.theme,
         );
         self.syntax = egui_extras::syntax_highlighting::CodeTheme::dark(self.preferences.font_size);
-        self.cloud.status = Some((
-            false,
-            tr("Settings downloaded from the cloud.").to_owned(),
-        ));
+        self.cloud.status = Some((false, tr("Settings downloaded from the cloud.").to_owned()));
     }
 
     fn cloud_upload(&mut self, ctx: &egui::Context) {
@@ -612,10 +609,8 @@ impl Editor {
                 ctx.open_url(egui::OpenUrl::new_tab(&sign_in.url));
                 self.cloud.endpoint = Some(endpoint);
                 self.cloud.sign_in = Some(sign_in);
-                self.cloud.status = Some((
-                    false,
-                    tr("Finish signing in in your browser.").to_owned(),
-                ));
+                self.cloud.status =
+                    Some((false, tr("Finish signing in in your browser.").to_owned()));
             }
             Err(error) => self.cloud.status = Some((true, error)),
         }

@@ -189,7 +189,12 @@ impl Link {
         self.serial.to_string()
     }
 
-    fn broadcast(&mut self, socket: &mut Socket, event: &str, payload: Value) -> Result<(), String> {
+    fn broadcast(
+        &mut self,
+        socket: &mut Socket,
+        event: &str,
+        payload: Value,
+    ) -> Result<(), String> {
         let reference = self.next_ref();
         send(
             socket,
@@ -522,7 +527,8 @@ mod tests {
 
     #[test]
     fn commands_are_shape_checked_before_the_editor_sees_them() {
-        let luma = json!({"id": "c1", "sent_ms": NOW, "kind": "luma_order", "text": " Fix the build "});
+        let luma =
+            json!({"id": "c1", "sent_ms": NOW, "kind": "luma_order", "text": " Fix the build "});
         assert_eq!(
             parse_command(&luma, NOW).unwrap().command,
             Command::LumaOrder {
@@ -540,8 +546,7 @@ mod tests {
         );
         let stale = json!({"id": "c3", "sent_ms": NOW - 10 * 60_000, "kind": "refresh"});
         assert_eq!(parse_command(&stale, NOW).unwrap_err().0, "c3");
-        let traversal =
-            json!({"id": "c4", "sent_ms": NOW, "kind": "approval", "ticket": "../x", "allow": true});
+        let traversal = json!({"id": "c4", "sent_ms": NOW, "kind": "approval", "ticket": "../x", "allow": true});
         assert!(parse_command(&traversal, NOW).is_err());
         let huge = json!({"id": "c5", "sent_ms": NOW, "kind": "luma_order", "text": "x".repeat(MAX_TEXT + 1)});
         assert!(parse_command(&huge, NOW).is_err());

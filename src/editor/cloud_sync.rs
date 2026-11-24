@@ -177,11 +177,7 @@ impl SyncedConfig {
         prefs.inline_suggestions = self.inline_suggestions;
         prefs.compact = self.compact;
         prefs.ui_scale = clamp(self.ui_scale, 1.0, super::preferences::UI_SCALE);
-        prefs.explorer_zoom = clamp(
-            self.explorer_zoom,
-            1.0,
-            super::preferences::EXPLORER_ZOOM,
-        );
+        prefs.explorer_zoom = clamp(self.explorer_zoom, 1.0, super::preferences::EXPLORER_ZOOM);
         prefs.motion = clamp(self.motion, 1.0, (0.0, 1.0));
         prefs.brightness = clamp(self.brightness, 0.35, (0.0, 1.0));
         prefs.reduce_motion = self.reduce_motion;
@@ -280,7 +276,13 @@ mod tests {
         let text = serde_json::to_string(&config).unwrap();
         assert!(!text.contains("secret-project"));
         assert!(text.contains("session-1") && text.contains("Prefer small commits."));
-        for field in ["last_workspace", "recent", "notes", "tasks", "agent_account"] {
+        for field in [
+            "last_workspace",
+            "recent",
+            "notes",
+            "tasks",
+            "agent_account",
+        ] {
             assert!(!text.contains(&format!("\"{field}\"")), "{field} leaked");
         }
     }

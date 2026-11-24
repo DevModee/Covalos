@@ -140,7 +140,10 @@ fn parse_session(body: &str) -> Result<Session, String> {
     let access = text(&value["access_token"]).ok_or("The server sent no access token.")?;
     let refresh = text(&value["refresh_token"]).ok_or("The server sent no refresh token.")?;
     let user_id = text(&value["user"]["id"]).ok_or("The server sent no user id.")?;
-    if !user_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+    if !user_id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
         return Err("The server sent an invalid user id.".into());
     }
     let expires_in = value["expires_in"]
