@@ -77,6 +77,18 @@ pub(super) fn trf(template: &'static str, values: &[(&str, String)]) -> String {
 }
 
 const SPANISH: &[(&str, &str)] = &[
+    ("Save your changes?", "¿Guardar los cambios?"),
+    ("This file has unsaved changes.", "Este archivo tiene cambios sin guardar."),
+    (
+        "One or more files have unsaved changes.",
+        "Uno o más archivos tienen cambios sin guardar.",
+    ),
+    (
+        "Choose how the agent should work in this project.",
+        "Elegí cómo querés que trabaje el agente en este proyecto.",
+    ),
+    ("Commands", "Comandos"),
+    ("Ask in this workspace", "Preguntar en este proyecto"),
     ("Open Luma Notch", "Abrir Luma"),
     (
         "Ask Luma or search files and commands",

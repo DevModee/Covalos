@@ -607,6 +607,7 @@ impl Editor {
             return;
         }
         let focus = std::mem::take(&mut terms.focus_input);
+        ui.add_space(4.0);
         let rect = ui.available_rect_before_wrap();
         let active = terms.active;
         match terms.second {

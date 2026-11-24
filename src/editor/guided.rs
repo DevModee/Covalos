@@ -247,6 +247,8 @@ pub(super) struct GuidedController {
     pub(super) sync: SyncSnapshot,
     /// Transient notice shown inside the guide window.
     pub(super) hint: Option<String>,
+    /// Last time workspace files on disk were reconciled against the guided plan.
+    disk_synced_at: Option<std::time::Instant>,
 }
 
 impl GuidedController {
@@ -327,6 +329,14 @@ impl GuidedController {
         mode: MatchMode,
         workspace: Option<&Path>,
     ) {
+        if let Some(root) = workspace
+            && self
+                .disk_synced_at
+                .is_none_or(|t| t.elapsed() >= std::time::Duration::from_millis(1500))
+        {
+            self.disk_synced_at = Some(std::time::Instant::now());
+            self.reconcile_with_disk(root, mode);
+        }
         let Some(session) = self.session.as_mut() else {
             self.sync = SyncSnapshot::default();
             return;
@@ -335,6 +345,64 @@ impl GuidedController {
         self.sync = session.sync_with_buffer(active_rel_path, buffer_text, mode);
         if (session.step_index, session.line_index) != prev {
             self.save_to_disk(workspace);
+        }
+    }
+
+    /// Reconciles every step in the plan against the real files on disk so work completed
+    /// externally (e.g. by Claude or manual edits) automatically marks steps done and
+    /// advances the active step instead of getting stuck on stale lines.
+    pub(super) fn reconcile_with_disk(&mut self, workspace: &Path, mode: MatchMode) {
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        let mut changed = false;
+        for (idx, step) in session.plan.steps.iter().enumerate() {
+            if session.completed_steps.get(idx).copied().unwrap_or(false) {
+                continue;
+            }
+            let full = workspace.join(&step.path);
+            let Ok(contents) = std::fs::read_to_string(&full) else {
+                continue;
+            };
+            let disk_lines: Vec<&str> = contents.lines().collect();
+            let non_blank: Vec<&String> =
+                step.lines.iter().filter(|l| !l.trim().is_empty()).collect();
+            if non_blank.is_empty() {
+                continue;
+            }
+            let matched = non_blank
+                .iter()
+                .filter(|target| disk_lines.iter().any(|l| lines_match(l, target, mode)))
+                .count();
+            // Step is complete if all lines match, or if the file was already written
+            // externally with >= 60% of the step's lines (or substantially larger code).
+            let done = matched == non_blank.len()
+                || (matched * 5 >= non_blank.len() * 3)
+                || (contents.len() > 240 && disk_lines.len() >= non_blank.len() * 2);
+            if done && idx < session.completed_steps.len() {
+                session.completed_steps[idx] = true;
+                changed = true;
+            }
+        }
+        // If the current step is now completed on disk, advance to the first incomplete step.
+        if session
+            .completed_steps
+            .get(session.step_index)
+            .copied()
+            .unwrap_or(false)
+        {
+            if let Some(next_idx) = session.completed_steps.iter().position(|&done| !done) {
+                session.step_index = next_idx;
+                session.line_index = 0;
+                session.skip_blank_lines();
+                changed = true;
+            } else if let Some(step) = session.plan.steps.get(session.step_index) {
+                session.line_index = step.lines.len();
+                changed = true;
+            }
+        }
+        if changed {
+            self.save_to_disk(Some(workspace));
         }
     }
 

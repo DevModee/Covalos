@@ -2450,13 +2450,45 @@ fn new_conversation(
                 }
                 return;
             }
-            ui.label(RichText::new(tr("New conversation")).size(LEAD).strong());
-            ui.add_space(8.0);
-            target_picker(ui, chat);
-            if chat.target == Target::Orchestrator {
-                ui.add_space(8.0);
-                plan_card(ui, runtime, actions);
-            }
+            ui.add_space(18.0);
+            Frame::new()
+                .fill(colors().surface)
+                .stroke(egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.65)))
+                .corner_radius(14)
+                .inner_margin(Margin::same(18))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        let (badge, _) =
+                            ui.allocate_exact_size(egui::vec2(30.0, 30.0), egui::Sense::hover());
+                        ui.painter().rect_filled(badge, 9, colors().accent_bg);
+                        draw_icon_sized(
+                            ui.painter(),
+                            badge.center(),
+                            Icon::Sparkles,
+                            colors().accent,
+                            15.0,
+                        );
+                        ui.add_space(6.0);
+                        ui.vertical(|ui| {
+                            ui.label(
+                                RichText::new(tr("New conversation"))
+                                    .size(LEAD)
+                                    .strong()
+                                    .color(colors().text),
+                            );
+                            ui.label(muted(tr(
+                                "Choose how the agent should work in this project.",
+                            )));
+                        });
+                    });
+                    ui.add_space(12.0);
+                    target_picker(ui, chat);
+                    if chat.target == Target::Orchestrator {
+                        ui.add_space(10.0);
+                        plan_card(ui, runtime, actions);
+                    }
+                });
         });
     if !ready {
         notice(ui, runtime);

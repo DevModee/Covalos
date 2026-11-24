@@ -212,124 +212,148 @@ impl Editor {
 
         ui.add_space(10.0);
 
-        // Coucou-style split hero: Luma expressive status card on the left,
-        // quick actions / live status chips on the right.
+        // Coucou-style split hero: two cleanly proportioned cards that never overflow.
+        let gap = 10.0;
         let total_w = ui.available_width();
-        let left_w = (total_w * 0.56).max(240.0);
-        let right_w = (total_w - left_w - 10.0).max(160.0);
+        let left_outer = ((total_w - gap) * 0.56).floor().max(220.0);
+        let right_outer = (total_w - gap - left_outer).floor().max(150.0);
         ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = 10.0;
-            egui::Frame::new()
-                .fill(colors().surface)
-                .stroke(egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.75)))
-                .corner_radius(14)
-                .inner_margin(egui::Margin::same(12))
-                .show(ui, |ui| {
-                    ui.set_width((left_w - 24.0).max(160.0));
-                    ui.horizontal(|ui| {
-                        let (art, _) =
-                            ui.allocate_exact_size(egui::vec2(62.0, 62.0), egui::Sense::hover());
-                        self.identity.portrait(
-                            ui,
-                            art,
-                            &self.preferences.identity,
-                            mood,
-                            self.preferences.reduce_motion,
-                        );
-                        ui.add_space(6.0);
-                        ui.vertical(|ui| {
-                            ui.add_space(2.0);
-                            ui.label(
-                                RichText::new(tr("LUMA  ·  LEAD DEVELOPER"))
-                                    .size(10.0)
-                                    .color(colors().muted),
-                            );
-                            ui.label(
-                                RichText::new(tr(if waiting > 0 {
-                                    "Waiting for your OK"
-                                } else if running > 0 {
-                                    "Work in motion"
-                                } else {
-                                    "A quiet workspace"
-                                }))
-                                .size(17.0)
-                                .strong(),
-                            );
-                            ui.add_space(4.0);
-                            ui.horizontal_wrapped(|ui| {
-                                ui.spacing_mut().item_spacing = egui::vec2(5.0, 4.0);
-                                chip(
-                                    ui,
-                                    &trf("{n} running", &[("n", running.to_string())]),
-                                    colors().accent,
+            ui.spacing_mut().item_spacing.x = gap;
+            ui.allocate_ui_with_layout(
+                egui::vec2(left_outer, 94.0),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    egui::Frame::new()
+                        .fill(colors().surface)
+                        .stroke(egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.45)))
+                        .corner_radius(14)
+                        .inner_margin(egui::Margin::same(12))
+                        .show(ui, |ui| {
+                            ui.set_width((left_outer - 24.0).max(120.0));
+                            ui.horizontal(|ui| {
+                                let (art, _) = ui.allocate_exact_size(
+                                    egui::vec2(58.0, 58.0),
+                                    egui::Sense::hover(),
                                 );
-                                if waiting > 0 {
-                                    chip(
-                                        ui,
-                                        &trf("{n} waiting", &[("n", waiting.to_string())]),
-                                        colors().warning,
+                                self.identity.portrait(
+                                    ui,
+                                    art,
+                                    &self.preferences.identity,
+                                    mood,
+                                    self.preferences.reduce_motion,
+                                );
+                                ui.add_space(6.0);
+                                ui.vertical(|ui| {
+                                    ui.add_space(2.0);
+                                    ui.label(
+                                        RichText::new(tr("LUMA  ·  LEAD DEVELOPER"))
+                                            .size(10.0)
+                                            .color(colors().muted),
                                     );
-                                }
-                                if completed > 0 {
-                                    chip(
-                                        ui,
-                                        &trf("{n} done", &[("n", completed.to_string())]),
-                                        colors().success,
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(tr(if waiting > 0 {
+                                                "Waiting for your OK"
+                                            } else if running > 0 {
+                                                "Work in motion"
+                                            } else {
+                                                "A quiet workspace"
+                                            }))
+                                            .size(16.0)
+                                            .strong(),
+                                        )
+                                        .truncate(),
                                     );
-                                }
+                                    ui.add_space(4.0);
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.spacing_mut().item_spacing = egui::vec2(5.0, 4.0);
+                                        chip(
+                                            ui,
+                                            &trf("{n} running", &[("n", running.to_string())]),
+                                            colors().accent,
+                                        );
+                                        if waiting > 0 {
+                                            chip(
+                                                ui,
+                                                &trf("{n} waiting", &[("n", waiting.to_string())]),
+                                                colors().warning,
+                                            );
+                                        }
+                                        if completed > 0 {
+                                            chip(
+                                                ui,
+                                                &trf("{n} done", &[("n", completed.to_string())]),
+                                                colors().success,
+                                            );
+                                        }
+                                    });
+                                });
                             });
                         });
-                    });
-                });
+                },
+            );
 
-            egui::Frame::new()
-                .fill(colors().surface)
-                .stroke(egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.75)))
-                .corner_radius(14)
-                .inner_margin(egui::Margin::same(10))
-                .show(ui, |ui| {
-                    ui.set_width((right_w - 20.0).max(120.0));
-                    ui.spacing_mut().item_spacing.y = 6.0;
-                    let pill_row =
-                        |ui: &mut Ui, icon: Icon, color: egui::Color32, label: &str| -> bool {
-                            let (r, resp) = ui.allocate_exact_size(
-                                egui::vec2(ui.available_width(), 28.0),
-                                egui::Sense::click(),
-                            );
-                            ui.painter().rect(
-                                r,
-                                10,
-                                if resp.hovered() {
-                                    colors().hover
-                                } else {
-                                    colors().elevated
-                                },
-                                egui::Stroke::new(1.0_f32, color.gamma_multiply(0.32)),
-                                egui::StrokeKind::Inside,
-                            );
-                            draw_icon_sized(
-                                ui.painter(),
-                                r.left_center() + egui::vec2(14.0, 0.0),
-                                icon,
-                                color,
-                                13.0,
-                            );
-                            ui.painter().text(
-                                r.left_center() + egui::vec2(28.0, 0.0),
-                                egui::Align2::LEFT_CENTER,
-                                tr(label),
-                                egui::FontId::proportional(SMALL),
-                                colors().text,
-                            );
-                            pointer(resp).clicked()
-                        };
-                    if pill_row(ui, Icon::Search, colors().accent, "Search files (Ctrl+P)") {
-                        open_palette_now = true;
-                    }
-                    if pill_row(ui, Icon::Hub, colors().success, "Agents & sessions") {
-                        open_hub_now = true;
-                    }
-                });
+            ui.allocate_ui_with_layout(
+                egui::vec2(right_outer, 94.0),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    egui::Frame::new()
+                        .fill(colors().surface)
+                        .stroke(egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.45)))
+                        .corner_radius(14)
+                        .inner_margin(egui::Margin::same(10))
+                        .show(ui, |ui| {
+                            let inner_w = (right_outer - 20.0).max(100.0);
+                            ui.set_width(inner_w);
+                            ui.spacing_mut().item_spacing.y = 6.0;
+                            let pill_row = |ui: &mut Ui,
+                                            icon: Icon,
+                                            color: egui::Color32,
+                                            label: &str|
+                             -> bool {
+                                let (r, resp) = ui.allocate_exact_size(
+                                    egui::vec2(inner_w, 30.0),
+                                    egui::Sense::click(),
+                                );
+                                ui.painter().rect(
+                                    r,
+                                    10,
+                                    if resp.hovered() {
+                                        colors().hover
+                                    } else {
+                                        colors().elevated
+                                    },
+                                    egui::Stroke::new(1.0_f32, color.gamma_multiply(0.28)),
+                                    egui::StrokeKind::Inside,
+                                );
+                                draw_icon_sized(
+                                    ui.painter(),
+                                    r.left_center() + egui::vec2(14.0, 0.0),
+                                    icon,
+                                    color,
+                                    13.0,
+                                );
+                                ui.painter()
+                                    .with_clip_rect(r.shrink2(egui::vec2(26.0, 0.0)))
+                                    .text(
+                                        r.left_center() + egui::vec2(28.0, 0.0),
+                                        egui::Align2::LEFT_CENTER,
+                                        tr(label),
+                                        egui::FontId::proportional(SMALL),
+                                        colors().text,
+                                    );
+                                pointer(resp).clicked()
+                            };
+                            if pill_row(ui, Icon::Search, colors().accent, "Search files (Ctrl+P)")
+                            {
+                                open_palette_now = true;
+                            }
+                            if pill_row(ui, Icon::Hub, colors().success, "Agents & sessions") {
+                                open_hub_now = true;
+                            }
+                        });
+                },
+            );
         });
 
         ui.add_space(10.0);
@@ -674,7 +698,7 @@ impl Editor {
                     outer,
                     corner,
                     notch_fill,
-                    egui::Stroke::new(1.0_f32, colors().control_border.gamma_multiply(0.85)),
+                    egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.35)),
                     egui::StrokeKind::Inside,
                 );
                 if eased < 0.999 {

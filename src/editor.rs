@@ -1014,8 +1014,8 @@ impl Editor {
             self.splash_started = None;
             return;
         }
-        const HOLD: f32 = 0.78;
-        const FADE: f32 = 0.37;
+        const HOLD: f32 = 1.45;
+        const FADE: f32 = 0.55;
         const TOTAL: f32 = HOLD + FADE;
         let elapsed = started.elapsed().as_secs_f32();
         if elapsed >= TOTAL {
@@ -1054,15 +1054,15 @@ impl Editor {
                 ];
                 let accent = theme::colors().accent;
                 let text_col = theme::colors().text;
-                let line_h = 16.0_f32;
+                let line_h = 18.0_f32;
                 let total_h = LOGO.len() as f32 * line_h;
-                let top_y = screen.center().y - total_h * 0.5 - 18.0;
+                let top_y = screen.center().y - total_h * 0.5;
                 for (idx, row) in LOGO.iter().enumerate() {
                     let row_t = ((load_t * (LOGO.len() as f32 + 2.5)) - idx as f32).clamp(0.0, 1.0);
                     if row_t <= 0.01 {
                         continue;
                     }
-                    let shimmer = (1.0 - (idx as f32 / LOGO.len() as f32 - load_t).abs() * 3.0)
+                    let shimmer = (1.0 - (idx as f32 / LOGO.len() as f32 - load_t).abs() * 2.8)
                         .clamp(0.0, 1.0);
                     let col = motion::blend(accent.gamma_multiply(0.75), text_col, shimmer * 0.85)
                         .gamma_multiply(row_t * fade);
@@ -1070,34 +1070,10 @@ impl Editor {
                         egui::pos2(screen.center().x, top_y + idx as f32 * line_h),
                         egui::Align2::CENTER_CENTER,
                         *row,
-                        egui::FontId::monospace(14.0),
+                        egui::FontId::monospace(15.0),
                         col,
                     );
                 }
-                // Thin progress bar underneath
-                let bar_w = 132.0;
-                let bar_rect = egui::Rect::from_center_size(
-                    egui::pos2(screen.center().x, top_y + total_h + 18.0),
-                    egui::vec2(bar_w, 2.5),
-                );
-                painter.rect_filled(
-                    bar_rect,
-                    2,
-                    egui::Color32::from_white_alpha((28.0 * fade) as u8),
-                );
-                let fill_w = bar_w * egui::emath::easing::cubic_in_out(load_t);
-                painter.rect_filled(
-                    egui::Rect::from_min_size(bar_rect.min, egui::vec2(fill_w, 2.5)),
-                    2,
-                    accent.gamma_multiply(fade),
-                );
-                painter.text(
-                    egui::pos2(screen.center().x, bar_rect.bottom() + 16.0),
-                    egui::Align2::CENTER_CENTER,
-                    "C O V A L O S",
-                    egui::FontId::proportional(11.5),
-                    theme::colors().muted.gamma_multiply(fade * 0.9),
-                );
             });
         ctx.request_repaint_after(std::time::Duration::from_millis(16));
     }

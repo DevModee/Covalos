@@ -224,9 +224,32 @@ const ACTIONS: &[(Action, &str, PaletteCategory)] = &[
 enum Selection {
     Action(Action),
     File(PathBuf),
+    Setting(SettingsSection),
     Project(PathBuf),
     Ask(String),
 }
+
+const SETTINGS_ITEMS: &[(&str, &str, SettingsSection)] = &[
+    ("Font ligatures", "ligaduras fuente font symbols", SettingsSection::Editor),
+    ("Code font", "fuente codigo font monospace hack ibm plex", SettingsSection::Editor),
+    ("Interface font", "fuente interfaz font geist ubuntu", SettingsSection::Appearance),
+    ("Word wrap", "ajuste de linea wrap", SettingsSection::Editor),
+    ("Code minimap", "minimapa mapa visor code", SettingsSection::Editor),
+    ("Inline suggestions", "sugerencias autocompletado ghost", SettingsSection::Editor),
+    ("Code colors", "colores sintaxis syntax", SettingsSection::Editor),
+    ("Theme", "tema nocturne obsidian oled daylight light", SettingsSection::Appearance),
+    ("Surface brightness", "claridad brillo superficies", SettingsSection::Appearance),
+    ("Motion intensity", "movimiento animaciones", SettingsSection::Appearance),
+    ("Explorer zoom", "zoom explorador", SettingsSection::Appearance),
+    ("Interface scale", "escala interfaz scale", SettingsSection::Appearance),
+    ("Reduce motion", "reducir movimiento", SettingsSection::Appearance),
+    ("Background", "fondo dither ascii", SettingsSection::Background),
+    ("Language", "idioma spanish english", SettingsSection::General),
+    ("Providers", "proveedores ia claude gemini codex antigravity", SettingsSection::Agents),
+    ("Notifications", "notificaciones", SettingsSection::Notifications),
+    ("COVALOS account", "cuenta cloud sync", SettingsSection::Account),
+    ("Integrations", "integraciones discord", SettingsSection::Integrations),
+];
 
 impl Editor {
     pub(super) fn open_palette(&mut self, ctx: &egui::Context) {
@@ -2707,12 +2730,13 @@ impl Editor {
                 });
                 ui.add_space(8.0);
                 let query = palette.query.trim();
-                let mut choices = Vec::new();
+                let mut choices: Vec<(Selection, String, &'static str)> = Vec::new();
                 if let Some(prompt) = query.strip_prefix('?') {
                     if self.root.is_some() && !prompt.trim().is_empty() {
                         choices.push((
                             Selection::Ask(prompt.trim().to_owned()),
-                            "Ask Codex in this workspace".to_owned(),
+                            "Ask in this workspace".to_owned(),
+                            "Agents",
                         ));
                     }
                 } else if let Some(filter) = query.strip_prefix('@') {
@@ -2722,30 +2746,9 @@ impl Editor {
                         title
                             .to_lowercase()
                             .contains(&filter)
-                            .then(|| (Selection::Project(root.clone()), title))
+                            .then(|| (Selection::Project(root.clone()), title, "Projects"))
                     }));
-                } else if palette.category == PaletteCategory::Files
-                    && !query.starts_with('>')
-                    && let Some(root) = &self.root
-                {
-                    let filter = query.to_lowercase().replace('\\', "/");
-                    choices.extend(
-                        palette
-                            .files
-                            .iter()
-                            .filter_map(|file| {
-                                let label = file
-                                    .strip_prefix(root)
-                                    .unwrap_or(file)
-                                    .display()
-                                    .to_string();
-                                (filter.is_empty()
-                                    || label.to_lowercase().replace('\\', "/").contains(&filter))
-                                .then(|| (Selection::File(file.clone()), label))
-                            })
-                            .take(30),
-                    );
-                } else if query.is_empty() || query.starts_with('>') {
+                } else if query.starts_with('>') {
                     let filter = query.trim_start_matches('>').trim().to_lowercase();
                     choices.extend(
                         ACTIONS
@@ -2753,32 +2756,112 @@ impl Editor {
                             .filter(|(_, label, cat)| {
                                 (palette.category == PaletteCategory::All
                                     || *cat == palette.category)
-                                    && label.to_lowercase().contains(&filter)
+                                    && (label.to_lowercase().contains(&filter)
+                                        || tr(label).to_lowercase().contains(&filter))
                             })
                             .map(|(action, label, _)| {
-                                (Selection::Action(*action), (*label).to_owned())
+                                (Selection::Action(*action), (*label).to_owned(), "Commands")
                             }),
                     );
-                } else if let Some(root) = &self.root {
+                } else if query.is_empty() {
+                    if palette.category == PaletteCategory::Files
+                        && let Some(root) = &self.root
+                    {
+                        choices.extend(palette.files.iter().take(30).map(|file| {
+                            let label = file
+                                .strip_prefix(root)
+                                .unwrap_or(file)
+                                .display()
+                                .to_string();
+                            (Selection::File(file.clone()), label, "Files")
+                        }));
+                    } else if palette.category == PaletteCategory::Settings {
+                        choices.extend(SETTINGS_ITEMS.iter().map(|(label, _, section)| {
+                            (Selection::Setting(*section), (*label).to_owned(), "Settings")
+                        }));
+                    } else {
+                        choices.extend(
+                            ACTIONS
+                                .iter()
+                                .filter(|(_, _, cat)| {
+                                    palette.category == PaletteCategory::All
+                                        || *cat == palette.category
+                                })
+                                .map(|(action, label, _)| {
+                                    (Selection::Action(*action), (*label).to_owned(), "Commands")
+                                }),
+                        );
+                    }
+                } else {
                     let filter = query.to_lowercase().replace('\\', "/");
-                    choices.extend(
-                        palette
-                            .files
-                            .iter()
-                            .filter_map(|file| {
-                                let label = file
-                                    .strip_prefix(root)
-                                    .unwrap_or(file)
-                                    .display()
-                                    .to_string();
-                                label
-                                    .to_lowercase()
-                                    .replace('\\', "/")
-                                    .contains(&filter)
-                                    .then(|| (Selection::File(file.clone()), label))
-                            })
-                            .take(30),
-                    );
+                    // 1. Matching workspace files
+                    if matches!(palette.category, PaletteCategory::All | PaletteCategory::Files)
+                        && let Some(root) = &self.root
+                    {
+                        choices.extend(
+                            palette
+                                .files
+                                .iter()
+                                .filter_map(|file| {
+                                    let label = file
+                                        .strip_prefix(root)
+                                        .unwrap_or(file)
+                                        .display()
+                                        .to_string();
+                                    label
+                                        .to_lowercase()
+                                        .replace('\\', "/")
+                                        .contains(&filter)
+                                        .then(|| (Selection::File(file.clone()), label, "Files"))
+                                })
+                                .take(20),
+                        );
+                    }
+                    // 2. Matching Settings options (English + Spanish + keywords)
+                    if matches!(
+                        palette.category,
+                        PaletteCategory::All | PaletteCategory::Settings
+                    ) {
+                        choices.extend(
+                            SETTINGS_ITEMS
+                                .iter()
+                                .filter(|(label, keywords, _)| {
+                                    label.to_lowercase().contains(&filter)
+                                        || tr(label).to_lowercase().contains(&filter)
+                                        || keywords.contains(&filter)
+                                })
+                                .map(|(label, _, section)| {
+                                    (
+                                        Selection::Setting(*section),
+                                        (*label).to_owned(),
+                                        "Settings",
+                                    )
+                                }),
+                        );
+                    }
+                    // 3. Matching Commands
+                    if !matches!(
+                        palette.category,
+                        PaletteCategory::Files | PaletteCategory::Settings
+                    ) {
+                        choices.extend(
+                            ACTIONS
+                                .iter()
+                                .filter(|(_, label, cat)| {
+                                    (palette.category == PaletteCategory::All
+                                        || *cat == palette.category)
+                                        && (label.to_lowercase().contains(&filter)
+                                            || tr(label).to_lowercase().contains(&filter))
+                                })
+                                .map(|(action, label, _)| {
+                                    (
+                                        Selection::Action(*action),
+                                        (*label).to_owned(),
+                                        "Commands",
+                                    )
+                                }),
+                        );
+                    }
                 }
                 if !choices.is_empty() {
                     if down {
@@ -2801,11 +2884,28 @@ impl Editor {
                             ui.label(secondary(tr("No matching items.")));
                             ui.add_space(16.0);
                         }
-                        for (index, (choice, label)) in choices.into_iter().enumerate() {
+                        let mut last_group: Option<&str> = None;
+                        for (index, (choice, label, group)) in choices.into_iter().enumerate() {
+                            if last_group != Some(group) {
+                                if last_group.is_some() {
+                                    ui.add_space(4.0);
+                                    ui.separator();
+                                }
+                                ui.add_space(4.0);
+                                ui.label(
+                                    RichText::new(tr(group).to_uppercase())
+                                        .size(10.5)
+                                        .strong()
+                                        .color(colors().muted),
+                                );
+                                ui.add_space(2.0);
+                                last_group = Some(group);
+                            }
                             let hint = match &choice {
                                 Selection::File(_) => "File",
+                                Selection::Setting(sec) => sec.label(),
                                 Selection::Project(_) => "Project",
-                                Selection::Ask(_) => "Codex",
+                                Selection::Ask(_) => "Agents",
                                 Selection::Action(Action::OpenFolder) => "Ctrl O",
                                 Selection::Action(Action::OpenFile) => "Ctrl Shift O",
                                 Selection::Action(Action::Save) => "Ctrl S",
@@ -2814,7 +2914,13 @@ impl Editor {
                                 Selection::Action(Action::Terminal) => "Ctrl `",
                                 Selection::Action(_) => "Command",
                             };
-                            let response = row(ui, &label, hint, index == palette.selected);
+                            let response = palette_row(
+                                ui,
+                                &choice,
+                                &label,
+                                hint,
+                                index == palette.selected,
+                            );
                             if (up || down) && index == palette.selected {
                                 response.scroll_to_me(None);
                             }
@@ -2868,6 +2974,10 @@ impl Editor {
                 Action::About => self.about_open = true,
             },
             Some(Selection::File(file)) => self.open_file(file),
+            Some(Selection::Setting(section)) => {
+                ctx.data_mut(|d| d.insert_temp(Id::new("settings-active-section"), section));
+                self.settings_open = true;
+            }
             Some(Selection::Project(root)) => self.request(Pending::OpenWorkspace(root), ctx),
             Some(Selection::Ask(prompt)) => {
                 self.preferences.assistant_open = true;
@@ -2879,6 +2989,130 @@ impl Editor {
             None => {}
         }
     }
+}
+
+/// Command palette result row with language file icon, folder icon, settings gear, or command icon.
+fn palette_row(
+    ui: &mut Ui,
+    choice: &Selection,
+    label: &str,
+    detail: &str,
+    selected: bool,
+) -> egui::Response {
+    let (label, detail) = (tr(label), tr(detail));
+    let height = 30.0;
+    let response = ui.add_sized(
+        [ui.available_width(), height],
+        egui::Button::new("").frame(false).selected(selected),
+    );
+    let painter = ui.painter_at(response.rect);
+    let hovered = super::motion::state(
+        ui,
+        response.id.with("prow-hover"),
+        response.hovered(),
+        super::motion::HOVER,
+    );
+    let sel = super::motion::state(
+        ui,
+        response.id.with("prow-sel"),
+        selected,
+        super::motion::CONTROL,
+    );
+    let fill = super::motion::blend(
+        colors().hover.gamma_multiply(hovered),
+        colors().accent_bg,
+        sel,
+    );
+    painter.rect_filled(response.rect, 6, fill);
+    if selected {
+        painter.rect_filled(
+            egui::Rect::from_min_size(
+                response.rect.left_top() + egui::vec2(0.0, 5.0),
+                egui::vec2(2.5, height - 10.0),
+            ),
+            2,
+            colors().accent,
+        );
+    }
+    let icon_center = response.rect.left_center() + egui::vec2(16.0, 0.0);
+    match choice {
+        Selection::File(path) => {
+            if path.is_dir() {
+                draw_icon_sized(&painter, icon_center, Icon::Folder, colors().muted, 15.0);
+            } else {
+                super::assets::file(ui, icon_center, path);
+            }
+        }
+        Selection::Setting(_) => {
+            draw_icon_sized(
+                &painter,
+                icon_center,
+                Icon::Settings,
+                if selected {
+                    colors().accent
+                } else {
+                    colors().muted
+                },
+                14.5,
+            );
+        }
+        Selection::Project(_) => {
+            draw_icon_sized(&painter, icon_center, Icon::Folder, colors().accent, 15.0);
+        }
+        Selection::Ask(_) => {
+            draw_icon_sized(&painter, icon_center, Icon::Sparkles, colors().accent, 14.5);
+        }
+        Selection::Action(_) => {
+            draw_icon_sized(
+                &painter,
+                icon_center,
+                Icon::Terminal,
+                if selected {
+                    colors().accent
+                } else {
+                    colors().muted
+                },
+                14.0,
+            );
+        }
+    }
+    let detail_width = if detail.is_empty() { 0.0 } else { 104.0 };
+    let max_width = (response.rect.width() - 44.0 - detail_width).max(1.0);
+    let galley = ui.fonts_mut(|fonts| {
+        fonts.layout_job(egui::text::LayoutJob {
+            wrap: egui::text::TextWrapping {
+                max_width,
+                max_rows: 1,
+                break_anywhere: true,
+                ..Default::default()
+            },
+            ..egui::text::LayoutJob::simple(
+                label.to_owned(),
+                egui::FontId::proportional(BODY),
+                if selected {
+                    colors().text
+                } else {
+                    colors().secondary
+                },
+                max_width,
+            )
+        })
+    });
+    painter.galley(
+        response.rect.left_center() + egui::vec2(32.0, -galley.size().y / 2.0),
+        galley,
+        colors().text,
+    );
+    if !detail.is_empty() {
+        painter.text(
+            response.rect.right_center() - egui::vec2(12.0, 0.0),
+            egui::Align2::RIGHT_CENTER,
+            detail,
+            egui::FontId::proportional(SMALL),
+            colors().muted,
+        );
+    }
+    pointer(response)
 }
 
 /// Home action card: icon tile, title, shortcut; lifts and lights its border on hover.

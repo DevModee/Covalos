@@ -344,7 +344,7 @@ impl Shell {
     pub(super) fn show(&mut self, ui: &mut Ui, rect: Rect, focus: bool) {
         let font = FontId::monospace(FONT);
         let (cell_w, cell_h) = ui.fonts_mut(|f| (f.glyph_width(&font, 'M'), f.row_height(&font)));
-        let inner = rect.shrink2(egui::vec2(8.0, 6.0));
+        let inner = rect.shrink2(egui::vec2(12.0, 10.0));
         let cols = (inner.width() / cell_w).floor().clamp(10.0, 500.0) as u16;
         let rows = (inner.height() / cell_h).floor().clamp(2.0, 300.0) as u16;
         self.resize(rows, cols);
@@ -377,15 +377,20 @@ impl Shell {
         }
 
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 6, colors().inset);
-        if focused {
-            painter.rect_stroke(
-                rect,
-                6,
-                egui::Stroke::new(1.0_f32, colors().accent.gamma_multiply(0.45)),
-                egui::StrokeKind::Inside,
-            );
-        }
+        painter.rect_filled(rect, 10, colors().inset);
+        painter.rect_stroke(
+            rect,
+            10,
+            egui::Stroke::new(
+                1.0_f32,
+                if focused {
+                    colors().control_border.gamma_multiply(0.7)
+                } else {
+                    colors().border.gamma_multiply(0.45)
+                },
+            ),
+            egui::StrokeKind::Inside,
+        );
         let Ok(mut parser) = self.parser.lock() else {
             return;
         };

@@ -489,7 +489,6 @@ impl Editor {
             let nav =
                 egui::Rect::from_min_size(content.min, egui::vec2(nav_width, content.height()));
             ui.scope_builder(egui::UiBuilder::new().max_rect(nav), |ui| {
-                self.luma_dock(ui);
                 ui.add_space(8.0);
                 ui.label(RichText::new(tr("Agent Hub")).size(HEADING).strong());
                 ui.add_space(24.0);

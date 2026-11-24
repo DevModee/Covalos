@@ -447,10 +447,23 @@ impl Editor {
     }
 
     pub(super) fn status_bar(&mut self, ctx: &Context) {
+        // On Windows, borderless maximized windows extend behind the taskbar; reserve
+        // bottom clearance when maximized so the status bar & Terminal button stay visible.
+        let taskbar_clearance =
+            if cfg!(windows) && ctx.input(|i| i.viewport().maximized.unwrap_or(false)) {
+                44.0
+            } else {
+                0.0
+            };
         TopBottomPanel::bottom("status")
-            .exact_height(STATUS_HEIGHT)
+            .exact_height(STATUS_HEIGHT + taskbar_clearance)
             .show_separator_line(false)
-            .frame(panel_frame(Margin::symmetric(12, 2)))
+            .frame(panel_frame(Margin {
+                left: 12,
+                right: 12,
+                top: 2,
+                bottom: 2 + taskbar_clearance as i8,
+            }))
             .show(ctx, |ui| {
                 let rect = ui.available_rect_before_wrap();
                 let right_width = if self.active.is_some() { 290.0 } else { 100.0 };
@@ -604,6 +617,7 @@ impl Editor {
             });
     }
 
+    #[allow(dead_code)]
     pub(super) fn luma_dock(&mut self, ui: &mut Ui) {
         if !self.preferences.identity.mascot {
             return;
@@ -682,7 +696,6 @@ impl Editor {
             .show_separator_line(false)
             .frame(sidebar_frame(Margin::symmetric(PANEL_PADDING, 8)))
             .show(ctx, |ui| {
-                self.luma_dock(ui);
                 let mut selected = None;
                 // Integrated compact header: collapse toggle, workspace pill, and view actions.
                 ui.horizontal(|ui| {
@@ -1605,24 +1618,99 @@ impl Editor {
 
     pub(super) fn modals(&mut self, ctx: &Context) {
         if let Some(action) = self.pending.take() {
+            let dirty_names: Vec<String> = match &action {
+                Pending::CloseTab(index) => self
+                    .documents
+                    .get(*index)
+                    .map(|d| vec![workspace::filename(&d.path)])
+                    .unwrap_or_default(),
+                _ => self
+                    .documents
+                    .iter()
+                    .filter(|d| d.dirty)
+                    .take(4)
+                    .map(|d| workspace::filename(&d.path))
+                    .collect(),
+            };
             let modal = egui::Modal::new(Id::new("close_confirmation"))
-                .frame(modal_frame())
+                .backdrop_color(egui::Color32::from_black_alpha(145))
+                .frame(modal_frame().inner_margin(Margin::same(22)))
                 .show(ctx, |ui| {
-                    ui.heading("Save your changes?");
-                    ui.label(if matches!(action, Pending::CloseTab(_)) {
-                        "This file has unsaved changes."
-                    } else {
-                        "One or more files have unsaved changes."
-                    });
-                    ui.add_space(8.0);
+                    ui.set_min_width(340.0);
+                    ui.set_max_width(400.0);
                     ui.horizontal(|ui| {
-                        if ui.add(primary(tr("Save"))).clicked() {
+                        let (badge, _) =
+                            ui.allocate_exact_size(egui::vec2(34.0, 34.0), egui::Sense::hover());
+                        ui.painter().rect_filled(badge, 10, colors().accent_bg);
+                        draw_icon_sized(
+                            ui.painter(),
+                            badge.center(),
+                            Icon::Save,
+                            colors().accent,
+                            17.0,
+                        );
+                        ui.add_space(6.0);
+                        ui.vertical(|ui| {
+                            ui.label(
+                                RichText::new(tr("Save your changes?"))
+                                    .size(LEAD + 1.0)
+                                    .strong()
+                                    .color(colors().text),
+                            );
+                            ui.label(secondary(if matches!(action, Pending::CloseTab(_)) {
+                                "This file has unsaved changes."
+                            } else {
+                                "One or more files have unsaved changes."
+                            }));
+                        });
+                    });
+                    if !dirty_names.is_empty() {
+                        ui.add_space(10.0);
+                        egui::Frame::new()
+                            .fill(colors().inset)
+                            .stroke(egui::Stroke::new(1.0_f32, colors().border))
+                            .corner_radius(9)
+                            .inner_margin(Margin::symmetric(10, 7))
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                ui.label(
+                                    RichText::new(dirty_names.join("  ·  "))
+                                        .size(SMALL)
+                                        .color(colors().secondary),
+                                );
+                            });
+                    }
+                    ui.add_space(16.0);
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        if pointer(ui.add(primary(tr("Save")).min_size(egui::vec2(88.0, 30.0))))
+                            .clicked()
+                        {
                             return Some(true);
                         }
-                        if ui.button(tr("Discard")).clicked() {
+                        let discard = egui::Button::new(
+                            RichText::new(tr("Discard"))
+                                .size(BODY)
+                                .color(colors().error),
+                        )
+                        .fill(colors().error.gamma_multiply(0.12))
+                        .stroke(egui::Stroke::new(
+                            1.0_f32,
+                            colors().error.gamma_multiply(0.35),
+                        ))
+                        .corner_radius(CONTROL_RADIUS)
+                        .min_size(egui::vec2(88.0, 30.0));
+                        if pointer(ui.add(discard)).clicked() {
                             return Some(false);
                         }
-                        if ui.button(tr("Cancel")).clicked() {
+                        if pointer(
+                            ui.add(
+                                egui::Button::new(tr("Cancel"))
+                                    .min_size(egui::vec2(82.0, 30.0)),
+                            ),
+                        )
+                        .clicked()
+                        {
                             ui.close();
                         }
                         None
