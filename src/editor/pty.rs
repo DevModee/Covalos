@@ -605,6 +605,7 @@ fn color(c: vt100::Color, fg: bool) -> Option<Color32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
     use std::time::{Duration, Instant};
 
     #[cfg(windows)]
