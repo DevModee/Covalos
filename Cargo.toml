@@ -46,3 +46,21 @@ winit = { version = "0.30", default-features = false }
 
 [profile.release]
 lto = "thin"
+
+# `cargo deb --no-build` after `tools/third-party-notices.sh x86_64-unknown-linux-gnu build/notices`
+# (the release workflow runs both).
+[package.metadata.deb]
+name = "covalos"
+maintainer = "Matias Sánchez"
+copyright = "Matias Sánchez"
+section = "editors"
+priority = "optional"
+depends = "$auto"
+extended-description = "Native desktop code editor written in Rust, with a built-in team of coding agents (Codex, Claude Code, Gemini) that run on your own CLIs and accounts."
+assets = [
+    ["target/release/covalos", "usr/bin/", "755"],
+    ["packaging/linux/covalos.desktop", "usr/share/applications/", "644"],
+    ["assets/brand/covalos-app-256.png", "usr/share/icons/hicolor/256x256/apps/covalos.png", "644"],
+    ["build/notices/THIRD_PARTY_NOTICES.txt", "usr/share/doc/covalos/", "644"],
+    ["build/notices/licenses/*", "usr/share/doc/covalos/licenses/", "644"],
+]
