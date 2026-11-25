@@ -1029,7 +1029,11 @@ impl Editor {
                     .auto_select_for_prompt(&self.preferences.skills, &trimmed);
             }
             let outgoing = if self.guided.armed {
-                super::guided::build_guided_prompt(&trimmed, self.preferences.guided.flow_order)
+                super::guided::build_guided_prompt_with_style(
+                    &trimmed,
+                    self.preferences.guided.flow_order,
+                    self.preferences.guided.style,
+                )
             } else {
                 trimmed
             };

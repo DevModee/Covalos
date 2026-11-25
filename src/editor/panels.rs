@@ -433,11 +433,10 @@ impl Editor {
                                 self.studio_open = false;
                             }
                         }
-                        if self.guided.session.is_some()
-                            && ui
-                                .selectable_label(self.guided.open, tr("Guided Mode"))
-                                .on_hover_text(tr("Show or hide the Guided Mode window"))
-                                .clicked()
+                        if ui
+                            .selectable_label(self.guided.open, tr("Guided Mode"))
+                            .on_hover_text(tr("Open Guided Mode — learn by prompt, link, or code-along"))
+                            .clicked()
                         {
                             self.guided.open = !self.guided.open;
                         }
@@ -1251,7 +1250,71 @@ impl Editor {
                     let marks =
                         self.git_gutter
                             .marks(ui.ctx(), self.root.as_deref(), &doc.path, &doc.text);
-                    let shapes = decorate(ui, &output, gutter, &doc.text, self.cursor, marks);
+                    let mut shapes = decorate(ui, &output, gutter, &doc.text, self.cursor, marks);
+                    // Guided Learning Mode: translucent bracket-colored block hover + explanation card
+                    if self.guided.session.is_some()
+                        && self.preferences.guided.learn_hover
+                        && let Some(hover_pos) = output.response.hover_pos()
+                    {
+                        let rows = &output.galley.rows;
+                        let origin = output.galley_pos;
+                        let lines = row_lines(rows);
+                        if let Some(row_idx) = rows.iter().position(|r| {
+                            let y0 = origin.y + r.pos.y;
+                            hover_pos.y >= y0 && hover_pos.y < y0 + r.size.y
+                        }) && let Some(&hovered_line) = lines.get(row_idx)
+                            && let Some(info) = super::guided::learn_block_for_hover(
+                                self.guided.session.as_ref(),
+                                self.root.as_deref(),
+                                self.preferences.guided.learn_hover,
+                                self.preferences.guided.match_mode,
+                                &doc.path,
+                                &doc.text,
+                                hovered_line,
+                            )
+                        {
+                            let (start_l, end_l) = info.line_range;
+                            let mut top_y: Option<f32> = None;
+                            let mut bot_y: Option<f32> = None;
+                            for (ri, r) in rows.iter().enumerate() {
+                                let l = lines[ri];
+                                if l >= start_l && l <= end_l {
+                                    let y0 = origin.y + r.pos.y;
+                                    let y1 = y0 + r.size.y;
+                                    top_y = Some(top_y.map_or(y0, |t| t.min(y0)));
+                                    bot_y = Some(bot_y.map_or(y1, |b| b.max(y1)));
+                                }
+                            }
+                            if let (Some(y0), Some(y1)) = (top_y, bot_y) {
+                                let clip = ui.clip_rect();
+                                let block_rect = egui::Rect::from_min_max(
+                                    egui::pos2(gutter.right() + 6.0, y0 - 2.0),
+                                    egui::pos2((clip.right() - 12.0).max(gutter.right() + 80.0), y1 + 2.0),
+                                );
+                                let tint = palette.bracket;
+                                shapes.push(egui::Shape::rect_filled(
+                                    block_rect,
+                                    7,
+                                    tint.gamma_multiply(0.11),
+                                ));
+                                shapes.push(egui::Shape::rect_stroke(
+                                    block_rect,
+                                    7,
+                                    egui::Stroke::new(1.0_f32, tint.gamma_multiply(0.42)),
+                                    egui::StrokeKind::Inside,
+                                ));
+                                shapes.push(egui::Shape::rect_filled(
+                                    egui::Rect::from_min_size(
+                                        block_rect.left_top() + egui::vec2(1.0, 5.0),
+                                        egui::vec2(3.0, (block_rect.height() - 10.0).max(6.0)),
+                                    ),
+                                    2,
+                                    tint.gamma_multiply(0.85),
+                                ));
+                                paint_learn_hover_card(ui.ctx(), hover_pos, block_rect, &info, tint);
+                            }
+                        }
+                    }
                     ui.painter().set(decorations, egui::Shape::Vec(shapes));
                 });
             });
@@ -1796,6 +1859,117 @@ fn matching_bracket(text: &str, cursor: usize) -> Option<(usize, usize)> {
         }
     }
     None
+}
+
+/// Floating educational tooltip shown when hovering a highlighted code block in Guided Mode.
+fn paint_learn_hover_card(
+    ctx: &Context,
+    hover_pos: egui::Pos2,
+    block_rect: egui::Rect,
+    info: &super::guided::LearnBlockInfo,
+    tint: egui::Color32,
+) {
+    let screen = ctx.content_rect();
+    let card_w = 340.0_f32.min((screen.width() - 32.0).max(220.0));
+    let x = (hover_pos.x + 22.0).min(screen.right() - card_w - 16.0).max(screen.left() + 12.0);
+    let below_y = (block_rect.bottom() + 8.0).min(screen.bottom() - 210.0);
+    let y = if below_y > hover_pos.y + 16.0 {
+        below_y
+    } else {
+        (block_rect.top() - 160.0).max(screen.top() + CHROME_HEIGHT + 8.0)
+    };
+    egui::Area::new(Id::new("guided-learn-hover-card"))
+        .order(egui::Order::Tooltip)
+        .fixed_pos(egui::pos2(x, y))
+        .interactable(false)
+        .show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(colors().elevated)
+                .stroke(egui::Stroke::new(1.0_f32, tint.gamma_multiply(0.55)))
+                .corner_radius(11)
+                .shadow(floating_shadow(active(), 22))
+                .inner_margin(Margin::symmetric(13, 10))
+                .show(ui, |ui| {
+                    ui.set_width(card_w);
+                    ui.horizontal(|ui| {
+                        let (dot, _) =
+                            ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
+                        ui.painter().circle_filled(dot.center(), 4.0, tint);
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(&info.title)
+                                    .size(SMALL)
+                                    .strong()
+                                    .color(colors().text),
+                            )
+                            .truncate(),
+                        );
+                    });
+                    ui.add_space(5.0);
+                    ui.label(
+                        RichText::new(tr("This line"))
+                            .size(10.5)
+                            .strong()
+                            .color(tint),
+                    );
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(&info.line_summary)
+                                .size(SMALL)
+                                .color(colors().text),
+                        )
+                        .wrap(),
+                    );
+                    if let Some(why) = info.why.as_deref().filter(|s| !s.trim().is_empty()) {
+                        ui.add_space(5.0);
+                        ui.label(
+                            RichText::new(tr("Why this block"))
+                                .size(10.5)
+                                .strong()
+                                .color(colors().muted),
+                        );
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(why)
+                                    .size(SMALL)
+                                    .italics()
+                                    .color(colors().secondary),
+                            )
+                            .wrap(),
+                        );
+                    }
+                    if let Some(detail) = info.detail.as_deref().filter(|s| !s.trim().is_empty()) {
+                        ui.add_space(4.0);
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(detail)
+                                    .size(SMALL)
+                                    .color(colors().text),
+                            )
+                            .wrap(),
+                        );
+                    }
+                    if !info.calls.is_empty() {
+                        ui.add_space(6.0);
+                        ui.label(
+                            RichText::new(tr("Call flow"))
+                                .size(10.5)
+                                .strong()
+                                .color(colors().muted),
+                        );
+                        for call in info.calls.iter().take(4) {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(format!("→  {call}"))
+                                        .size(11.5)
+                                        .color(colors().text),
+                                )
+                                .wrap(),
+                            );
+                        }
+                    }
+                });
+        });
 }
 
 /// Logical line index of every laid-out row; wrapped continuation rows share their

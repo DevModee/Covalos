@@ -46,19 +46,23 @@ fn palette(mood: Mood) -> Palette {
     };
     Palette {
         edge: if dark {
-            Color32::from_rgb(20, 17, 30)
+            blend(theme.inset, theme.canvas, 0.5)
         } else {
-            Color32::from_rgb(52, 42, 86)
+            blend(theme.text, accent, 0.35)
         },
         body: if dark {
-            Color32::from_rgb(44, 37, 70)
+            blend(theme.elevated, accent, 0.24)
         } else {
-            Color32::from_rgb(86, 70, 146)
+            blend(theme.text, accent, 0.52)
         },
-        light: blend(Color32::from_rgb(132, 112, 214), accent, 0.35),
+        light: blend(theme.elevated, accent, 0.62),
         rim: signal,
-        eye: Color32::from_rgb(246, 243, 255),
-        ring: blend(accent, signal, 0.6),
+        eye: if dark {
+            theme.text
+        } else {
+            Color32::from_rgb(248, 248, 252)
+        },
+        ring: blend(accent, signal, 0.55),
         signal,
     }
 }

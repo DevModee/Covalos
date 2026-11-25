@@ -689,16 +689,12 @@ impl Editor {
                     }
                     .as_shape(outer, corner),
                 );
-                let notch_fill = if active().is_dark() {
-                    egui::Color32::from_rgb(13, 12, 18)
-                } else {
-                    colors().surface
-                };
+                let notch_fill = colors().canvas;
                 ui.painter().rect(
                     outer,
                     corner,
                     notch_fill,
-                    egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.35)),
+                    egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.55)),
                     egui::StrokeKind::Inside,
                 );
                 if eased < 0.999 {

@@ -31,19 +31,36 @@ pub(super) enum MatchMode {
     Strict,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum GuidedStyle {
+    /// Cozy interactive tutor: bite-sized explanations, call-flow hover, re-explain, and XP.
+    #[default]
+    Learn,
+    /// Pure code-along: clean karaoke lines without long theory cards.
+    CodeOnly,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub(super) struct GuidedPreferences {
     pub(super) flow_order: FlowOrder,
     pub(super) match_mode: MatchMode,
+    pub(super) style: GuidedStyle,
     pub(super) show_why: bool,
-    /// Expanded explanation of what the active line or block does; off by default.
+    /// Expanded explanation of what the active line or block does.
     pub(super) show_detail: bool,
     pub(super) floating: bool,
     /// Open Guided Mode in an independent native OS window (movable across monitors).
     pub(super) detached: bool,
     /// Font size scale percentage for the Guided teleprompter (85..=180).
     pub(super) font_scale_pct: u16,
+    /// Show translucent bracket-colored hover explanations over code blocks in the editor.
+    pub(super) learn_hover: bool,
+    /// Learning points earned by completing guided lines and steps.
+    pub(super) xp: u32,
+    /// Current streak of consecutive guided lines/steps completed without skipping.
+    pub(super) streak: u32,
 }
 
 impl Default for GuidedPreferences {
@@ -51,11 +68,15 @@ impl Default for GuidedPreferences {
         Self {
             flow_order: FlowOrder::Natural,
             match_mode: MatchMode::Flexible,
+            style: GuidedStyle::Learn,
             show_why: true,
-            show_detail: false,
+            show_detail: true,
             floating: true,
             detached: false,
             font_scale_pct: 100,
+            learn_hover: true,
+            xp: 0,
+            streak: 0,
         }
     }
 }
@@ -88,6 +109,9 @@ pub(super) struct GuidedStep {
     /// description inferred from the line itself.
     #[serde(default)]
     pub(super) notes: Vec<String>,
+    /// Call-flow notes explaining which function calls which and how they connect.
+    #[serde(default)]
+    pub(super) calls: Vec<String>,
 }
 
 impl GuidedStep {
@@ -247,6 +271,10 @@ pub(super) struct GuidedController {
     pub(super) sync: SyncSnapshot,
     /// Transient notice shown inside the guide window.
     pub(super) hint: Option<String>,
+    /// Prompt or URL (repo / aprenderust.dev / lab) drafted inside the Guided launcher.
+    pub(super) prompt_draft: String,
+    /// Last XP reward earned, for a subtle feedback pill.
+    pub(super) last_xp: Option<(u32, std::time::Instant)>,
     /// Last time workspace files on disk were reconciled against the guided plan.
     disk_synced_at: Option<std::time::Instant>,
 }
@@ -550,9 +578,13 @@ impl GuidedSession {
     }
 }
 
-/// Wraps a user's request so the AI returns a dependency-ordered `covalos-guided` JSON plan
-/// instead of dumping disconnected files.
-pub(super) fn build_guided_prompt(user_request: &str, flow: FlowOrder) -> String {
+/// Wraps a user's request (prompt, repo link, or course URL like aprenderust.dev) so the
+/// AI returns a dependency-ordered `covalos-guided` JSON plan tailored to Learn or CodeOnly.
+pub(super) fn build_guided_prompt_with_style(
+    user_request: &str,
+    flow: FlowOrder,
+    style: GuidedStyle,
+) -> String {
     let order_rule = match flow {
         FlowOrder::Natural => {
             "Use natural developer order: start with the entry file up to the point where it needs another module/component/route, pause to create that dependency file first, then return to the entry file to add the import and use it."
@@ -561,9 +593,28 @@ pub(super) fn build_guided_prompt(user_request: &str, flow: FlowOrder) -> String
             "Use bottom-up dependency order: write leaf types, helpers, and components first, then write the entry file that imports them last."
         }
     };
+    let has_link = user_request.contains("http://")
+        || user_request.contains("https://")
+        || user_request.contains("aprenderust.dev")
+        || user_request.contains("github.com/");
+    let source_hint = if has_link {
+        "The user provided a course/lab/repo reference link. Turn its key concepts or exercises into a welcoming, hands-on interactive practice plan in this workspace."
+    } else {
+        "Turn the user's request into a clear, welcoming step-by-step practice plan."
+    };
+    let pedagogy_rule = match style {
+        GuidedStyle::Learn => {
+            "Teaching style: warm, approachable, never heavy or academic. Use short plain-language sentences and everyday analogies in `why`, `detail`, `notes`, and `calls` so anyone learns faster than in a university lecture."
+        }
+        GuidedStyle::CodeOnly => {
+            "Code-only style: keep `why` and `notes` ultra-concise (1 short phrase) and focus on clean, idiomatic code lines."
+        }
+    };
     format!(
         "{user_request}\n\n\
          [COVALOS GUIDED MODE]\n\
+         {source_hint}\n\
+         {pedagogy_rule}\n\
          Do NOT edit files directly. Instead, respond with a short 2-line overview and one fenced code block tagged `covalos-guided` containing valid JSON with this exact schema:\n\
          ```covalos-guided\n\
          {{\n\
@@ -573,10 +624,11 @@ pub(super) fn build_guided_prompt(user_request: &str, flow: FlowOrder) -> String
                \"path\": \"relative/path/to/file.ext\",\n\
                \"action\": \"create_file\",\n\
                \"requires\": [],\n\
-               \"why\": \"One short sentence explaining why we write this block now\",\n\
-               \"detail\": \"Two to four sentences on what this block does and how it fits\",\n\
+               \"why\": \"One short friendly sentence explaining why we write this block now\",\n\
+               \"detail\": \"Two to three light, easy-to-read sentences on what this block does and how it fits\",\n\
                \"lines\": [\"line 1\", \"line 2\"],\n\
-               \"notes\": [\"What line 1 does\", \"What line 2 does\"]\n\
+               \"notes\": [\"What line 1 does in plain language\", \"What line 2 does\"],\n\
+               \"calls\": [\"caller() -> callee(): how and why it calls it\"]\n\
              }}\n\
            ]\n\
          }}\n\
@@ -584,8 +636,9 @@ pub(super) fn build_guided_prompt(user_request: &str, flow: FlowOrder) -> String
          Rules:\n\
          1. {order_rule}\n\
          2. NEVER import or reference a local file before an earlier step has created it.\n\
-         3. Keep each step focused (4 to 20 lines) and use relative paths only.\n\
-         4. `notes` holds exactly one short plain-language explanation per entry in `lines`."
+         3. Keep each step focused (4 to 16 lines) and use relative paths only.\n\
+         4. `notes` holds exactly one short plain-language explanation per entry in `lines`.\n\
+         5. `calls` explains which functions/hooks/methods this block calls and how data flows between them."
     )
 }
 
@@ -1047,8 +1100,32 @@ impl super::Editor {
         let (rel, text) = active_pair.unwrap_or((None, String::new()));
         let mode = self.preferences.guided.match_mode;
         let root = self.root.clone();
+        let before = self
+            .guided
+            .session
+            .as_ref()
+            .map(|s| (s.step_index, s.line_index, s.completed_steps.iter().filter(|&&c| c).count()));
         self.guided
             .sync_with_editor(rel.as_deref(), &text, mode, root.as_deref());
+        let after = self
+            .guided
+            .session
+            .as_ref()
+            .map(|s| (s.step_index, s.line_index, s.completed_steps.iter().filter(|&&c| c).count()));
+        if let (Some((bs, bl, bd)), Some((as_, al, ad))) = (before, after) {
+            let mut gained = 0u32;
+            if as_ == bs && al > bl {
+                gained += ((al - bl) as u32) * 5;
+            }
+            if ad > bd {
+                gained += ((ad - bd) as u32) * 25;
+            }
+            if gained > 0 {
+                self.preferences.guided.xp = self.preferences.guided.xp.saturating_add(gained);
+                self.preferences.guided.streak = self.preferences.guided.streak.saturating_add(1);
+                self.guided.last_xp = Some((gained, std::time::Instant::now()));
+            }
+        }
     }
 
     /// Safely opens (or creates empty inside the workspace) the file for a guided step.
@@ -1078,38 +1155,62 @@ impl super::Editor {
         self.open_file(full);
     }
 
-    /// Renders the Studio / Teleprompter Guided Mode surface, either as an in-app floating
-    /// window or detached into an independent native OS window (movable across monitors).
+    /// Renders the Studio / Teleprompter Guided Mode surface (or the cozy Learn / Code-only
+    /// launcher when no session is active), either floating inside the editor or detached
+    /// into an independent native OS window movable across monitors.
     pub(super) fn guided_overlay(&mut self, ctx: &egui::Context) {
         if !self.guided.open {
             return;
         }
-        let Some(session_clone) = self.guided.session.clone() else {
-            self.guided.open = false;
-            return;
-        };
-        if session_clone.plan.steps.get(session_clone.step_index).is_none() {
-            return;
-        }
+        let session_clone = self.guided.session.clone();
         let sync = self.guided.sync.clone();
         let mut open = self.guided.open;
         let mut actions = GuidedUiActions::default();
+        let mut launch_prompt: Option<String> = None;
 
         let prefs = &self.preferences.guided;
+        let recent_xp = self
+            .guided
+            .last_xp
+            .filter(|(_, at)| at.elapsed() < std::time::Duration::from_secs(4))
+            .map(|(pts, _)| pts);
         let view = GuidedViewConfig {
+            style: prefs.style,
             show_why: prefs.show_why,
             show_detail: prefs.show_detail,
             match_mode: prefs.match_mode,
             detached: prefs.detached,
+            learn_hover: prefs.learn_hover,
             font_scale: (f32::from(prefs.font_scale_pct.clamp(85, 180)) / 100.0),
+            xp: prefs.xp,
+            streak: prefs.streak,
+            recent_xp,
+            watching: self.guided.watching_session.is_some(),
+        };
+        let mut draft = std::mem::take(&mut self.guided.prompt_draft);
+
+        let show_contents = |ui: &mut egui::Ui,
+                             draft: &mut String,
+                             actions: &mut GuidedUiActions,
+                             launch_prompt: &mut Option<String>| {
+            if let Some(session) = &session_clone
+                && session.plan.steps.get(session.step_index).is_some()
+            {
+                render_guided_body(ui, session, &sync, &view, actions);
+            } else {
+                render_guided_launcher(ui, draft, &view, actions, launch_prompt);
+            }
         };
 
         if view.detached {
             let viewport_id = egui::ViewportId::from_hash_of("covalos-guided-viewport");
-            let title = format!("{} — {}", tr("Guided Mode"), session_clone.plan.title);
+            let title = match &session_clone {
+                Some(s) => format!("{} — {}", tr("Guided Mode"), s.plan.title),
+                None => tr("Guided Mode").to_owned(),
+            };
             let builder = egui::ViewportBuilder::default()
                 .with_title(title)
-                .with_inner_size([820.0, 560.0])
+                .with_inner_size([840.0, 580.0])
                 .with_min_inner_size([380.0, 340.0])
                 .with_resizable(true);
             ctx.show_viewport_immediate(viewport_id, builder, |vctx, _class| {
@@ -1119,8 +1220,7 @@ impl super::Editor {
                 egui::CentralPanel::default()
                     .frame(Frame::new().fill(colors().canvas).inner_margin(Margin::same(18)))
                     .show(vctx, |ui| {
-                        super::theme::ambient_top_glow(ui.painter(), ui.max_rect(), 16.0);
-                        render_guided_body(ui, &session_clone, &sync, &view, &mut actions);
+                        show_contents(ui, &mut draft, &mut actions, &mut launch_prompt);
                     });
             });
         } else {
@@ -1131,28 +1231,31 @@ impl super::Editor {
                 .resizable(true)
                 .collapsible(true)
                 .constrain(true)
-                .default_width(480.0)
-                .min_width(340.0)
+                .default_width(500.0)
+                .min_width(360.0)
                 .pivot(pivot)
                 .default_pos(anchor)
                 .frame(
                     Frame::new()
-                        .fill(colors().elevated)
+                        .fill(colors().surface)
                         .stroke(egui::Stroke::new(1.0_f32, colors().control_border))
-                        .corner_radius(14)
-                        .inner_margin(Margin::same(14))
+                        .corner_radius(16)
+                        .inner_margin(Margin::same(16))
                         .shadow(super::theme::floating_shadow(super::theme::active(), 28)),
                 )
                 .show(ctx, |ui| {
-                    super::theme::ambient_top_glow(ui.painter(), ui.max_rect(), 10.0);
-                    render_guided_body(ui, &session_clone, &sync, &view, &mut actions);
+                    show_contents(ui, &mut draft, &mut actions, &mut launch_prompt);
                 });
         }
+        self.guided.prompt_draft = draft;
 
         let prev_open = self.guided.open;
         self.guided.open = open;
         if prev_open != open {
             self.guided.save_to_disk(self.root.as_deref());
+        }
+        if let Some(style) = actions.set_style {
+            self.preferences.guided.style = style;
         }
         if actions.toggle_detached {
             self.preferences.guided.detached = !self.preferences.guided.detached;
@@ -1168,11 +1271,29 @@ impl super::Editor {
         if actions.toggle_detail {
             self.preferences.guided.show_detail = !self.preferences.guided.show_detail;
         }
+        if actions.toggle_learn_hover {
+            self.preferences.guided.learn_hover = !self.preferences.guided.learn_hover;
+        }
         if actions.toggle_mode {
             self.preferences.guided.match_mode = match self.preferences.guided.match_mode {
                 MatchMode::Flexible => MatchMode::Strict,
                 MatchMode::Strict => MatchMode::Flexible,
             };
+        }
+        if let Some(req) = launch_prompt {
+            let outgoing = build_guided_prompt_with_style(
+                &req,
+                self.preferences.guided.flow_order,
+                self.preferences.guided.style,
+            );
+            if let Some(session_id) = self.start_chat_from_home(ctx, &outgoing) {
+                self.guided.watching_session = Some(session_id);
+                self.guided.prompt_draft.clear();
+            }
+        }
+        if let Some(reexplain) = actions.reexplain_prompt {
+            self.preferences.assistant_open = true;
+            let _ = self.start_chat_from_home(ctx, &reexplain);
         }
         if let Some(path) = actions.open_path {
             self.open_guided_file(&path);
@@ -1186,6 +1307,7 @@ impl super::Editor {
             self.open_guided_file(&path);
         }
         if actions.skip_line_now {
+            self.preferences.guided.streak = 0;
             self.guided.skip_line(self.root.as_deref());
         }
         if actions.advance_now && let Some(path) = self.guided.advance_step(self.root.as_deref()) {
@@ -1212,17 +1334,25 @@ impl super::Editor {
 }
 
 struct GuidedViewConfig {
+    style: GuidedStyle,
     show_why: bool,
     show_detail: bool,
     match_mode: MatchMode,
     detached: bool,
+    learn_hover: bool,
     font_scale: f32,
+    xp: u32,
+    streak: u32,
+    recent_xp: Option<u32>,
+    watching: bool,
 }
 
 #[derive(Default)]
 struct GuidedUiActions {
+    set_style: Option<GuidedStyle>,
     open_path: Option<String>,
     jump_step: Option<usize>,
+    reexplain_prompt: Option<String>,
     advance_now: bool,
     prev_now: bool,
     skip_line_now: bool,
@@ -1231,7 +1361,233 @@ struct GuidedUiActions {
     toggle_why: bool,
     toggle_detail: bool,
     toggle_detached: bool,
+    toggle_learn_hover: bool,
     font_delta: i32,
+}
+
+/// Cozy Guided Studio launcher shown when no guided session is active yet:
+/// choose Learn vs Code-only, paste a prompt or link (e.g. aprenderust.dev or GitHub repo),
+/// or click a quick-start preset.
+fn render_guided_launcher(
+    ui: &mut egui::Ui,
+    draft: &mut String,
+    view: &GuidedViewConfig,
+    actions: &mut GuidedUiActions,
+    launch_prompt: &mut Option<String>,
+) {
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(tr("Guided Learning Studio"))
+                .size(LEAD)
+                .strong()
+                .color(colors().text),
+        );
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            let detach_lbl = if view.detached {
+                tr("Dock ↙")
+            } else {
+                tr("Pop out ↗")
+            };
+            if pill(ui, detach_lbl, view.detached).clicked() {
+                actions.toggle_detached = true;
+            }
+            xp_badge(ui, view.xp, view.streak, view.recent_xp);
+        });
+    });
+    ui.add_space(4.0);
+    ui.add(
+        egui::Label::new(
+            RichText::new(tr(
+                "Learn by prompt, repo, or course link — step by step, friendly and hands-on.",
+            ))
+            .size(SMALL)
+            .color(colors().muted),
+        )
+        .wrap(),
+    );
+    ui.add_space(12.0);
+
+    // Two clean mode selector cards: Learn vs Code-only
+    let gap = 8.0;
+    let card_w = ((ui.available_width() - gap) * 0.5).max(140.0);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        for (style, title, desc) in [
+            (
+                GuidedStyle::Learn,
+                "Learn mode",
+                "Friendly explanations, hover call-flow, re-explain & XP",
+            ),
+            (
+                GuidedStyle::CodeOnly,
+                "Code only",
+                "Clean karaoke code-along without extra theory",
+            ),
+        ] {
+            let selected = view.style == style;
+            let (rect, resp) =
+                ui.allocate_exact_size(egui::vec2(card_w, 56.0), egui::Sense::click());
+            ui.painter().rect(
+                rect,
+                11,
+                if selected {
+                    colors().accent_bg
+                } else if resp.hovered() {
+                    colors().hover
+                } else {
+                    colors().elevated
+                },
+                egui::Stroke::new(
+                    1.0_f32,
+                    if selected {
+                        colors().accent.gamma_multiply(0.75)
+                    } else {
+                        colors().border
+                    },
+                ),
+                egui::StrokeKind::Inside,
+            );
+            let inner = rect.shrink2(egui::vec2(10.0, 8.0));
+            ui.painter().with_clip_rect(inner).text(
+                inner.left_top(),
+                egui::Align2::LEFT_TOP,
+                tr(title),
+                egui::FontId::proportional(BODY),
+                if selected {
+                    colors().accent
+                } else {
+                    colors().text
+                },
+            );
+            ui.painter().with_clip_rect(inner).text(
+                inner.left_top() + egui::vec2(0.0, 20.0),
+                egui::Align2::LEFT_TOP,
+                tr(desc),
+                egui::FontId::proportional(11.0),
+                colors().muted,
+            );
+            if super::theme::pointer(resp).clicked() {
+                actions.set_style = Some(style);
+            }
+        }
+    });
+
+    ui.add_space(12.0);
+    // Prompt or URL input card
+    let input_id = ui.make_persistent_id("guided-launcher-input");
+    let focused = ui.memory(|m| m.has_focus(input_id));
+    let mut submit = false;
+    Frame::new()
+        .fill(colors().inset)
+        .stroke(egui::Stroke::new(
+            1.0_f32,
+            if focused {
+                colors().accent
+            } else {
+                colors().border
+            },
+        ))
+        .corner_radius(12)
+        .inner_margin(Margin::symmetric(12, 10))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            if focused && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
+                submit = true;
+            }
+            ui.add(
+                egui::TextEdit::multiline(draft)
+                    .id(input_id)
+                    .frame(false)
+                    .desired_rows(2)
+                    .desired_width(f32::INFINITY)
+                    .hint_text(tr(
+                        "Paste a link (e.g. aprenderust.dev, GitHub repo) or write what you want to learn…",
+                    )),
+            );
+            ui.add_space(6.0);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let ready = !draft.trim().is_empty() && !view.watching;
+                let lbl = if view.watching {
+                    tr("Building lesson…")
+                } else {
+                    tr("Start lesson →")
+                };
+                if super::theme::pointer(ui.add_enabled(ready, super::theme::primary(lbl)))
+                    .clicked()
+                {
+                    submit = true;
+                }
+            });
+        });
+    if submit && !draft.trim().is_empty() && !view.watching {
+        *launch_prompt = Some(draft.trim().to_owned());
+    }
+
+    ui.add_space(12.0);
+    ui.label(
+        RichText::new(tr("Quick start"))
+            .size(11.0)
+            .strong()
+            .color(colors().muted),
+    );
+    ui.add_space(6.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+        for (label, prompt) in [
+            (
+                "Rust · aprenderust.dev",
+                "Basado en el curso aprenderust.dev de midudev, armame una lección práctica paso a paso para aprender los fundamentos de Rust (variables, mutabilidad, ownership y structs) con ejercicios cortos y explicaciones súper claras.",
+            ),
+            (
+                "Learn this repo",
+                "Analizá este proyecto y armame un recorrido guiado paso a paso explicando qué hace cada archivo principal, por qué está estructurado así y qué función llama a qué.",
+            ),
+            (
+                "Hands-on lab",
+                "Creame un laboratorio práctico corto para aprender construyendo una mini funcionalidad real en este proyecto, paso a paso y con analogías fáciles.",
+            ),
+        ] {
+            if pill(ui, tr(label), false).clicked() && !view.watching {
+                *launch_prompt = Some(prompt.to_owned());
+            }
+        }
+    });
+}
+
+/// Compact gamified XP + streak badge.
+fn xp_badge(ui: &mut egui::Ui, xp: u32, streak: u32, recent_xp: Option<u32>) {
+    Frame::new()
+        .fill(colors().accent_bg)
+        .stroke(egui::Stroke::new(1.0_f32, colors().accent.gamma_multiply(0.45)))
+        .corner_radius(10)
+        .inner_margin(Margin::symmetric(8, 3))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 5.0;
+                ui.label(
+                    RichText::new(format!("★ {xp} XP"))
+                        .size(11.0)
+                        .strong()
+                        .color(colors().accent),
+                );
+                if streak > 1 {
+                    ui.label(
+                        RichText::new(format!("· x{streak}"))
+                            .size(11.0)
+                            .color(colors().warning),
+                    );
+                }
+                if let Some(pts) = recent_xp {
+                    ui.label(
+                        RichText::new(format!("+{pts}"))
+                            .size(11.0)
+                            .strong()
+                            .color(colors().success),
+                    );
+                }
+            });
+        });
 }
 
 fn render_guided_body(
@@ -1251,10 +1607,10 @@ fn render_guided_body(
     let next_step_path = session.plan.steps.get(step_idx + 1).map(|s| s.path.clone());
     let wide = ui.available_width() >= 680.0;
 
-    // Header row: title + window controls (zoom, pop-out / dock)
+    // Header row: title + XP badge + zoom + pop-out / dock
     ui.horizontal(|ui| {
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.spacing_mut().item_spacing.x = 5.0;
             let detach_lbl = if view.detached {
                 tr("Dock ↙")
             } else {
@@ -1283,6 +1639,7 @@ fn render_guided_body(
             {
                 actions.font_delta = -15;
             }
+            xp_badge(ui, view.xp, view.streak, view.recent_xp);
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                 ui.add(
                     egui::Label::new(
@@ -1297,8 +1654,8 @@ fn render_guided_body(
         });
     });
 
-    ui.add_space(5.0);
-    // Meta & toggles row
+    ui.add_space(6.0);
+    // Meta & mode toggles row: Learn vs Code-only + learning helpers
     ui.horizontal(|ui| {
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
@@ -1312,17 +1669,34 @@ fn render_guided_body(
             {
                 actions.toggle_mode = true;
             }
-            if pill(ui, tr("Detail"), view.show_detail)
-                .on_hover_text(tr("Explain what each line of the active block does"))
-                .clicked()
-            {
-                actions.toggle_detail = true;
+            if view.style == GuidedStyle::Learn {
+                if pill(ui, tr("Learn hover"), view.learn_hover)
+                    .on_hover_text(tr(
+                        "Highlight code blocks on hover in the editor to explain what they do and what calls what",
+                    ))
+                    .clicked()
+                {
+                    actions.toggle_learn_hover = true;
+                }
+                if pill(ui, tr("Detail"), view.show_detail)
+                    .on_hover_text(tr("Explain what each line of the active block does"))
+                    .clicked()
+                {
+                    actions.toggle_detail = true;
+                }
             }
-            if pill(ui, tr("Why?"), view.show_why)
-                .on_hover_text(tr("Show why this block is written now"))
+            let code_only = view.style == GuidedStyle::CodeOnly;
+            if pill(ui, tr("Code only"), code_only)
+                .on_hover_text(tr("Pure code-along without theory cards"))
                 .clicked()
             {
-                actions.toggle_why = true;
+                actions.set_style = Some(GuidedStyle::CodeOnly);
+            }
+            if pill(ui, tr("Learn mode"), !code_only)
+                .on_hover_text(tr("Interactive tutor with explanations, hover & XP"))
+                .clicked()
+            {
+                actions.set_style = Some(GuidedStyle::Learn);
             }
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                 ui.add(
@@ -1574,21 +1948,21 @@ fn teleprompter_column(
         ui.add_space(8.0);
     }
 
-    // Optional 1-line explanation
-    if view.show_why
+    // Optional friendly 1-line explanation (shown in Learn mode)
+    if view.style == GuidedStyle::Learn
+        && view.show_why
         && let Some(why) = step.why.as_deref().filter(|w| !w.trim().is_empty())
     {
         Frame::new()
-            .fill(colors().surface)
-            .corner_radius(9)
-            .inner_margin(Margin::symmetric(10, 7))
+            .fill(colors().elevated)
+            .corner_radius(10)
+            .inner_margin(Margin::symmetric(12, 8))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.add(
                     egui::Label::new(
                         RichText::new(why)
                             .size(SMALL * view.font_scale.min(1.25))
-                            .italics()
                             .color(colors().secondary),
                     )
                     .wrap(),
@@ -1686,9 +2060,16 @@ fn teleprompter_column(
             }
         });
 
-    if view.show_detail {
-        ui.add_space(8.0);
-        detail_card(ui, step, line_idx, sync.step_complete);
+    if view.style == GuidedStyle::Learn && view.show_detail {
+        ui.add_space(10.0);
+        if detail_card(ui, step, line_idx, sync.step_complete) {
+            let active_line = step.lines.get(line_idx).map_or("", String::as_str);
+            let block = step.lines.join("\n");
+            actions.reexplain_prompt = Some(format!(
+                "Explicame de otra forma, súper simple y con una analogía de la vida real (sin lenguaje académico pesado), qué hace este bloque de `{}` y en especial la línea `{}`:\n```\n{}\n```",
+                step.path, active_line, block
+            ));
+        }
     }
 
     ui.add_space(10.0);
@@ -1837,23 +2218,43 @@ fn active_line_card(ui: &mut egui::Ui, code_line: &str, progress: f32, font_size
         });
 }
 
-/// On-demand explanation: what the active line does and, when the plan has one, the
-/// longer description of the whole block.
-fn detail_card(ui: &mut egui::Ui, step: &GuidedStep, line_idx: usize, complete: bool) {
+/// On-demand learning explanation: what the active line does, why the block exists,
+/// which functions/methods it calls, and a button to ask for a simpler alternative explanation.
+/// Returns `true` when the user clicks "Explain another way".
+fn detail_card(ui: &mut egui::Ui, step: &GuidedStep, line_idx: usize, complete: bool) -> bool {
+    let mut reexplain = false;
+    let calls: Vec<String> = if !step.calls.is_empty() {
+        step.calls.clone()
+    } else {
+        analyze_block_calls(&step.lines, "")
+    };
     Frame::new()
-        .fill(colors().surface)
-        .stroke(egui::Stroke::new(1.0_f32, colors().border))
-        .corner_radius(9)
-        .inner_margin(Margin::symmetric(10, 8))
+        .fill(colors().elevated)
+        .stroke(egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.75)))
+        .corner_radius(12)
+        .inner_margin(Margin::symmetric(14, 11))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            if !complete && line_idx < step.lines.len() {
+            ui.horizontal(|ui| {
                 ui.label(
                     RichText::new(tr("This line"))
                         .size(SMALL)
                         .strong()
-                        .color(colors().secondary),
+                        .color(colors().accent),
                 );
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if pill(ui, tr("Explain another way ↻"), false)
+                        .on_hover_text(tr(
+                            "Ask the AI to explain this block in simpler words with an analogy",
+                        ))
+                        .clicked()
+                    {
+                        reexplain = true;
+                    }
+                });
+            });
+            if !complete && line_idx < step.lines.len() {
+                ui.add_space(3.0);
                 ui.add(
                     egui::Label::new(
                         RichText::new(step.line_note(line_idx))
@@ -1864,7 +2265,7 @@ fn detail_card(ui: &mut egui::Ui, step: &GuidedStep, line_idx: usize, complete: 
                 );
             }
             if let Some(detail) = step.detail.as_deref().filter(|d| !d.trim().is_empty()) {
-                ui.add_space(6.0);
+                ui.add_space(7.0);
                 ui.label(
                     RichText::new(tr("This block"))
                         .size(SMALL)
@@ -1875,7 +2276,297 @@ fn detail_card(ui: &mut egui::Ui, step: &GuidedStep, line_idx: usize, complete: 
                     egui::Label::new(RichText::new(detail).size(SMALL).color(colors().text)).wrap(),
                 );
             }
+            if !calls.is_empty() {
+                ui.add_space(7.0);
+                ui.label(
+                    RichText::new(tr("Call flow"))
+                        .size(SMALL)
+                        .strong()
+                        .color(colors().secondary),
+                );
+                for item in calls.iter().take(5) {
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(format!("→  {item}"))
+                                .size(SMALL)
+                                .color(colors().text),
+                        )
+                        .wrap(),
+                    );
+                }
+            }
         });
+    reexplain
+}
+
+/// Interactive learning metadata for a code block hovered in the editor during Guided Mode.
+pub(super) struct LearnBlockInfo {
+    /// 0-based inclusive line range `(start_line, end_line)` in the active editor buffer.
+    pub(super) line_range: (usize, usize),
+    pub(super) title: String,
+    pub(super) line_summary: String,
+    pub(super) why: Option<String>,
+    pub(super) detail: Option<String>,
+    pub(super) calls: Vec<String>,
+}
+
+/// Returns the learning block + explanation for `hovered_line` (0-based) in the active
+/// document while a Guided Mode session is active and `learn_hover` is enabled.
+pub(super) fn learn_block_for_hover(
+    session: Option<&GuidedSession>,
+    root: Option<&Path>,
+    learn_hover: bool,
+    mode: MatchMode,
+    doc_path: &Path,
+    buffer_text: &str,
+    hovered_line: usize,
+) -> Option<LearnBlockInfo> {
+    if !learn_hover {
+        return None;
+    }
+    let session = session?;
+    let rel = root.and_then(|r| relative_workspace_path(r, doc_path));
+    let buf_lines: Vec<&str> = buffer_text.lines().collect();
+    let hovered_text = buf_lines.get(hovered_line).copied().unwrap_or("");
+    if hovered_text.trim().is_empty() {
+        return None;
+    }
+
+    // 1. Try to match a specific guided step belonging to this file that covers `hovered_line`.
+    if let Some(rel_path) = rel.as_deref() {
+        for (idx, step) in session.plan.steps.iter().enumerate() {
+            if !paths_equal(rel_path, &step.path) {
+                continue;
+            }
+            if let Some((start, end)) = find_step_line_range(buffer_text, step, mode)
+                && hovered_line >= start
+                && hovered_line <= end
+            {
+                let step_line_note = step
+                    .lines
+                    .iter()
+                    .enumerate()
+                    .find(|(_, l)| lines_match(hovered_text, l, mode))
+                    .map(|(li, _)| step.line_note(li))
+                    .unwrap_or_else(|| describe_line(hovered_text).to_owned());
+                let calls = if !step.calls.is_empty() {
+                    step.calls.clone()
+                } else {
+                    analyze_block_calls(&step.lines, buffer_text)
+                };
+                return Some(LearnBlockInfo {
+                    line_range: (start, end),
+                    title: format!(
+                        "{} {}/{} · {}",
+                        tr("Step"),
+                        idx + 1,
+                        session.plan.steps.len(),
+                        step.path
+                    ),
+                    line_summary: step_line_note,
+                    why: step.why.clone(),
+                    detail: step.detail.clone(),
+                    calls,
+                });
+            }
+        }
+    }
+
+    // 2. Fallback: highlight the enclosing `{ ... }` block (or compact 3-line slice)
+    // around `hovered_line` and explain what it declares, does, and calls!
+    let (start, end) = find_brace_block_range(buffer_text, hovered_line)?;
+    let slice: Vec<String> = buf_lines
+        .iter()
+        .skip(start)
+        .take(end - start + 1)
+        .map(|s| (*s).to_owned())
+        .collect();
+    let header = slice
+        .first()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Block");
+    let calls = analyze_block_calls(&slice, buffer_text);
+    let declared = extract_declared_name(header);
+    let title = if let Some(name) = declared {
+        format!("{} · {name}", tr("Code block"))
+    } else {
+        format!("{} · L{}–{}", tr("Code block"), start + 1, end + 1)
+    };
+    Some(LearnBlockInfo {
+        line_range: (start, end),
+        title,
+        line_summary: describe_line(hovered_text).to_owned(),
+        why: Some(describe_line(header).to_owned()),
+        detail: None,
+        calls,
+    })
+}
+
+/// Finds the 0-based inclusive `(start_line, end_line)` in `buffer_text` spanned by `step`.
+pub(super) fn find_step_line_range(
+    buffer_text: &str,
+    step: &GuidedStep,
+    mode: MatchMode,
+) -> Option<(usize, usize)> {
+    let buf_lines: Vec<&str> = buffer_text.lines().collect();
+    let mut first: Option<usize> = None;
+    let mut last: Option<usize> = None;
+    for target in step.lines.iter().filter(|l| !l.trim().is_empty()) {
+        if let Some(pos) = buf_lines.iter().position(|l| lines_match(l, target, mode)) {
+            first = Some(first.map_or(pos, |f| f.min(pos)));
+            last = Some(last.map_or(pos, |l| l.max(pos)));
+        }
+    }
+    first.zip(last)
+}
+
+/// Finds the enclosing `{ ... }` block around `line_idx` (0-based), bounded so huge files
+/// don't highlight 500 lines at once.
+pub(super) fn find_brace_block_range(buffer_text: &str, line_idx: usize) -> Option<(usize, usize)> {
+    let lines: Vec<&str> = buffer_text.lines().collect();
+    if line_idx >= lines.len() {
+        return None;
+    }
+    // Walk upward to find the nearest unmatched `{` opening this block.
+    let mut depth: i32 = 0;
+    let mut start = line_idx;
+    let mut found_open = false;
+    for i in (line_idx.saturating_sub(40)..=line_idx).rev() {
+        let l = lines[i];
+        let opens = l.chars().filter(|&c| c == '{').count() as i32;
+        let closes = l.chars().filter(|&c| c == '}').count() as i32;
+        if i == line_idx && opens > closes {
+            start = i;
+            found_open = true;
+            break;
+        }
+        depth += closes - opens;
+        if depth < 0 {
+            start = i;
+            found_open = true;
+            break;
+        }
+    }
+    if !found_open {
+        let lo = line_idx.saturating_sub(1);
+        let hi = (line_idx + 1).min(lines.len().saturating_sub(1));
+        return Some((lo, hi));
+    }
+    // Walk downward from `start` until braces balance.
+    let mut balance: i32 = 0;
+    let max_end = (start + 45).min(lines.len().saturating_sub(1));
+    let mut end = start;
+    for (i, l) in lines.iter().enumerate().take(max_end + 1).skip(start) {
+        balance += l.chars().filter(|&c| c == '{').count() as i32;
+        balance -= l.chars().filter(|&c| c == '}').count() as i32;
+        end = i;
+        if balance <= 0 && i > start {
+            break;
+        }
+    }
+    if line_idx >= start && line_idx <= end {
+        Some((start, end))
+    } else {
+        Some((line_idx, line_idx))
+    }
+}
+
+/// Extracts a concise function/component/type name from a block header line.
+fn extract_declared_name(header: &str) -> Option<String> {
+    let keywords = [
+        "export default async function ",
+        "export async function ",
+        "export default function ",
+        "export function ",
+        "async function ",
+        "function ",
+        "pub async fn ",
+        "pub fn ",
+        "fn ",
+        "def ",
+        "class ",
+        "struct ",
+        "const ",
+    ];
+    for kw in keywords {
+        if let Some(rest) = header.strip_prefix(kw) {
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            if !name.is_empty() {
+                return Some(name);
+            }
+        }
+    }
+    None
+}
+
+/// Lightweight static call-flow analyzer: detects which functions/methods a block calls
+/// and notes whether each callee is defined locally, imported, or a method/hook call.
+pub(super) fn analyze_block_calls(lines: &[String], file_text: &str) -> Vec<String> {
+    const IGNORED: &[&str] = &[
+        "if", "for", "while", "match", "switch", "catch", "return", "sizeof", "typeof", "await",
+        "Some", "None", "Ok", "Err", "vec", "format", "println", "eprintln", "assert",
+    ];
+    let caller = lines
+        .iter()
+        .find_map(|l| extract_declared_name(l.trim()))
+        .unwrap_or_else(|| tr("This block").to_owned());
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed.starts_with("//") || trimmed.starts_with('#') || trimmed.starts_with("/*") {
+            continue;
+        }
+        let bytes = trimmed.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'(' && i > 0 {
+                let mut start = i;
+                while start > 0
+                    && (bytes[start - 1].is_ascii_alphanumeric() || bytes[start - 1] == b'_')
+                {
+                    start -= 1;
+                }
+                if start < i {
+                    let name = &trimmed[start..i];
+                    let is_decl = trimmed.starts_with(&format!("fn {name}("))
+                        || trimmed.starts_with(&format!("pub fn {name}("))
+                        || trimmed.starts_with(&format!("function {name}("))
+                        || trimmed.starts_with(&format!("export function {name}("))
+                        || trimmed.starts_with(&format!("export async function {name}("))
+                        || trimmed.starts_with(&format!("def {name}("));
+                    if !is_decl
+                        && name.len() >= 2
+                        && !IGNORED.contains(&name)
+                        && seen.insert(name.to_owned())
+                    {
+                        let is_method = start > 0 && bytes[start - 1] == b'.';
+                        let role = if name.starts_with("use") && name.chars().nth(3).is_some_and(char::is_uppercase) {
+                            tr("React hook")
+                        } else if is_method {
+                            tr("method call")
+                        } else if !file_text.is_empty()
+                            && (file_text.contains(&format!("import")) && file_text.contains(name))
+                        {
+                            tr("imported function")
+                        } else {
+                            tr("function call")
+                        };
+                        out.push(format!("{caller} → {name}() ({role})"));
+                        if out.len() >= 6 {
+                            return out;
+                        }
+                    }
+                }
+            }
+            i += 1;
+        }
+    }
+    out
 }
 
 /// Width a footer button needs for `text` at the footer size, padding included.
@@ -2019,6 +2710,7 @@ mod tests {
                 why: Some("Start entry file".into()),
                 detail: None,
                 notes: Vec::new(),
+                calls: Vec::new(),
             },
             GuidedStep {
                 path: "src/routes/home.tsx".into(),
@@ -2028,6 +2720,7 @@ mod tests {
                 why: Some("Create home route".into()),
                 detail: None,
                 notes: Vec::new(),
+                calls: Vec::new(),
             },
         ];
 
@@ -2051,6 +2744,7 @@ mod tests {
                 why: None,
                 detail: None,
                 notes: Vec::new(),
+                calls: Vec::new(),
             },
             GuidedStep {
                 path: "src/math.ts".into(),
@@ -2060,6 +2754,7 @@ mod tests {
                 why: None,
                 detail: None,
                 notes: Vec::new(),
+                calls: Vec::new(),
             },
         ];
         let ordered = normalize_plan_order(steps, FlowOrder::BottomUp);
@@ -2123,6 +2818,7 @@ mod tests {
             why: None,
             detail: Some("Entry".into()),
             notes: vec!["first".into(), "second".into()],
+            calls: Vec::new(),
         };
         let (head, tail) = step.split_at(1);
         assert_eq!(head.notes, vec!["first".to_owned()]);
@@ -2140,5 +2836,15 @@ mod tests {
             .line_note(0),
             "Stores a value in a named variable."
         );
+    }
+
+    #[test]
+    fn learn_helpers_detect_brace_blocks_and_call_flow() {
+        let code = "import { saveUser } from './db';\n\nexport async function register(email: string) {\n    const clean = email.trim();\n    return saveUser(clean);\n}\n";
+        assert_eq!(find_brace_block_range(code, 3), Some((2, 5)));
+        let lines: Vec<String> = code.lines().skip(2).take(4).map(str::to_owned).collect();
+        let calls = analyze_block_calls(&lines, code);
+        assert!(calls.iter().any(|c| c.contains("register") && c.contains("trim()")));
+        assert!(calls.iter().any(|c| c.contains("register") && c.contains("saveUser()")));
     }
 }

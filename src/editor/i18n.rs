@@ -77,6 +77,59 @@ pub(super) fn trf(template: &'static str, values: &[(&str, String)]) -> String {
 }
 
 const SPANISH: &[(&str, &str)] = &[
+    (
+        "Open Guided Mode — learn by prompt, link, or code-along",
+        "Abrir Modo Guiado — aprendé con un prompt, link o solo código",
+    ),
+    ("Guided Learning Studio", "Estudio de Aprendizaje Guiado"),
+    (
+        "Learn by prompt, repo, or course link — step by step, friendly and hands-on.",
+        "Aprendé con un prompt, un repo o un link de curso — paso a paso, claro y práctico.",
+    ),
+    ("Learn mode", "Aprender"),
+    (
+        "Friendly explanations, hover call-flow, re-explain & XP",
+        "Explicaciones claras, hover con llamadas, re-explicar y XP",
+    ),
+    ("Code only", "Solo código"),
+    (
+        "Clean karaoke code-along without extra theory",
+        "Solo código con karaoke, sin teoría extra",
+    ),
+    (
+        "Pure code-along without theory cards",
+        "Solo código paso a paso sin tarjetas de teoría",
+    ),
+    (
+        "Interactive tutor with explanations, hover & XP",
+        "Tutor interactivo con explicaciones, hover y puntos XP",
+    ),
+    (
+        "Paste a link (e.g. aprenderust.dev, GitHub repo) or write what you want to learn…",
+        "Pegá un link (ej. aprenderust.dev, repo de GitHub) o escribí qué querés aprender…",
+    ),
+    ("Building lesson…", "Armando lección…"),
+    ("Start lesson →", "Empezar lección →"),
+    ("Quick start", "Inicio rápido"),
+    ("Learn this repo", "Aprender de este repo"),
+    ("Hands-on lab", "Lab práctico"),
+    ("Explain another way ↻", "Explicámelo de otra forma ↻"),
+    (
+        "Ask the AI to explain this block in simpler words with an analogy",
+        "Pedile a la IA que explique este bloque de otra forma, más simple y con una analogía",
+    ),
+    ("Learn hover", "Hover didáctico"),
+    (
+        "Highlight code blocks on hover in the editor to explain what they do and what calls what",
+        "Resaltar bloques de código al pasar el mouse en el editor para explicar qué hacen y qué función llama a qué",
+    ),
+    ("Call flow", "Flujo de llamadas"),
+    ("Why this block", "Por qué este bloque"),
+    ("Code block", "Bloque de código"),
+    ("React hook", "hook de React"),
+    ("method call", "llamada a método"),
+    ("imported function", "función importada"),
+    ("function call", "llamada a función"),
     ("Save your changes?", "¿Guardar los cambios?"),
     ("This file has unsaved changes.", "Este archivo tiene cambios sin guardar."),
     (
@@ -1159,6 +1212,59 @@ const SPANISH: &[(&str, &str)] = &[
     ("Confirm", "Confirmar"),
     ("Discard", "Descartar"),
     ("Keep editing", "Seguir editando"),
+    (
+        "Open Guided Mode — learn by prompt, link, or code-along",
+        "Abrir Modo Guiado — aprendé con un prompt, link o solo código",
+    ),
+    ("Guided Learning Studio", "Estudio de Aprendizaje Guiado"),
+    (
+        "Learn by prompt, repo, or course link — step by step, friendly and hands-on.",
+        "Aprendé con un prompt, un repo o un link de curso — paso a paso, claro y práctico.",
+    ),
+    ("Learn mode", "Aprender"),
+    (
+        "Friendly explanations, hover call-flow, re-explain & XP",
+        "Explicaciones claras, hover con llamadas, re-explicar y XP",
+    ),
+    ("Code only", "Solo código"),
+    (
+        "Clean karaoke code-along without extra theory",
+        "Solo código con karaoke, sin teoría extra",
+    ),
+    (
+        "Pure code-along without theory cards",
+        "Solo código paso a paso sin tarjetas de teoría",
+    ),
+    (
+        "Interactive tutor with explanations, hover & XP",
+        "Tutor interactivo con explicaciones, hover y puntos XP",
+    ),
+    (
+        "Paste a link (e.g. aprenderust.dev, GitHub repo) or write what you want to learn…",
+        "Pegá un link (ej. aprenderust.dev, repo de GitHub) o escribí qué querés aprender…",
+    ),
+    ("Building lesson…", "Armando lección…"),
+    ("Start lesson →", "Empezar lección →"),
+    ("Quick start", "Inicio rápido"),
+    ("Learn this repo", "Aprender de este repo"),
+    ("Hands-on lab", "Lab práctico"),
+    ("Explain another way ↻", "Explicámelo de otra forma ↻"),
+    (
+        "Ask the AI to explain this block in simpler words with an analogy",
+        "Pedile a la IA que explique este bloque de otra forma, más simple y con una analogía",
+    ),
+    ("Learn hover", "Hover didáctico"),
+    (
+        "Highlight code blocks on hover in the editor to explain what they do and what calls what",
+        "Resaltar bloques de código al pasar el mouse en el editor para explicar qué hacen y qué función llama a qué",
+    ),
+    ("Call flow", "Flujo de llamadas"),
+    ("Why this block", "Por qué este bloque"),
+    ("Code block", "Bloque de código"),
+    ("React hook", "hook de React"),
+    ("method call", "llamada a método"),
+    ("imported function", "función importada"),
+    ("function call", "llamada a función"),
     ("Save your changes?", "¿Guardar los cambios?"),
     (
         "This file has unsaved changes.",
