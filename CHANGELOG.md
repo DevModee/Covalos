@@ -1,0 +1,66 @@
+# Changelog
+
+Notable changes per published build. Versions follow the internal build number in
+`Cargo.toml` (see [`docs/RELEASE.md`](docs/RELEASE.md)); the public name is "Beta" plus that
+number. Builds before 0.8.4 are described only in the git history.
+
+## [0.8.8] - 2026-11-25
+
+### Added
+
+- Release builds for macOS (Apple silicon and Intel, `.dmg`) and Linux x86_64 (`.AppImage`
+  and `.deb`) next to the Windows installer, produced by `.github/workflows/release.yml`.
+  These builds are new and less tested than Windows.
+- CI workflow running `cargo fmt`, Clippy and the test suite on Windows, macOS and Linux.
+
+### Changed
+
+- The Luma Notch shares the top bar fill and joins it with concave corners, so it reads as
+  part of the window chrome instead of a floating card.
+- The Luma mascot faces the cursor and changes expression with the agent state.
+- The bottom gap that appeared on maximized windows next to the Windows taskbar is gone.
+- Guided Mode launcher copy describes what Learn and Code only do.
+
+### Fixed
+
+- Learn hover labelled every call as an "imported function" in any file that contained the
+  word `import`. It now checks import, `use`, `from` and `require` lines for the identifier.
+- The Spanish translation table had duplicated entries; a test now rejects repeated keys.
+
+## [0.8.7]
+
+### Added
+
+- Guided Learning Studio: a launcher that takes a prompt, a repository or a course link and
+  builds a step-by-step plan.
+- Two Guided styles: **Learn** (short explanation per line, call flow on hover,
+  "Explain another way", XP and streak) and **Code only** (the lines to type, without
+  explanation cards).
+- Learn hover: hovering a code block in the editor highlights it and lists what it calls.
+
+### Changed
+
+- Luma takes its colours from the active theme.
+
+## [0.8.5]
+
+### Added
+
+- `Ctrl+P` also searches Settings (English and Spanish labels and keywords).
+- Guided Mode reconciles its steps with the files on disk, so work written by an agent or by
+  hand marks steps as done.
+- Save prompt when closing files with unsaved changes.
+
+### Changed
+
+- Luma Notch layout and terminal panel polish.
+
+## [0.8.4]
+
+### Added
+
+- Nocturne colour theme and syntax palette.
+- Luma Notch at the top of the window, with Home and Chat tabs.
+- Guided Mode can open in its own window, for a second monitor.
+- Code minimap with an `Alt` peek.
+- Short splash on launch.
