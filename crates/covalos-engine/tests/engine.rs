@@ -254,8 +254,10 @@ fn web_app_goal_runs_end_to_end_and_replays_identically() {
 #[test]
 fn parallelism_is_bounded() {
     let dir = tempfile::tempdir().unwrap();
+    // Long enough that all three slots fill before the first task ends, even on a
+    // loaded CI runner; at 120 ms the peak was sometimes 2.
     let slow = |a: &Assignment, ch: &Channel| {
-        ch.sleep(Duration::from_millis(120));
+        ch.sleep(Duration::from_millis(400));
         deliver(a, ch)
     };
     let mut executor = Scripted::default();
@@ -524,7 +526,9 @@ fn approvals_expire_as_denials() {
         deliver(a, ch)
     }));
     let mut deps = deps(executor, dir.path());
-    deps.config.approval_ttl_ms = 50;
+    // Long enough to observe the pending approval before it expires on a slow runner;
+    // at 50 ms the first check sometimes found it already expired.
+    deps.config.approval_ttl_ms = 500;
     let mut engine = Engine::start(
         PlanId::new("p").unwrap(),
         spec(vec![task("a", "backend", &[])]),
@@ -534,7 +538,7 @@ fn approvals_expire_as_denials() {
     )
     .unwrap();
     assert_eq!(engine.run_until(LONG).unwrap(), Progress::AwaitingApproval);
-    std::thread::sleep(Duration::from_millis(80));
+    std::thread::sleep(Duration::from_millis(600));
     assert_eq!(
         engine.run_until(LONG).unwrap(),
         Progress::Settled(PlanState::Succeeded)
