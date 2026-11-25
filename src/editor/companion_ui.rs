@@ -14,7 +14,8 @@ const ISLAND_WIDTH: f32 = 576.0;
 fn draw_chat_bubble(painter: &egui::Painter, center: egui::Pos2, color: egui::Color32, size: f32) {
     let w = size * 0.92;
     let h = size * 0.68;
-    let body = egui::Rect::from_center_size(center - egui::vec2(0.0, size * 0.08), egui::vec2(w, h));
+    let body =
+        egui::Rect::from_center_size(center - egui::vec2(0.0, size * 0.08), egui::vec2(w, h));
     painter.rect_filled(body, (size * 0.22).max(2.0), color);
     let tail = vec![
         egui::pos2(body.left() + w * 0.20, body.bottom() - 1.0),
@@ -234,27 +235,29 @@ impl Editor {
         // Right: Effort pills · Settings · Close
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 5.0;
-            let pill_icon = |ui: &mut Ui, icon: Option<Icon>, tip: &str, active: bool| -> egui::Response {
-                let (r, resp) = ui.allocate_exact_size(egui::vec2(30.0, 26.0), egui::Sense::click());
-                let bg = if active {
-                    colors().elevated
-                } else if resp.hovered() {
-                    colors().hover
-                } else {
-                    egui::Color32::TRANSPARENT
+            let pill_icon =
+                |ui: &mut Ui, icon: Option<Icon>, tip: &str, active: bool| -> egui::Response {
+                    let (r, resp) =
+                        ui.allocate_exact_size(egui::vec2(30.0, 26.0), egui::Sense::click());
+                    let bg = if active {
+                        colors().elevated
+                    } else if resp.hovered() {
+                        colors().hover
+                    } else {
+                        egui::Color32::TRANSPARENT
+                    };
+                    ui.painter().rect_filled(r, 13, bg);
+                    let fg = if active || resp.hovered() {
+                        colors().text
+                    } else {
+                        colors().muted
+                    };
+                    match icon {
+                        Some(ic) => draw_icon_sized(ui.painter(), r.center(), ic, fg, 14.0),
+                        None => draw_chat_bubble(ui.painter(), r.center(), fg, 13.0),
+                    }
+                    pointer(resp).on_hover_text(tr(tip))
                 };
-                ui.painter().rect_filled(r, 13, bg);
-                let fg = if active || resp.hovered() {
-                    colors().text
-                } else {
-                    colors().muted
-                };
-                match icon {
-                    Some(ic) => draw_icon_sized(ui.painter(), r.center(), ic, fg, 14.0),
-                    None => draw_chat_bubble(ui.painter(), r.center(), fg, 13.0),
-                }
-                pointer(resp).on_hover_text(tr(tip))
-            };
             if pill_icon(ui, Some(Icon::Home), "Home", active_tab == 0).clicked() {
                 active_tab = 0;
             }
@@ -539,7 +542,10 @@ impl Editor {
                         ui.add(egui::Label::new(muted(clean)).truncate());
                     }
                     if !session.scope.is_empty() {
-                        let clean = session.scope.strip_prefix(r"\\?\").unwrap_or(&session.scope);
+                        let clean = session
+                            .scope
+                            .strip_prefix(r"\\?\")
+                            .unwrap_or(&session.scope);
                         ui.add(egui::Label::new(muted(clean)).truncate());
                     }
                     if let Some(external) = &session.external {
@@ -829,17 +835,16 @@ impl Editor {
                     );
                     // Subtle hairline only along the protruding curve below the top bar so
                     // there is zero seam against the top bar itself.
-                    let rim = egui::Stroke::new(
-                        1.0_f32,
-                        colors().border.gamma_multiply(0.55 * eased),
-                    );
+                    let rim =
+                        egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.55 * eased));
                     let br = f32::from(bottom_r);
                     let mut contour = Vec::with_capacity(64);
                     contour.extend_from_slice(&left_arc);
                     // Bottom-left corner arc
                     let bl_c = egui::pos2(outer.left() + br, outer.bottom() - br);
                     for i in 0..=8 {
-                        let a = std::f32::consts::PI - std::f32::consts::FRAC_PI_2 * (i as f32 / 8.0);
+                        let a =
+                            std::f32::consts::PI - std::f32::consts::FRAC_PI_2 * (i as f32 / 8.0);
                         contour.push(bl_c + egui::vec2(a.cos() * br, a.sin() * br));
                     }
                     // Bottom-right corner arc

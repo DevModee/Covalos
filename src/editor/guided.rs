@@ -1100,18 +1100,22 @@ impl super::Editor {
         let (rel, text) = active_pair.unwrap_or((None, String::new()));
         let mode = self.preferences.guided.match_mode;
         let root = self.root.clone();
-        let before = self
-            .guided
-            .session
-            .as_ref()
-            .map(|s| (s.step_index, s.line_index, s.completed_steps.iter().filter(|&&c| c).count()));
+        let before = self.guided.session.as_ref().map(|s| {
+            (
+                s.step_index,
+                s.line_index,
+                s.completed_steps.iter().filter(|&&c| c).count(),
+            )
+        });
         self.guided
             .sync_with_editor(rel.as_deref(), &text, mode, root.as_deref());
-        let after = self
-            .guided
-            .session
-            .as_ref()
-            .map(|s| (s.step_index, s.line_index, s.completed_steps.iter().filter(|&&c| c).count()));
+        let after = self.guided.session.as_ref().map(|s| {
+            (
+                s.step_index,
+                s.line_index,
+                s.completed_steps.iter().filter(|&&c| c).count(),
+            )
+        });
         if let (Some((bs, bl, bd)), Some((as_, al, ad))) = (before, after) {
             let mut gained = 0u32;
             if as_ == bs && al > bl {
@@ -1218,7 +1222,11 @@ impl super::Editor {
                     open = false;
                 }
                 egui::CentralPanel::default()
-                    .frame(Frame::new().fill(colors().canvas).inner_margin(Margin::same(18)))
+                    .frame(
+                        Frame::new()
+                            .fill(colors().canvas)
+                            .inner_margin(Margin::same(18)),
+                    )
                     .show(vctx, |ui| {
                         show_contents(ui, &mut draft, &mut actions, &mut launch_prompt);
                     });
@@ -1303,14 +1311,18 @@ impl super::Editor {
         {
             self.open_guided_file(&path);
         }
-        if actions.prev_now && let Some(path) = self.guided.prev_step(self.root.as_deref()) {
+        if actions.prev_now
+            && let Some(path) = self.guided.prev_step(self.root.as_deref())
+        {
             self.open_guided_file(&path);
         }
         if actions.skip_line_now {
             self.preferences.guided.streak = 0;
             self.guided.skip_line(self.root.as_deref());
         }
-        if actions.advance_now && let Some(path) = self.guided.advance_step(self.root.as_deref()) {
+        if actions.advance_now
+            && let Some(path) = self.guided.advance_step(self.root.as_deref())
+        {
             self.open_guided_file(&path);
         }
         if actions.clear_now {
@@ -1559,7 +1571,10 @@ fn render_guided_launcher(
 fn xp_badge(ui: &mut egui::Ui, xp: u32, streak: u32, recent_xp: Option<u32>) {
     Frame::new()
         .fill(colors().accent_bg)
-        .stroke(egui::Stroke::new(1.0_f32, colors().accent.gamma_multiply(0.45)))
+        .stroke(egui::Stroke::new(
+            1.0_f32,
+            colors().accent.gamma_multiply(0.45),
+        ))
         .corner_radius(10)
         .inner_margin(Margin::symmetric(8, 3))
         .show(ui, |ui| {
@@ -2230,7 +2245,10 @@ fn detail_card(ui: &mut egui::Ui, step: &GuidedStep, line_idx: usize, complete: 
     };
     Frame::new()
         .fill(colors().elevated)
-        .stroke(egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.75)))
+        .stroke(egui::Stroke::new(
+            1.0_f32,
+            colors().border.gamma_multiply(0.75),
+        ))
         .corner_radius(12)
         .inner_margin(Margin::symmetric(14, 11))
         .show(ui, |ui| {
@@ -2545,7 +2563,9 @@ pub(super) fn analyze_block_calls(lines: &[String], file_text: &str) -> Vec<Stri
                         && seen.insert(name.to_owned())
                     {
                         let is_method = start > 0 && bytes[start - 1] == b'.';
-                        let role = if name.starts_with("use") && name.chars().nth(3).is_some_and(char::is_uppercase) {
+                        let role = if name.starts_with("use")
+                            && name.chars().nth(3).is_some_and(char::is_uppercase)
+                        {
                             tr("React hook")
                         } else if is_method {
                             tr("method call")
@@ -2844,7 +2864,15 @@ mod tests {
         assert_eq!(find_brace_block_range(code, 3), Some((2, 5)));
         let lines: Vec<String> = code.lines().skip(2).take(4).map(str::to_owned).collect();
         let calls = analyze_block_calls(&lines, code);
-        assert!(calls.iter().any(|c| c.contains("register") && c.contains("trim()")));
-        assert!(calls.iter().any(|c| c.contains("register") && c.contains("saveUser()")));
+        assert!(
+            calls
+                .iter()
+                .any(|c| c.contains("register") && c.contains("trim()"))
+        );
+        assert!(
+            calls
+                .iter()
+                .any(|c| c.contains("register") && c.contains("saveUser()"))
+        );
     }
 }

@@ -131,7 +131,10 @@ const SPANISH: &[(&str, &str)] = &[
     ("imported function", "función importada"),
     ("function call", "llamada a función"),
     ("Save your changes?", "¿Guardar los cambios?"),
-    ("This file has unsaved changes.", "Este archivo tiene cambios sin guardar."),
+    (
+        "This file has unsaved changes.",
+        "Este archivo tiene cambios sin guardar.",
+    ),
     (
         "One or more files have unsaved changes.",
         "Uno o más archivos tienen cambios sin guardar.",
@@ -155,12 +158,18 @@ const SPANISH: &[(&str, &str)] = &[
         "Buscar archivos y comandos (Ctrl+P)",
     ),
     ("Open Agent Hub", "Abrir Agent Hub"),
-    ("Scale spring and hover animations.", "Escala las animaciones de interfaz."),
+    (
+        "Scale spring and hover animations.",
+        "Escala las animaciones de interfaz.",
+    ),
     (
         "Independent text and icon scale for the file tree.",
         "Escala independiente para el árbol de archivos.",
     ),
-    ("Scale the whole window interface.", "Escala toda la interfaz de la ventana."),
+    (
+        "Scale the whole window interface.",
+        "Escala toda la interfaz de la ventana.",
+    ),
     (
         "How views enter when switching screens.",
         "Cómo entran las vistas al cambiar de pantalla.",
@@ -186,8 +195,14 @@ const SPANISH: &[(&str, &str)] = &[
         "Open Guided Mode in its own window so you can move or maximize it on another screen",
         "Abrir el Modo Guiado en una ventana propia para moverlo o maximizarlo en otra pantalla",
     ),
-    ("Increase Guided Mode text size", "Aumentar tamaño del texto guiado"),
-    ("Decrease Guided Mode text size", "Reducir tamaño del texto guiado"),
+    (
+        "Increase Guided Mode text size",
+        "Aumentar tamaño del texto guiado",
+    ),
+    (
+        "Decrease Guided Mode text size",
+        "Reducir tamaño del texto guiado",
+    ),
     ("Steps", "Pasos"),
     ("Copy line", "Copiar línea"),
     ("Minimap", "Minimapa"),

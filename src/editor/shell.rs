@@ -230,25 +230,97 @@ enum Selection {
 }
 
 const SETTINGS_ITEMS: &[(&str, &str, SettingsSection)] = &[
-    ("Font ligatures", "ligaduras fuente font symbols", SettingsSection::Editor),
-    ("Code font", "fuente codigo font monospace hack ibm plex", SettingsSection::Editor),
-    ("Interface font", "fuente interfaz font geist ubuntu", SettingsSection::Appearance),
+    (
+        "Font ligatures",
+        "ligaduras fuente font symbols",
+        SettingsSection::Editor,
+    ),
+    (
+        "Code font",
+        "fuente codigo font monospace hack ibm plex",
+        SettingsSection::Editor,
+    ),
+    (
+        "Interface font",
+        "fuente interfaz font geist ubuntu",
+        SettingsSection::Appearance,
+    ),
     ("Word wrap", "ajuste de linea wrap", SettingsSection::Editor),
-    ("Code minimap", "minimapa mapa visor code", SettingsSection::Editor),
-    ("Inline suggestions", "sugerencias autocompletado ghost", SettingsSection::Editor),
-    ("Code colors", "colores sintaxis syntax", SettingsSection::Editor),
-    ("Theme", "tema nocturne obsidian oled daylight light", SettingsSection::Appearance),
-    ("Surface brightness", "claridad brillo superficies", SettingsSection::Appearance),
-    ("Motion intensity", "movimiento animaciones", SettingsSection::Appearance),
-    ("Explorer zoom", "zoom explorador", SettingsSection::Appearance),
-    ("Interface scale", "escala interfaz scale", SettingsSection::Appearance),
-    ("Reduce motion", "reducir movimiento", SettingsSection::Appearance),
-    ("Background", "fondo dither ascii", SettingsSection::Background),
-    ("Language", "idioma spanish english", SettingsSection::General),
-    ("Providers", "proveedores ia claude gemini codex antigravity", SettingsSection::Agents),
-    ("Notifications", "notificaciones", SettingsSection::Notifications),
-    ("COVALOS account", "cuenta cloud sync", SettingsSection::Account),
-    ("Integrations", "integraciones discord", SettingsSection::Integrations),
+    (
+        "Code minimap",
+        "minimapa mapa visor code",
+        SettingsSection::Editor,
+    ),
+    (
+        "Inline suggestions",
+        "sugerencias autocompletado ghost",
+        SettingsSection::Editor,
+    ),
+    (
+        "Code colors",
+        "colores sintaxis syntax",
+        SettingsSection::Editor,
+    ),
+    (
+        "Theme",
+        "tema nocturne obsidian oled daylight light",
+        SettingsSection::Appearance,
+    ),
+    (
+        "Surface brightness",
+        "claridad brillo superficies",
+        SettingsSection::Appearance,
+    ),
+    (
+        "Motion intensity",
+        "movimiento animaciones",
+        SettingsSection::Appearance,
+    ),
+    (
+        "Explorer zoom",
+        "zoom explorador",
+        SettingsSection::Appearance,
+    ),
+    (
+        "Interface scale",
+        "escala interfaz scale",
+        SettingsSection::Appearance,
+    ),
+    (
+        "Reduce motion",
+        "reducir movimiento",
+        SettingsSection::Appearance,
+    ),
+    (
+        "Background",
+        "fondo dither ascii",
+        SettingsSection::Background,
+    ),
+    (
+        "Language",
+        "idioma spanish english",
+        SettingsSection::General,
+    ),
+    (
+        "Providers",
+        "proveedores ia claude gemini codex antigravity",
+        SettingsSection::Agents,
+    ),
+    (
+        "Notifications",
+        "notificaciones",
+        SettingsSection::Notifications,
+    ),
+    (
+        "COVALOS account",
+        "cuenta cloud sync",
+        SettingsSection::Account,
+    ),
+    (
+        "Integrations",
+        "integraciones discord",
+        SettingsSection::Integrations,
+    ),
 ];
 
 impl Editor {
@@ -2781,7 +2853,11 @@ impl Editor {
                         }));
                     } else if palette.category == PaletteCategory::Settings {
                         choices.extend(SETTINGS_ITEMS.iter().map(|(label, _, section)| {
-                            (Selection::Setting(*section), (*label).to_owned(), "Settings")
+                            (
+                                Selection::Setting(*section),
+                                (*label).to_owned(),
+                                "Settings",
+                            )
                         }));
                     } else {
                         choices.extend(
@@ -2799,8 +2875,10 @@ impl Editor {
                 } else {
                     let filter = query.to_lowercase().replace('\\', "/");
                     // 1. Matching workspace files
-                    if matches!(palette.category, PaletteCategory::All | PaletteCategory::Files)
-                        && let Some(root) = &self.root
+                    if matches!(
+                        palette.category,
+                        PaletteCategory::All | PaletteCategory::Files
+                    ) && let Some(root) = &self.root
                     {
                         choices.extend(
                             palette
@@ -2858,11 +2936,7 @@ impl Editor {
                                             || tr(label).to_lowercase().contains(&filter))
                                 })
                                 .map(|(action, label, _)| {
-                                    (
-                                        Selection::Action(*action),
-                                        (*label).to_owned(),
-                                        "Commands",
-                                    )
+                                    (Selection::Action(*action), (*label).to_owned(), "Commands")
                                 }),
                         );
                     }
@@ -2918,13 +2992,8 @@ impl Editor {
                                 Selection::Action(Action::Terminal) => "Ctrl `",
                                 Selection::Action(_) => "Command",
                             };
-                            let response = palette_row(
-                                ui,
-                                &choice,
-                                &label,
-                                hint,
-                                index == palette.selected,
-                            );
+                            let response =
+                                palette_row(ui, &choice, &label, hint, index == palette.selected);
                             if (up || down) && index == palette.selected {
                                 response.scroll_to_me(None);
                             }

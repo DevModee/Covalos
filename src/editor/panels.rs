@@ -435,7 +435,9 @@ impl Editor {
                         }
                         if ui
                             .selectable_label(self.guided.open, tr("Guided Mode"))
-                            .on_hover_text(tr("Open Guided Mode — learn by prompt, link, or code-along"))
+                            .on_hover_text(tr(
+                                "Open Guided Mode — learn by prompt, link, or code-along",
+                            ))
                             .clicked()
                         {
                             self.guided.open = !self.guided.open;
@@ -1276,7 +1278,10 @@ impl Editor {
                                 let clip = ui.clip_rect();
                                 let block_rect = egui::Rect::from_min_max(
                                     egui::pos2(gutter.right() + 6.0, y0 - 2.0),
-                                    egui::pos2((clip.right() - 12.0).max(gutter.right() + 80.0), y1 + 2.0),
+                                    egui::pos2(
+                                        (clip.right() - 12.0).max(gutter.right() + 80.0),
+                                        y1 + 2.0,
+                                    ),
                                 );
                                 let tint = palette.bracket;
                                 shapes.push(egui::Shape::rect_filled(
@@ -1298,7 +1303,13 @@ impl Editor {
                                     2,
                                     tint.gamma_multiply(0.85),
                                 ));
-                                paint_learn_hover_card(ui.ctx(), hover_pos, block_rect, &info, tint);
+                                paint_learn_hover_card(
+                                    ui.ctx(),
+                                    hover_pos,
+                                    block_rect,
+                                    &info,
+                                    tint,
+                                );
                             }
                         }
                     }
@@ -1682,91 +1693,89 @@ impl Editor {
                     .map(|d| workspace::filename(&d.path))
                     .collect(),
             };
-            let modal = egui::Modal::new(Id::new("close_confirmation"))
-                .backdrop_color(egui::Color32::from_black_alpha(145))
-                .frame(modal_frame().inner_margin(Margin::same(22)))
-                .show(ctx, |ui| {
-                    ui.set_min_width(340.0);
-                    ui.set_max_width(400.0);
-                    ui.horizontal(|ui| {
-                        let (badge, _) =
-                            ui.allocate_exact_size(egui::vec2(34.0, 34.0), egui::Sense::hover());
-                        ui.painter().rect_filled(badge, 10, colors().accent_bg);
-                        draw_icon_sized(
-                            ui.painter(),
-                            badge.center(),
-                            Icon::Save,
-                            colors().accent,
-                            17.0,
-                        );
-                        ui.add_space(6.0);
-                        ui.vertical(|ui| {
-                            ui.label(
-                                RichText::new(tr("Save your changes?"))
-                                    .size(LEAD + 1.0)
-                                    .strong()
-                                    .color(colors().text),
+            let modal =
+                egui::Modal::new(Id::new("close_confirmation"))
+                    .backdrop_color(egui::Color32::from_black_alpha(145))
+                    .frame(modal_frame().inner_margin(Margin::same(22)))
+                    .show(ctx, |ui| {
+                        ui.set_min_width(340.0);
+                        ui.set_max_width(400.0);
+                        ui.horizontal(|ui| {
+                            let (badge, _) = ui
+                                .allocate_exact_size(egui::vec2(34.0, 34.0), egui::Sense::hover());
+                            ui.painter().rect_filled(badge, 10, colors().accent_bg);
+                            draw_icon_sized(
+                                ui.painter(),
+                                badge.center(),
+                                Icon::Save,
+                                colors().accent,
+                                17.0,
                             );
-                            ui.label(secondary(if matches!(action, Pending::CloseTab(_)) {
-                                "This file has unsaved changes."
-                            } else {
-                                "One or more files have unsaved changes."
-                            }));
-                        });
-                    });
-                    if !dirty_names.is_empty() {
-                        ui.add_space(10.0);
-                        egui::Frame::new()
-                            .fill(colors().inset)
-                            .stroke(egui::Stroke::new(1.0_f32, colors().border))
-                            .corner_radius(9)
-                            .inner_margin(Margin::symmetric(10, 7))
-                            .show(ui, |ui| {
-                                ui.set_width(ui.available_width());
+                            ui.add_space(6.0);
+                            ui.vertical(|ui| {
                                 ui.label(
-                                    RichText::new(dirty_names.join("  ·  "))
-                                        .size(SMALL)
-                                        .color(colors().secondary),
+                                    RichText::new(tr("Save your changes?"))
+                                        .size(LEAD + 1.0)
+                                        .strong()
+                                        .color(colors().text),
                                 );
+                                ui.label(secondary(if matches!(action, Pending::CloseTab(_)) {
+                                    "This file has unsaved changes."
+                                } else {
+                                    "One or more files have unsaved changes."
+                                }));
                             });
-                    }
-                    ui.add_space(16.0);
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.spacing_mut().item_spacing.x = 8.0;
-                        if pointer(ui.add(primary(tr("Save")).min_size(egui::vec2(88.0, 30.0))))
+                        });
+                        if !dirty_names.is_empty() {
+                            ui.add_space(10.0);
+                            egui::Frame::new()
+                                .fill(colors().inset)
+                                .stroke(egui::Stroke::new(1.0_f32, colors().border))
+                                .corner_radius(9)
+                                .inner_margin(Margin::symmetric(10, 7))
+                                .show(ui, |ui| {
+                                    ui.set_width(ui.available_width());
+                                    ui.label(
+                                        RichText::new(dirty_names.join("  ·  "))
+                                            .size(SMALL)
+                                            .color(colors().secondary),
+                                    );
+                                });
+                        }
+                        ui.add_space(16.0);
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.spacing_mut().item_spacing.x = 8.0;
+                            if pointer(ui.add(primary(tr("Save")).min_size(egui::vec2(88.0, 30.0))))
+                                .clicked()
+                            {
+                                return Some(true);
+                            }
+                            let discard = egui::Button::new(
+                                RichText::new(tr("Discard"))
+                                    .size(BODY)
+                                    .color(colors().error),
+                            )
+                            .fill(colors().error.gamma_multiply(0.12))
+                            .stroke(egui::Stroke::new(
+                                1.0_f32,
+                                colors().error.gamma_multiply(0.35),
+                            ))
+                            .corner_radius(CONTROL_RADIUS)
+                            .min_size(egui::vec2(88.0, 30.0));
+                            if pointer(ui.add(discard)).clicked() {
+                                return Some(false);
+                            }
+                            if pointer(ui.add(
+                                egui::Button::new(tr("Cancel")).min_size(egui::vec2(82.0, 30.0)),
+                            ))
                             .clicked()
-                        {
-                            return Some(true);
-                        }
-                        let discard = egui::Button::new(
-                            RichText::new(tr("Discard"))
-                                .size(BODY)
-                                .color(colors().error),
-                        )
-                        .fill(colors().error.gamma_multiply(0.12))
-                        .stroke(egui::Stroke::new(
-                            1.0_f32,
-                            colors().error.gamma_multiply(0.35),
-                        ))
-                        .corner_radius(CONTROL_RADIUS)
-                        .min_size(egui::vec2(88.0, 30.0));
-                        if pointer(ui.add(discard)).clicked() {
-                            return Some(false);
-                        }
-                        if pointer(
-                            ui.add(
-                                egui::Button::new(tr("Cancel"))
-                                    .min_size(egui::vec2(82.0, 30.0)),
-                            ),
-                        )
-                        .clicked()
-                        {
-                            ui.close();
-                        }
-                        None
-                    })
-                    .inner
-                });
+                            {
+                                ui.close();
+                            }
+                            None
+                        })
+                        .inner
+                    });
             match modal.inner {
                 Some(false) => self.perform(action, ctx),
                 Some(true) => {
@@ -1858,7 +1867,9 @@ fn paint_learn_hover_card(
 ) {
     let screen = ctx.content_rect();
     let card_w = 340.0_f32.min((screen.width() - 32.0).max(220.0));
-    let x = (hover_pos.x + 22.0).min(screen.right() - card_w - 16.0).max(screen.left() + 12.0);
+    let x = (hover_pos.x + 22.0)
+        .min(screen.right() - card_w - 16.0)
+        .max(screen.left() + 12.0);
     let below_y = (block_rect.bottom() + 8.0).min(screen.bottom() - 210.0);
     let y = if below_y > hover_pos.y + 16.0 {
         below_y
@@ -1929,9 +1940,7 @@ fn paint_learn_hover_card(
                         ui.add_space(4.0);
                         ui.add(
                             egui::Label::new(
-                                RichText::new(detail)
-                                    .size(SMALL)
-                                    .color(colors().text),
+                                RichText::new(detail).size(SMALL).color(colors().text),
                             )
                             .wrap(),
                         );
@@ -2347,9 +2356,8 @@ impl Editor {
             egui::Sense::click_and_drag(),
         );
         if alt_held && reveal > 0.3 {
-            ui.painter().add(
-                floating_shadow(active(), 18).as_shape(map_rect, 10),
-            );
+            ui.painter()
+                .add(floating_shadow(active(), 18).as_shape(map_rect, 10));
         }
         let painter = ui.painter().with_clip_rect(map_rect);
         // Clean frosted card backdrop
@@ -2462,7 +2470,10 @@ impl Editor {
         let top_frac = (scroll.state.offset.y / content_h).clamp(0.0, 1.0);
         let frac_h = (view_h / content_h).clamp(0.06, 1.0);
         let slider = egui::Rect::from_min_max(
-            egui::pos2(map_rect.left() + 2.0, inner.top() + top_frac * inner.height()),
+            egui::pos2(
+                map_rect.left() + 2.0,
+                inner.top() + top_frac * inner.height(),
+            ),
             egui::pos2(
                 map_rect.right() - 2.0,
                 (inner.top() + (top_frac + frac_h) * inner.height()).min(inner.bottom()),
@@ -2494,9 +2505,12 @@ impl Editor {
         }
 
         // Hover / Alt-peek floating code preview loupe
-        let hover_pos = interact
-            .hover_pos()
-            .or_else(|| interact.dragged().then(|| interact.interact_pointer_pos()).flatten());
+        let hover_pos = interact.hover_pos().or_else(|| {
+            interact
+                .dragged()
+                .then(|| interact.interact_pointer_pos())
+                .flatten()
+        });
         if let Some(pos) = hover_pos
             && reveal > 0.7
             && !lines.is_empty()
@@ -2507,14 +2521,13 @@ impl Editor {
             let start = target_line.saturating_sub(4);
             let end = (start + 9).min(total_lines);
             let snippet = lines[start..end].join("\n");
-            let lang = doc
-                .path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("");
+            let lang = doc.path.extension().and_then(|e| e.to_str()).unwrap_or("");
             let loupe_w = 340.0_f32.min((rect.width() - width - 36.0).max(180.0));
             let loupe_x = (map_rect.left() - loupe_w - 10.0).max(rect.left() + 12.0);
-            let loupe_y = (pos.y - 84.0).clamp(rect.top() + 8.0, (rect.bottom() - 180.0).max(rect.top() + 8.0));
+            let loupe_y = (pos.y - 84.0).clamp(
+                rect.top() + 8.0,
+                (rect.bottom() - 180.0).max(rect.top() + 8.0),
+            );
             egui::Area::new(Id::new(("minimap-loupe", &doc.path)))
                 .order(egui::Order::Tooltip)
                 .fixed_pos(egui::pos2(loupe_x, loupe_y))
@@ -2530,15 +2543,10 @@ impl Editor {
                             ui.set_width(loupe_w);
                             ui.horizontal(|ui| {
                                 ui.label(
-                                    RichText::new(format!(
-                                        "{} {}–{}",
-                                        tr("Lines"),
-                                        start + 1,
-                                        end
-                                    ))
-                                    .size(11.0)
-                                    .strong()
-                                    .color(colors().accent),
+                                    RichText::new(format!("{} {}–{}", tr("Lines"), start + 1, end))
+                                        .size(11.0)
+                                        .strong()
+                                        .color(colors().accent),
                                 );
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                     ui.label(
@@ -2631,7 +2639,9 @@ fn minimap_line_color(trimmed: &str) -> egui::Color32 {
     if trimmed.starts_with("//")
         || trimmed.starts_with("/*")
         || trimmed.starts_with('*')
-        || trimmed.starts_with('#') && !trimmed.starts_with("#[") && !trimmed.starts_with("#include")
+        || trimmed.starts_with('#')
+            && !trimmed.starts_with("#[")
+            && !trimmed.starts_with("#include")
     {
         colors().muted
     } else if trimmed.starts_with("fn ")

@@ -432,15 +432,13 @@ impl Editor {
             ui.spacing_mut().item_spacing.x = 3.0;
             for effort in Effort::ALL {
                 let selected = self.preferences.luma_effort == effort;
-                let btn = egui::Button::new(
-                    RichText::new(effort_name(effort))
-                        .size(11.0)
-                        .color(if selected {
-                            colors().text
-                        } else {
-                            colors().muted
-                        }),
-                )
+                let btn = egui::Button::new(RichText::new(effort_name(effort)).size(11.0).color(
+                    if selected {
+                        colors().text
+                    } else {
+                        colors().muted
+                    },
+                ))
                 .fill(if selected {
                     colors().elevated
                 } else {
@@ -472,8 +470,7 @@ impl Editor {
         let chat = &mut self.hub.agents.luma;
         let id = ui.make_persistent_id("luma-notch-composer");
         let focused = ui.memory(|m| m.has_focus(id));
-        let focus_t =
-            super::motion::state(ui, id.with("focus"), focused, super::motion::CONTROL);
+        let focus_t = super::motion::state(ui, id.with("focus"), focused, super::motion::CONTROL);
         let border = super::motion::blend(colors().border, colors().accent, focus_t);
         let mut send = None;
         Frame::new()
@@ -504,21 +501,16 @@ impl Editor {
                     }
                     let entered =
                         response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    let send_btn = egui::Button::new(
-                        RichText::new("↑").size(14.0).strong().color(if ready {
+                    let send_btn =
+                        egui::Button::new(RichText::new("↑").size(14.0).strong().color(if ready {
                             colors().canvas
                         } else {
                             colors().muted
-                        }),
-                    )
-                    .fill(if ready {
-                        colors().text
-                    } else {
-                        colors().hover
-                    })
-                    .stroke(egui::Stroke::NONE)
-                    .corner_radius(14)
-                    .min_size(egui::vec2(26.0, 26.0));
+                        }))
+                        .fill(if ready { colors().text } else { colors().hover })
+                        .stroke(egui::Stroke::NONE)
+                        .corner_radius(14)
+                        .min_size(egui::vec2(26.0, 26.0));
                     let button = pointer(ui.add_enabled(ready, send_btn));
                     if ready && (entered || button.clicked()) {
                         send = Some(std::mem::take(&mut chat.draft));
@@ -659,7 +651,10 @@ impl Editor {
         let mut has_active = false;
         Frame::new()
             .fill(colors().surface)
-            .stroke(egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.85)))
+            .stroke(egui::Stroke::new(
+                1.0_f32,
+                colors().border.gamma_multiply(0.85),
+            ))
             .corner_radius(12)
             .inner_margin(Margin::symmetric(12, 10))
             .show(ui, |ui| {

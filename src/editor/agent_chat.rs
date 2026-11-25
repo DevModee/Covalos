@@ -1852,7 +1852,10 @@ fn antigravity_progress_card(ui: &mut Ui, done_steps: &[String], active_step: &s
     let t = ui.input(|i| i.time) as f32;
     Frame::new()
         .fill(colors().inset)
-        .stroke(egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.85)))
+        .stroke(egui::Stroke::new(
+            1.0_f32,
+            colors().border.gamma_multiply(0.85),
+        ))
         .corner_radius(12)
         .inner_margin(Margin::symmetric(14, 12))
         .show(ui, |ui| {
@@ -1876,10 +1879,8 @@ fn antigravity_progress_card(ui: &mut Ui, done_steps: &[String], active_step: &s
                         egui::Stroke::new(1.2_f32, stroke_col),
                     );
                     ui.add(
-                        egui::Label::new(
-                            RichText::new(step).size(BODY).color(colors().muted),
-                        )
-                        .truncate(),
+                        egui::Label::new(RichText::new(step).size(BODY).color(colors().muted))
+                            .truncate(),
                     );
                 });
             }
@@ -1901,11 +1902,8 @@ fn antigravity_progress_card(ui: &mut Ui, done_steps: &[String], active_step: &s
                     } else {
                         0.75
                     };
-                    ui.painter().circle_filled(
-                        c + *off,
-                        1.7,
-                        colors().text.gamma_multiply(phase),
-                    );
+                    ui.painter()
+                        .circle_filled(c + *off, 1.7, colors().text.gamma_multiply(phase));
                 }
                 ui.add(
                     egui::Label::new(
@@ -2453,7 +2451,10 @@ fn new_conversation(
             ui.add_space(18.0);
             Frame::new()
                 .fill(colors().surface)
-                .stroke(egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.65)))
+                .stroke(egui::Stroke::new(
+                    1.0_f32,
+                    colors().border.gamma_multiply(0.65),
+                ))
                 .corner_radius(14)
                 .inner_margin(Margin::same(18))
                 .show(ui, |ui| {

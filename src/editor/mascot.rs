@@ -186,7 +186,11 @@ pub(super) fn paint(painter: &Painter, rect: Rect, pose: Pose) {
         if waving {
             let wave = (t * 7.5).sin() * 0.38 * m;
             let base = center + vec2(w * 1.18, h * 0.18);
-            let tip = base + vec2(paw_r * 1.35 * (0.8 + wave * 0.3), -paw_r * 1.45 + wave * paw_r);
+            let tip = base
+                + vec2(
+                    paw_r * 1.35 * (0.8 + wave * 0.3),
+                    -paw_r * 1.45 + wave * paw_r,
+                );
             painter.line_segment([base, tip], Stroke::new(paw_r * 1.65, pal.body));
         } else {
             let right_bob = if pose.mood == Mood::Coding {
