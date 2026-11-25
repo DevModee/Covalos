@@ -2569,9 +2569,7 @@ pub(super) fn analyze_block_calls(lines: &[String], file_text: &str) -> Vec<Stri
                             tr("React hook")
                         } else if is_method {
                             tr("method call")
-                        } else if !file_text.is_empty()
-                            && (file_text.contains(&format!("import")) && file_text.contains(name))
-                        {
+                        } else if is_imported(name, file_text) {
                             tr("imported function")
                         } else {
                             tr("function call")
@@ -2587,6 +2585,22 @@ pub(super) fn analyze_block_calls(lines: &[String], file_text: &str) -> Vec<Stri
         }
     }
     out
+}
+
+/// Whether `name` is brought in by an import line (`import`, `use`, `from … import`
+/// or `require`) rather than defined in the file. Matches whole identifiers only.
+fn is_imported(name: &str, file_text: &str) -> bool {
+    file_text.lines().any(|line| {
+        let line = line.trim_start();
+        let is_import = ["import ", "use ", "pub use ", "from "]
+            .iter()
+            .any(|prefix| line.starts_with(prefix))
+            || line.contains("require(");
+        is_import
+            && line
+                .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .any(|word| word == name)
+    })
 }
 
 /// Width a footer button needs for `text` at the footer size, padding included.
@@ -2872,7 +2886,22 @@ mod tests {
         assert!(
             calls
                 .iter()
-                .any(|c| c.contains("register") && c.contains("saveUser()"))
+                .any(|c| c.contains("saveUser()") && c.contains(tr("imported function")))
+        );
+        // `trim` appears nowhere in an import line, so it must not be labelled as imported
+        // just because the file has imports.
+        assert!(
+            calls
+                .iter()
+                .any(|c| c.contains("trim()") && c.contains(tr("method call")))
+        );
+        let local = "import { db } from './db';\nfn helper() {}\nfn run() {\n    helper();\n}\n";
+        let lines: Vec<String> = local.lines().skip(2).map(str::to_owned).collect();
+        let calls = analyze_block_calls(&lines, local);
+        assert!(
+            calls
+                .iter()
+                .any(|c| c.contains("helper()") && c.contains(tr("function call")))
         );
     }
 }
