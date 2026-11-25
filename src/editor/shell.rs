@@ -138,6 +138,13 @@ impl Palette {
             stop,
         }
     }
+
+    /// Site capture: a query as if typed, so the results are the real ones.
+    #[cfg(all(test, windows))]
+    pub(super) fn set_query(&mut self, query: &str) {
+        self.query = query.to_owned();
+        self.selected = 0;
+    }
 }
 
 #[derive(Clone, Copy)]

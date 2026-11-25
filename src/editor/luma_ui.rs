@@ -15,6 +15,36 @@ use crate::{
 
 const HISTORY: usize = 80;
 
+#[cfg(all(test, windows))]
+impl LumaChat {
+    /// Site capture: one order staffed as a team, written with Luma's real wording.
+    pub(super) fn review_order(&mut self) {
+        self.say(
+            Tone::User,
+            "Refunds are counted twice in the monthly totals. Fix it and add a regression test.",
+        );
+        self.say(
+            Tone::Info,
+            trf(
+                "Rated {rated}. {account} · {model} ({effort} effort) is planning a team of up to 3 agents, each in its own worktree.",
+                &[
+                    ("rated", effort_name(Effort::High).to_owned()),
+                    ("account", "Claude Personal".to_owned()),
+                    ("model", tr("default model").to_owned()),
+                    ("effort", "high".to_owned()),
+                ],
+            ),
+        );
+        self.say(
+            Tone::Success,
+            trf(
+                "{task}: done.",
+                &[("task", "Trace how refunds reach the totals".to_owned())],
+            ),
+        );
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Tone {
     User,

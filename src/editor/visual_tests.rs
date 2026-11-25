@@ -1058,3 +1058,465 @@ fn capture_precision_interactions() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     Ok(())
 }
+
+/// Captures for the README and the website: the real application rendering a small
+/// fixture project. Agent sessions, Luma's log and the approval are fixtures; no CLI or
+/// provider is called. `COVALOS_SITE_DIR` is the output folder; `COVALOS_SITE_SCALE`
+/// (default 1.4, which fits a 1920x1080 screen) multiplies the 1366x768 layout into pixels.
+#[test]
+#[ignore = "opens a native window and writes the website and README captures"]
+fn capture_site_screens() -> Result<(), Box<dyn std::error::Error>> {
+    use super::guided::{GuidedPlan, GuidedStep, StepAction};
+    use crate::agent_gate::GateRequest;
+    use crate::agents_runtime::{ClaudeModes, NewSession};
+    use covalos_agents::permission::{Action, Preset};
+    use eframe::egui::{Event, UserData, ViewportBuilder, ViewportCommand};
+    use winit::platform::windows::EventLoopBuilderExtWindows;
+
+    const SHOTS: &[&str] = &[
+        "editor-nocturne",
+        "guided-learn",
+        "command-search",
+        "home-nocturne",
+        // Last: its agents stay alive and would show up in the other captures.
+        "luma-notch",
+    ];
+    const SETTLE_FRAMES: usize = 45;
+
+    struct Site {
+        editor: Editor,
+        root: PathBuf,
+        output: PathBuf,
+        scale: f32,
+        size: [u32; 2],
+        stage: usize,
+        settle: usize,
+        started: bool,
+        requested: bool,
+        deadline: Instant,
+    }
+    impl Site {
+        fn enter(&mut self, ctx: &egui::Context) {
+            self.editor.palette = None;
+            self.editor.companion.open = false;
+            self.editor.guided.open = false;
+            self.editor.sidebar = Sidebar::Files;
+            self.editor.sidebar_open = true;
+            match SHOTS[self.stage] {
+                "editor-nocturne" => {
+                    self.editor.preferences.minimap = true;
+                    self.editor.open_file(self.root.join("src/models.rs"));
+                    self.editor.open_file(self.root.join("src/main.rs"));
+                    self.editor.open_file(self.root.join("src/report.rs"));
+                }
+                "luma-notch" => {
+                    // The chat panel would show the fixture account's placeholder model.
+                    self.editor.preferences.assistant_open = false;
+                    self.editor.open_file(self.root.join("src/report.rs"));
+                    assert!(self.editor.ensure_runtime(ctx));
+                    let runtime = self.editor.hub.agents.runtime.as_mut().unwrap();
+                    runtime.seed_review_accounts();
+                    let mut first = None;
+                    for (title, account) in [
+                        ("Fix the refund sign in summarize()", "claude-review"),
+                        ("Add a regression test for refunds", "codex-review"),
+                    ] {
+                        let index = runtime
+                            .create_session(NewSession {
+                                title: title.into(),
+                                account: covalos_agents::AccountId::new(account).unwrap(),
+                                model: None,
+                                effort: None,
+                                claude_modes: ClaudeModes::default(),
+                                root: self.root.clone(),
+                                worktree: false,
+                                preset: Preset::Supervised,
+                                allow_safe_commands: false,
+                                share_context: false,
+                            })
+                            .unwrap();
+                        let id = runtime.sessions[index].meta.id.to_string();
+                        runtime.review_waiting(&id);
+                        first.get_or_insert(id);
+                    }
+                    // Pending approvals are read from the gate folder, as the hook writes them.
+                    let session = first.unwrap();
+                    let request = GateRequest {
+                        ticket: "site-capture".into(),
+                        session: session.clone(),
+                        tool: "Bash".into(),
+                        action: Action::Execute("cargo test --workspace".into()),
+                        reason: "Runs the test suite".into(),
+                        once_only: false,
+                        created_ms: 0,
+                        expires_ms: u64::MAX,
+                    };
+                    let dir = runtime.gate_dir.join(&session);
+                    std::fs::create_dir_all(&dir).unwrap();
+                    std::fs::write(
+                        dir.join("request-site-capture.json"),
+                        serde_json::to_vec(&request).unwrap(),
+                    )
+                    .unwrap();
+                    self.editor.preferences.luma_effort = crate::luma::Effort::High;
+                    self.editor.hub.agents.luma.review_order();
+                    self.editor.companion.open = true;
+                    ctx.data_mut(|d| d.insert_temp(egui::Id::new("luma-notch-tab"), 1u8));
+                }
+                "guided-learn" => {
+                    let root = self.root.clone();
+                    self.editor.preferences.guided.xp = 140;
+                    self.editor.preferences.guided.streak = 6;
+                    self.editor.guided.load_plan(lesson(), Some(&root));
+                    self.editor.open_file(root.join("src/ledger.rs"));
+                }
+                "command-search" => {
+                    self.editor.open_palette(ctx);
+                    self.editor
+                        .palette
+                        .as_mut()
+                        .unwrap()
+                        .set_query("notifications");
+                }
+                "home-nocturne" => {
+                    self.editor.documents.clear();
+                    self.editor.active = None;
+                }
+                _ => unreachable!(),
+            }
+            self.settle = 0;
+            self.requested = false;
+        }
+    }
+    impl eframe::App for Site {
+        fn raw_input_hook(&mut self, _: &egui::Context, input: &mut egui::RawInput) {
+            input.focused = true;
+            // The real pointer would trigger hovers and tooltips wherever it happens to be.
+            input.events.retain(|event| {
+                !matches!(
+                    event,
+                    Event::PointerMoved(_) | Event::MouseMoved(_) | Event::PointerButton { .. }
+                )
+            });
+        }
+        fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+            assert!(Instant::now() < self.deadline, "site capture timed out");
+            if !self.started {
+                // Size the window in physical pixels whatever the monitor scale is,
+                // then lay the interface out at 1366x768 points.
+                let native = ctx.native_pixels_per_point().unwrap_or(1.0);
+                ctx.send_viewport_cmd(ViewportCommand::InnerSize(egui::vec2(
+                    self.size[0] as f32 / native,
+                    self.size[1] as f32 / native,
+                )));
+                ctx.set_pixels_per_point(self.scale);
+                self.started = true;
+                self.enter(ctx);
+            }
+            let shot = ctx.input(|input| {
+                input.events.iter().find_map(|event| match event {
+                    Event::Screenshot { image, .. } => Some(image.clone()),
+                    _ => None,
+                })
+            });
+            if let Some(image) = shot {
+                assert_eq!(
+                    [image.size[0] as u32, image.size[1] as u32],
+                    self.size,
+                    "the window did not reach the capture size; lower COVALOS_SITE_SCALE"
+                );
+                let bytes: Vec<u8> = image.pixels.iter().flat_map(|p| p.to_array()).collect();
+                image::save_buffer(
+                    self.output.join(format!("{}.png", SHOTS[self.stage])),
+                    &bytes,
+                    self.size[0],
+                    self.size[1],
+                    image::ColorType::Rgba8,
+                )
+                .expect("write site capture");
+                self.stage += 1;
+                if self.stage == SHOTS.len() {
+                    self.editor.force_close = true;
+                    ctx.send_viewport_cmd(ViewportCommand::Close);
+                    return;
+                }
+                self.enter(ctx);
+            }
+            self.editor.render(ctx);
+            self.settle += 1;
+            if self.settle >= SETTLE_FRAMES && !self.requested {
+                ctx.send_viewport_cmd(ViewportCommand::Screenshot(UserData::default()));
+                self.requested = true;
+            }
+            ctx.request_repaint_after(Duration::from_millis(40));
+        }
+    }
+
+    fn step(
+        path: &str,
+        action: StepAction,
+        requires: &[&str],
+        why: &str,
+        detail: &str,
+        lines: &[(&str, &str)],
+        calls: &[&str],
+    ) -> GuidedStep {
+        GuidedStep {
+            path: path.into(),
+            action,
+            lines: lines.iter().map(|(line, _)| (*line).into()).collect(),
+            requires: requires.iter().map(|r| (*r).into()).collect(),
+            why: Some(why.into()),
+            detail: Some(detail.into()),
+            notes: lines.iter().map(|(_, note)| (*note).into()).collect(),
+            calls: calls.iter().map(|c| (*c).into()).collect(),
+        }
+    }
+    fn lesson() -> GuidedPlan {
+        GuidedPlan {
+            title: "Monthly totals for a small ledger".into(),
+            steps: vec![
+                step(
+                    "src/models.rs",
+                    StepAction::CreateFile,
+                    &[],
+                    "The ledger needs a shape for each entry before anything can add them up.",
+                    "An enum lists the kinds of movement; a struct groups the fields every entry has.",
+                    MODELS,
+                    &[],
+                ),
+                step(
+                    "src/ledger.rs",
+                    StepAction::CreateFile,
+                    &["src/models.rs"],
+                    "Totals live in their own module so main.rs only asks for them.",
+                    "summarize walks every entry once, turns its kind into a sign and adds the signed amount to its account.",
+                    LEDGER,
+                    &[
+                        "summarize → HashMap::new() (creates the totals map)",
+                        "summarize → entry() / or_insert() (finds or starts an account's total)",
+                    ],
+                ),
+                step(
+                    "src/main.rs",
+                    StepAction::WriteBlock,
+                    &["src/ledger.rs"],
+                    "main builds a few entries and prints what summarize returns.",
+                    "The entry point only wires the pieces together.",
+                    &[
+                        (
+                            "mod ledger;",
+                            "Declares the ledger module from src/ledger.rs.",
+                        ),
+                        (
+                            "mod models;",
+                            "Declares the models module from src/models.rs.",
+                        ),
+                    ],
+                    &[],
+                ),
+            ],
+        }
+    }
+    const MODELS: &[(&str, &str)] = &[
+        (
+            "#[derive(Debug, Clone, Copy)]",
+            "Lets Kind be printed and copied freely.",
+        ),
+        (
+            "pub enum Kind {",
+            "The three kinds of movement an entry can be.",
+        ),
+        ("    Credit,", "Money coming in."),
+        ("    Debit,", "Money going out."),
+        (
+            "    Refund,",
+            "Money returned to a customer, so it also goes out.",
+        ),
+        ("}", "Closes the enum."),
+        ("", ""),
+        ("pub struct Entry {", "One line of the ledger."),
+        (
+            "    pub account: String,",
+            "Which account the money belongs to.",
+        ),
+        (
+            "    pub amount: f64,",
+            "How much, always positive; the kind gives the sign.",
+        ),
+        ("    pub kind: Kind,", "Credit, debit or refund."),
+        ("}", "Closes the struct."),
+    ];
+    const LEDGER: &[(&str, &str)] = &[
+        (
+            "use std::collections::HashMap;",
+            "Brings in the map type used for the totals.",
+        ),
+        (
+            "use crate::models::{Entry, Kind};",
+            "Uses the types written in the previous step.",
+        ),
+        ("", ""),
+        (
+            "/// Balance per account, counting each refund once.",
+            "A doc comment: it shows up in editor hovers.",
+        ),
+        (
+            "pub fn summarize(entries: &[Entry]) -> HashMap<String, f64> {",
+            "Takes a slice of entries and returns one total per account.",
+        ),
+        (
+            "    let mut totals = HashMap::new();",
+            "An empty map that will collect the totals; mut because it changes.",
+        ),
+        ("    for entry in entries {", "Visits every entry once."),
+        (
+            "        let sign = match entry.kind {",
+            "match picks a value for each kind of entry.",
+        ),
+        (
+            "            Kind::Credit => 1.0,",
+            "Credits add to the balance.",
+        ),
+        (
+            "            Kind::Debit | Kind::Refund => -1.0,",
+            "Debits and refunds subtract. One arm, so a refund is counted once.",
+        ),
+        ("        };", "Ends the match; sign is now 1.0 or -1.0."),
+        (
+            "        *totals.entry(entry.account.clone()).or_insert(0.0) += sign * entry.amount;",
+            "Finds the account's total (starting at 0) and adds the signed amount.",
+        ),
+        ("    }", "Ends the loop."),
+        ("    totals", "The last expression is the return value."),
+        ("}", "Closes the function."),
+    ];
+    const REPORT: &str = r#"
+/// Accounts sorted by balance, largest first, for the monthly report.
+pub fn ranked(totals: &HashMap<String, f64>) -> Vec<(&str, f64)> {
+    let mut rows: Vec<(&str, f64)> = totals
+        .iter()
+        .map(|(account, total)| (account.as_str(), *total))
+        .collect();
+    rows.sort_by(|a, b| b.1.total_cmp(&a.1));
+    rows
+}
+
+/// One aligned line per account, with the sign always shown.
+pub fn render(totals: &HashMap<String, f64>) -> String {
+    ranked(totals)
+        .into_iter()
+        .map(|(account, total)| format!("{account:>12}  {total:+.2}\n"))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{Entry, Kind};
+
+    #[test]
+    fn a_refund_is_counted_once() {
+        let entries = [
+            Entry { account: "orbit".into(), amount: 120.0, kind: Kind::Credit },
+            Entry { account: "orbit".into(), amount: 20.0, kind: Kind::Refund },
+        ];
+        assert_eq!(summarize(&entries)["orbit"], 100.0);
+    }
+}
+"#;
+
+    let output = PathBuf::from(std::env::var_os("COVALOS_SITE_DIR").ok_or("set COVALOS_SITE_DIR")?);
+    std::fs::create_dir_all(&output)?;
+    let scale = std::env::var("COVALOS_SITE_SCALE")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(1.4);
+    let size = [
+        (1366.0 * scale).round() as u32,
+        (768.0 * scale).round() as u32,
+    ];
+
+    let fixture = tempfile::tempdir()?;
+    let config = fixture.path().join("config");
+    std::fs::create_dir_all(&config)?;
+    // SAFETY: set before any thread of this test reads the environment.
+    unsafe { std::env::set_var("COVALOS_CONFIG_DIR", &config) };
+    // The project path shows up in agent cards, so captures meant for publishing should
+    // set COVALOS_SITE_ROOT to a neutral folder (it must not exist; it is removed after).
+    let site_root = std::env::var_os("COVALOS_SITE_ROOT").map(PathBuf::from);
+    if let Some(path) = &site_root {
+        assert!(!path.exists(), "COVALOS_SITE_ROOT must not exist yet");
+    }
+    let root = site_root
+        .clone()
+        .unwrap_or_else(|| fixture.path().join("orbit-ledger"));
+    for dir in ["src", "tests", "docs"] {
+        std::fs::create_dir_all(root.join(dir))?;
+    }
+    let join = |lines: &[(&str, &str)]| {
+        lines
+            .iter()
+            .map(|(line, _)| format!("{line}\n"))
+            .collect::<String>()
+    };
+    std::fs::write(root.join("src/models.rs"), join(MODELS))?;
+    // The ledger step is half typed, so Guided Mode resumes on the loop.
+    std::fs::write(root.join("src/ledger.rs"), join(&LEDGER[..6]))?;
+    std::fs::write(root.join("src/main.rs"), SAMPLE)?;
+    std::fs::write(
+        root.join("src/report.rs"),
+        format!("{}{REPORT}", join(LEDGER)),
+    )?;
+    std::fs::write(
+        root.join("src/notifications.rs"),
+        "// Sends the monthly report by email.\n",
+    )?;
+    std::fs::write(
+        root.join("tests/ledger.rs"),
+        "// Regression tests for the ledger.\n",
+    )?;
+    std::fs::write(root.join("README.md"), "# orbit-ledger\n")?;
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"orbit-ledger\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )?;
+
+    let options = eframe::NativeOptions {
+        viewport: ViewportBuilder::default()
+            .with_inner_size([size[0] as f32, size[1] as f32])
+            .with_position([0.0, 0.0])
+            .with_decorations(false)
+            .with_title("Covalos site capture"),
+        event_loop_builder: Some(Box::new(|builder| {
+            builder.with_any_thread(true);
+        })),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "Covalos site capture",
+        options,
+        Box::new(move |cc| {
+            let mut preferences = Preferences::default();
+            preferences.theme = serde_json::from_str("\"nocturne\"").unwrap_or_default();
+            preferences.language = super::i18n::Language::English;
+            let editor = Editor::new(&cc.egui_ctx, Some(root.clone()), preferences);
+            Ok(Box::new(Site {
+                editor,
+                root,
+                output,
+                scale,
+                size,
+                stage: 0,
+                settle: 0,
+                started: false,
+                requested: false,
+                deadline: Instant::now() + Duration::from_secs(120),
+            }))
+        }),
+    )?;
+    if let Some(path) = site_root {
+        std::fs::remove_dir_all(path)?;
+    }
+    Ok(())
+}
