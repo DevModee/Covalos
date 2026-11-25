@@ -677,7 +677,6 @@ const SPANISH: &[(&str, &str)] = &[
     ("Covalos", "Covalos"),
     ("Agent", "Agente"),
     ("GitHub", "GitHub"),
-    ("Close", "Cerrar"),
     ("Initial setup", "Configuración inicial"),
     (
         "Choose a few defaults before you start.",
@@ -895,7 +894,6 @@ const SPANISH: &[(&str, &str)] = &[
     ("Categories", "Categorías"),
     ("Close details", "Cerrar detalles"),
     ("Code", "Código"),
-    ("Commands", "Comandos"),
     ("Compatible", "Compatible"),
     ("Confirm and install", "Confirmar e instalar"),
     (
@@ -913,14 +911,12 @@ const SPANISH: &[(&str, &str)] = &[
     ("npm dependencies", "Dependencias npm"),
     ("Registry dependencies", "Dependencias del registro"),
     ("Discover", "Descubrir"),
-    ("Done", "Listo"),
     ("External", "Externo"),
     ("Favorites", "Favoritos"),
     (
         "Fetching from the official registry…",
         "Descargando desde el registro oficial…",
     ),
-    ("Files", "Archivos"),
     ("For this workspace", "Para este workspace"),
     ("compatible results first", "primero los compatibles"),
     ("Framework", "Framework"),
@@ -1103,7 +1099,6 @@ const SPANISH: &[(&str, &str)] = &[
     ("Dock back into tabs", "Acoplar de nuevo en pestañas"),
     ("Floating editors", "Editores flotantes"),
     ("Dock all", "Acoplar todos"),
-    ("Focus mode", "Modo enfoque"),
     ("Changes", "Cambios"),
     // Chrome, navigation and Home
     ("File", "Archivo"),
@@ -1212,68 +1207,6 @@ const SPANISH: &[(&str, &str)] = &[
     ("Confirm", "Confirmar"),
     ("Discard", "Descartar"),
     ("Keep editing", "Seguir editando"),
-    (
-        "Open Guided Mode — learn by prompt, link, or code-along",
-        "Abrir Modo Guiado — aprendé con un prompt, link o solo código",
-    ),
-    ("Guided Learning Studio", "Estudio de Aprendizaje Guiado"),
-    (
-        "Learn by prompt, repo, or course link — step by step, friendly and hands-on.",
-        "Aprendé con un prompt, un repo o un link de curso — paso a paso, claro y práctico.",
-    ),
-    ("Learn mode", "Aprender"),
-    (
-        "Friendly explanations, hover call-flow, re-explain & XP",
-        "Explicaciones claras, hover con llamadas, re-explicar y XP",
-    ),
-    ("Code only", "Solo código"),
-    (
-        "Clean karaoke code-along without extra theory",
-        "Solo código con karaoke, sin teoría extra",
-    ),
-    (
-        "Pure code-along without theory cards",
-        "Solo código paso a paso sin tarjetas de teoría",
-    ),
-    (
-        "Interactive tutor with explanations, hover & XP",
-        "Tutor interactivo con explicaciones, hover y puntos XP",
-    ),
-    (
-        "Paste a link (e.g. aprenderust.dev, GitHub repo) or write what you want to learn…",
-        "Pegá un link (ej. aprenderust.dev, repo de GitHub) o escribí qué querés aprender…",
-    ),
-    ("Building lesson…", "Armando lección…"),
-    ("Start lesson →", "Empezar lección →"),
-    ("Quick start", "Inicio rápido"),
-    ("Learn this repo", "Aprender de este repo"),
-    ("Hands-on lab", "Lab práctico"),
-    ("Explain another way ↻", "Explicámelo de otra forma ↻"),
-    (
-        "Ask the AI to explain this block in simpler words with an analogy",
-        "Pedile a la IA que explique este bloque de otra forma, más simple y con una analogía",
-    ),
-    ("Learn hover", "Hover didáctico"),
-    (
-        "Highlight code blocks on hover in the editor to explain what they do and what calls what",
-        "Resaltar bloques de código al pasar el mouse en el editor para explicar qué hacen y qué función llama a qué",
-    ),
-    ("Call flow", "Flujo de llamadas"),
-    ("Why this block", "Por qué este bloque"),
-    ("Code block", "Bloque de código"),
-    ("React hook", "hook de React"),
-    ("method call", "llamada a método"),
-    ("imported function", "función importada"),
-    ("function call", "llamada a función"),
-    ("Save your changes?", "¿Guardar los cambios?"),
-    (
-        "This file has unsaved changes.",
-        "Este archivo tiene cambios sin guardar.",
-    ),
-    (
-        "One or more files have unsaved changes.",
-        "Uno o más archivos tienen cambios sin guardar.",
-    ),
     (
         "This permanently deletes a file or an empty folder.",
         "Esto elimina de forma permanente un archivo o una carpeta vacía.",
@@ -2054,8 +1987,6 @@ const SPANISH: &[(&str, &str)] = &[
     ("project folder", "carpeta del proyecto"),
     ("Home", "Inicio"),
     ("Orchestrate with Luma", "Orquestar con Luma"),
-    ("New chat", "Nuevo chat"),
-    ("Guided Mode", "Modo Guiado"),
 ];
 
 #[cfg(test)]
@@ -2116,11 +2047,17 @@ mod tests {
         missing.sort();
         missing.dedup();
         assert!(missing.is_empty(), "untranslated keys: {missing:#?}");
-        let mut seen = HashMap::new();
-        for (en, es) in SPANISH {
-            if let Some(prev) = seen.insert(*en, *es) {
-                assert_eq!(prev, *es, "conflicting translations for {en}");
-            }
-        }
+    }
+
+    #[test]
+    fn spanish_table_has_one_entry_per_key() {
+        let mut seen = std::collections::HashSet::new();
+        let mut duplicated: Vec<&str> = SPANISH
+            .iter()
+            .filter(|(en, _)| !seen.insert(*en))
+            .map(|(en, _)| *en)
+            .collect();
+        duplicated.sort_unstable();
+        assert!(duplicated.is_empty(), "duplicated keys: {duplicated:#?}");
     }
 }
