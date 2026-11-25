@@ -35,13 +35,29 @@ by the release workflow since 0.8.8 and get less testing; see the platform table
 
 ## Screenshots
 
-| Home (Nocturne) | Rust editor |
+![Covalos 0.8.8 in the Nocturne theme with a Rust file, the Explorer, the minimap and the agent panel](assets/screenshots/editor-nocturne.png)
+
+| Luma Notch | Guided Mode, Learn style |
 | :---: | :---: |
-| ![Home view in the Nocturne theme](assets/screenshots/home-nocturne.png) | ![Editing a Rust file](assets/screenshots/editor-rust.png) |
+| ![The Luma Notch on the Chat tab: a cargo test command waiting for Allow once or Deny, Luma's log, and Claude Code and Codex working on the order](assets/screenshots/luma-notch.png) | ![Guided Mode over a half-written file: checked lines, the next line to type, its explanation, the call flow and XP](assets/screenshots/guided-learn.png) |
+| An order rated High and staffed as a team, with a command waiting for approval. | The next line to type, why it is there, and what the block calls. |
+
+| `Ctrl+P` | Project home |
+| :---: | :---: |
+| ![Ctrl+P matching a project file, a Settings section and a command](assets/screenshots/command-search.png) | ![Project home with the prompt box and a banner to resume a Guided lesson](assets/screenshots/home-nocturne.png) |
+| One box for files, commands and Settings. | Ask an agent or resume a Guided lesson. |
 
 | Floating editors | Library Studio |
 | :---: | :---: |
 | ![Editor tabs detached into floating windows](assets/screenshots/clean-code-floating.png) | ![Library Studio catalog](assets/screenshots/library-studio.png) |
+
+The first five captures come from `capture_site_screens` in `src/editor/visual_tests.rs`, which renders the real application over a fixture project (agent sessions are fixtures; no CLI is called). To regenerate them on Windows:
+
+```powershell
+$env:COVALOS_SITE_DIR = "$PWD\artifacts\site-captures"
+$env:COVALOS_SITE_ROOT = "E:\Projects\orbit-ledger"   # any folder that does not exist yet; it shows in agent cards
+cargo test --bin covalos -- --ignored --exact editor::visual_tests::capture_site_screens
+```
 
 ## Install
 
