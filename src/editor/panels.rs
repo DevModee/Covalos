@@ -435,9 +435,7 @@ impl Editor {
                         }
                         if ui
                             .selectable_label(self.guided.open, tr("Guided Mode"))
-                            .on_hover_text(tr(
-                                "Open Guided Mode — learn by prompt, link, or code-along",
-                            ))
+                            .on_hover_text(tr("Open Guided Mode"))
                             .clicked()
                         {
                             self.guided.open = !self.guided.open;

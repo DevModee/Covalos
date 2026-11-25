@@ -77,32 +77,29 @@ pub(super) fn trf(template: &'static str, values: &[(&str, String)]) -> String {
 }
 
 const SPANISH: &[(&str, &str)] = &[
-    (
-        "Open Guided Mode — learn by prompt, link, or code-along",
-        "Abrir Modo Guiado — aprendé con un prompt, link o solo código",
-    ),
+    ("Open Guided Mode", "Abrir Modo Guiado"),
     ("Guided Learning Studio", "Estudio de Aprendizaje Guiado"),
     (
-        "Learn by prompt, repo, or course link — step by step, friendly and hands-on.",
-        "Aprendé con un prompt, un repo o un link de curso — paso a paso, claro y práctico.",
+        "Describe what to build or paste a repository or course link. Covalos turns it into steps you type yourself.",
+        "Describí qué querés construir o pegá un link a un repositorio o curso. Covalos lo convierte en pasos que escribís vos.",
     ),
     ("Learn mode", "Aprender"),
     (
-        "Friendly explanations, hover call-flow, re-explain & XP",
-        "Explicaciones claras, hover con llamadas, re-explicar y XP",
+        "Explanations per line, call flow on hover, XP and streaks",
+        "Explicación por línea, flujo de llamadas al pasar el mouse, XP y racha",
     ),
     ("Code only", "Solo código"),
     (
-        "Clean karaoke code-along without extra theory",
-        "Solo código con karaoke, sin teoría extra",
+        "Type the code line by line, without explanations",
+        "Escribís el código línea por línea, sin explicaciones",
     ),
     (
-        "Pure code-along without theory cards",
-        "Solo código paso a paso sin tarjetas de teoría",
+        "Code-along without explanation cards",
+        "Código paso a paso, sin tarjetas de explicación",
     ),
     (
-        "Interactive tutor with explanations, hover & XP",
-        "Tutor interactivo con explicaciones, hover y puntos XP",
+        "Explanations, call flow on hover and XP",
+        "Explicaciones, flujo de llamadas al pasar el mouse y XP",
     ),
     (
         "Paste a link (e.g. aprenderust.dev, GitHub repo) or write what you want to learn…",

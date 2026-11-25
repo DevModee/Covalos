@@ -1411,7 +1411,7 @@ fn render_guided_launcher(
     ui.add(
         egui::Label::new(
             RichText::new(tr(
-                "Learn by prompt, repo, or course link — step by step, friendly and hands-on.",
+                "Describe what to build or paste a repository or course link. Covalos turns it into steps you type yourself.",
             ))
             .size(SMALL)
             .color(colors().muted),
@@ -1429,12 +1429,12 @@ fn render_guided_launcher(
             (
                 GuidedStyle::Learn,
                 "Learn mode",
-                "Friendly explanations, hover call-flow, re-explain & XP",
+                "Explanations per line, call flow on hover, XP and streaks",
             ),
             (
                 GuidedStyle::CodeOnly,
                 "Code only",
-                "Clean karaoke code-along without extra theory",
+                "Type the code line by line, without explanations",
             ),
         ] {
             let selected = view.style == style;
@@ -1702,13 +1702,13 @@ fn render_guided_body(
             }
             let code_only = view.style == GuidedStyle::CodeOnly;
             if pill(ui, tr("Code only"), code_only)
-                .on_hover_text(tr("Pure code-along without theory cards"))
+                .on_hover_text(tr("Code-along without explanation cards"))
                 .clicked()
             {
                 actions.set_style = Some(GuidedStyle::CodeOnly);
             }
             if pill(ui, tr("Learn mode"), !code_only)
-                .on_hover_text(tr("Interactive tutor with explanations, hover & XP"))
+                .on_hover_text(tr("Explanations, call flow on hover and XP"))
                 .clicked()
             {
                 actions.set_style = Some(GuidedStyle::Learn);
