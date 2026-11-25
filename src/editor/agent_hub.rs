@@ -20,7 +20,7 @@ pub(super) struct State {
     login: Option<ProviderLogin>,
     pub(super) secret: String,
     pub(super) secret_for: Option<AccountId>,
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     status: Vec<(AccountId, String)>,
     pub(super) selected: Option<usize>,
     note: String,
@@ -895,7 +895,7 @@ impl Editor {
     }
 
     /// Evidence harness: refresh every account's sign-in status line.
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     pub(super) fn evidence_account_status(&mut self) {
         let state = &mut self.hub.agents;
         let Some(runtime) = state.runtime.as_ref() else {

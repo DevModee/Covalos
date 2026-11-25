@@ -627,7 +627,7 @@ impl Runtime {
         primary
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     pub(crate) fn seed_review_conversation(&mut self, root: PathBuf, account: AccountId) -> String {
         let index = self
             .create_session(NewSession {
@@ -652,7 +652,7 @@ impl Runtime {
         session.meta.id.to_string()
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     pub(crate) fn review_waiting(&mut self, id: &str) {
         let session = self
             .sessions
@@ -1011,17 +1011,17 @@ impl Runtime {
         Ok(command)
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     pub(crate) fn account_status(&self, id: &AccountId) -> Result<String, String> {
         self.account_status_raw(id).map(|t| sanitize_status(&t))
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     fn account_status_raw(&self, id: &AccountId) -> Result<String, String> {
         run_capture(self.status_command_for(id)?, Duration::from_secs(20))
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     fn status_command_for(&self, id: &AccountId) -> Result<Command, String> {
         let (_, spec, _) = self.spec_for(id)?;
         let args = status_command(&spec).ok_or("No official status command.")?;

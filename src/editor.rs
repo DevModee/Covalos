@@ -1,6 +1,6 @@
 #[cfg(all(test, windows))]
 mod evidence;
-#[cfg(test)]
+#[cfg(all(test, windows))]
 mod visual_tests;
 
 mod agent_chat;

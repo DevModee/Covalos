@@ -1957,7 +1957,7 @@ fn code_block(ui: &mut Ui, text: &str, language: &str) {
     ui.add_space(4.0);
 }
 
-#[cfg(test)]
+#[cfg(all(test, windows))]
 impl Editor {
     pub(super) fn review_fixture(&mut self, screen: &str) {
         self.hub.tab = match screen {

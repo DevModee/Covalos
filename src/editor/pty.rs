@@ -607,6 +607,7 @@ mod tests {
     use super::*;
     use std::time::{Duration, Instant};
 
+    #[cfg(windows)]
     fn wait_for(shell: &Shell, needle: &str, secs: u64) -> bool {
         let until = Instant::now() + Duration::from_secs(secs);
         while Instant::now() < until {

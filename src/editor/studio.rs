@@ -199,7 +199,7 @@ impl Studio {
         self.sync = Some(events);
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     pub(super) fn syncing(&self) -> bool {
         self.sync.is_some()
     }
@@ -1895,17 +1895,17 @@ impl Editor {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     pub(super) fn library_item_loaded(&self) -> bool {
         self.studio.item.is_some()
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     pub(super) fn library_open_playground_tab(&mut self) {
         self.studio.tab = Tab::Playground;
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     pub(super) fn library_review_ready(&self) -> bool {
         matches!(
             self.studio.install,
@@ -1913,12 +1913,12 @@ impl Editor {
         )
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     pub(super) fn library_open_install_tab(&mut self) {
         self.studio.tab = Tab::Install;
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     pub(super) fn library_open_code_tab(&mut self) {
         self.studio.tab = Tab::Code;
     }

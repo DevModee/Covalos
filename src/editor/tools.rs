@@ -512,7 +512,7 @@ impl Editor {
     }
 
     /// The last Git job finished and produced output.
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     pub(super) fn git_ready(&self) -> bool {
         self.tools.git.is_none() && !self.tools.git_view.is_empty()
     }

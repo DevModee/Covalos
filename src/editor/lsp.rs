@@ -1366,7 +1366,7 @@ impl super::Editor {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, windows))]
 impl Lsp {
     pub(super) fn harness_ready(&self, path: &Path) -> bool {
         self.state(path).is_some_and(|(_, state)| state == "ready")

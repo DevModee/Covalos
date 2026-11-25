@@ -134,7 +134,7 @@ impl Companion {
         Mood::Idle
     }
     /// Drop external fixture sessions and stop watching the bridge (evidence captures).
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     pub(super) fn clear_external(&mut self) {
         self.monitor = None;
         self.external.clear();

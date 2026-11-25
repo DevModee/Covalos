@@ -186,7 +186,7 @@ impl Editor {
     pub(super) fn sync_preview(&mut self, _ctx: &egui::Context, _frame: &eframe::Frame) {}
 }
 
-#[cfg(test)]
+#[cfg(all(test, windows))]
 impl Editor {
     /// The native page exists and reports the address it loaded.
     pub(super) fn harness_preview_url(&self) -> Option<String> {

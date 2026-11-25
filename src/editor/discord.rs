@@ -149,7 +149,8 @@ fn spawn(client: String, status: Arc<Mutex<&'static str>>) -> Sender<Message> {
     sender
 }
 
-/// Frame encoding shared by every platform transport.
+/// Frame encoding for the Windows named-pipe transport, the only one so far.
+#[cfg(any(windows, test))]
 fn frame(op: u32, payload: &serde_json::Value) -> Vec<u8> {
     let body = payload.to_string().into_bytes();
     let mut out = Vec::with_capacity(body.len() + 8);
@@ -159,12 +160,15 @@ fn frame(op: u32, payload: &serde_json::Value) -> Vec<u8> {
     out
 }
 
+#[cfg(any(windows, test))]
 pub(super) const BETA_URL: &str = "https://www.matiasgs.com/work/covalos";
 
+#[cfg(any(windows, test))]
 fn activity_payload(activity: Option<&Activity>, nonce: u64) -> serde_json::Value {
     activity_payload_with_buttons(activity, nonce, true)
 }
 
+#[cfg(any(windows, test))]
 fn activity_payload_with_buttons(
     activity: Option<&Activity>,
     nonce: u64,

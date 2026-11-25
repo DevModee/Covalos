@@ -404,6 +404,7 @@ impl Terminals {
         self.tunnels.retain(|t| !t.done);
     }
 
+    #[cfg(windows)]
     pub(super) fn confirming(&self) -> bool {
         self.confirm_tunnel.is_some()
     }
@@ -861,7 +862,7 @@ impl Editor {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, windows))]
 impl Editor {
     pub(super) fn harness_open_terminal(&mut self, ctx: &egui::Context) {
         let root = self.root.clone().expect("project");
