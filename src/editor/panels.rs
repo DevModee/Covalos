@@ -446,23 +446,10 @@ impl Editor {
     }
 
     pub(super) fn status_bar(&mut self, ctx: &Context) {
-        // On Windows, borderless maximized windows extend behind the taskbar; reserve
-        // bottom clearance when maximized so the status bar & Terminal button stay visible.
-        let taskbar_clearance =
-            if cfg!(windows) && ctx.input(|i| i.viewport().maximized.unwrap_or(false)) {
-                44.0
-            } else {
-                0.0
-            };
         TopBottomPanel::bottom("status")
-            .exact_height(STATUS_HEIGHT + taskbar_clearance)
+            .exact_height(STATUS_HEIGHT)
             .show_separator_line(false)
-            .frame(panel_frame(Margin {
-                left: 12,
-                right: 12,
-                top: 2,
-                bottom: 2 + taskbar_clearance as i8,
-            }))
+            .frame(panel_frame(Margin::symmetric(12, 2)))
             .show(ctx, |ui| {
                 let rect = ui.available_rect_before_wrap();
                 let right_width = if self.active.is_some() { 290.0 } else { 100.0 };

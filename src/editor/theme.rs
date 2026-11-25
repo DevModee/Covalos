@@ -775,6 +775,7 @@ pub(super) fn row(ui: &mut egui::Ui, label: &str, detail: &str, selected: bool) 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Icon {
     Brand,
+    Home,
     Explorer,
     Search,
     Git,
@@ -849,6 +850,7 @@ impl Icon {
     pub(super) fn asset(self) -> Option<&'static str> {
         Some(match self {
             Self::Brand => return None,
+            Self::Home => "lucide-house",
             Self::Explorer => "lucide-files",
             Self::Search => "lucide-search",
             Self::Git => "lucide-git-branch",

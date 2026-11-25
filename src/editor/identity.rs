@@ -853,14 +853,11 @@ impl Identity {
         } else {
             0.0
         };
-        let live = motion > 0.0 && prefs.interactive && self.mascot_clock.active;
-        let look = super::mascot::look(
-            ui.ctx(),
-            id.with("look"),
-            center,
-            self.previous_pointer,
-            live,
-        );
+        let live = motion > 0.0 && prefs.interactive;
+        let pointer = ui
+            .input(|i| i.pointer.hover_pos())
+            .or(self.previous_pointer);
+        let look = super::mascot::look(ui.ctx(), id.with("look"), center, pointer, live);
         let hover = if motion > 0.0 && prefs.interactive {
             super::motion::state(ui, id.with("curious"), hovered, super::motion::CONTROL)
         } else {
@@ -888,7 +885,7 @@ impl Identity {
             motion,
         }
     }
-    /// A larger, non-interactive Luma for empty states and the Companion.
+    /// A larger, interactive Luma for empty states and the Companion Notch.
     pub(super) fn portrait(
         &self,
         ui: &Ui,
@@ -900,8 +897,16 @@ impl Identity {
         let id = ui
             .id()
             .with(("luma-portrait", rect.min.x as i32, rect.min.y as i32));
-        let pose = self.pose(ui, id, rect.center(), prefs, mood, reduce, false);
-        super::mascot::paint(&ui.painter_at(rect.expand(8.0)), rect, pose);
+        let hovered = ui.input(|i| {
+            i.pointer
+                .hover_pos()
+                .is_some_and(|p| rect.expand(14.0).contains(p))
+        });
+        let pose = self.pose(ui, id, rect.center(), prefs, mood, reduce, hovered);
+        super::mascot::paint(&ui.painter_at(rect.expand(16.0)), rect, pose);
+        if pose.motion > 0.0 && (hovered || ui.input(|i| i.pointer.delta().length_sq() > 0.01)) {
+            ui.ctx().request_repaint();
+        }
     }
 }
 fn sphere(

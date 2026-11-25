@@ -8,7 +8,65 @@ use eframe::egui::{self, Align, Layout, RichText, ScrollArea, Ui};
 use std::time::{Duration, Instant};
 
 const ISLAND_COMPACT: egui::Vec2 = egui::vec2(232.0, 21.0);
-const ISLAND_WIDTH: f32 = 564.0;
+const ISLAND_WIDTH: f32 = 576.0;
+
+/// Draw a Coucou-style minimal speech-bubble icon (chat tab).
+fn draw_chat_bubble(painter: &egui::Painter, center: egui::Pos2, color: egui::Color32, size: f32) {
+    let w = size * 0.92;
+    let h = size * 0.68;
+    let body = egui::Rect::from_center_size(center - egui::vec2(0.0, size * 0.08), egui::vec2(w, h));
+    painter.rect_filled(body, (size * 0.22).max(2.0), color);
+    let tail = vec![
+        egui::pos2(body.left() + w * 0.20, body.bottom() - 1.0),
+        egui::pos2(body.left() + w * 0.08, body.bottom() + size * 0.24),
+        egui::pos2(body.left() + w * 0.44, body.bottom() - 1.0),
+    ];
+    painter.add(egui::Shape::convex_polygon(tail, color, egui::Stroke::NONE));
+}
+
+/// Paint an inverted concave fillet connecting the top bar (`y = join_y`) smoothly
+/// into the vertical side of the Notch (`x = side_x`).
+fn paint_concave_fillet(
+    painter: &egui::Painter,
+    side_x: f32,
+    join_y: f32,
+    r: f32,
+    left_side: bool,
+    fill: egui::Color32,
+) -> Vec<egui::Pos2> {
+    if r < 1.0 {
+        return Vec::new();
+    }
+    let steps = 12_usize;
+    let corner = egui::pos2(side_x, join_y);
+    let arc_center = if left_side {
+        egui::pos2(side_x - r, join_y + r)
+    } else {
+        egui::pos2(side_x + r, join_y + r)
+    };
+    let mut arc_pts = Vec::with_capacity(steps + 1);
+    for i in 0..=steps {
+        let t = i as f32 / steps as f32;
+        let angle = if left_side {
+            // From top (-PI/2) to right (0)
+            -std::f32::consts::FRAC_PI_2 * (1.0 - t)
+        } else {
+            // From left (PI) to top (3*PI/2 = -PI/2)
+            std::f32::consts::PI + std::f32::consts::FRAC_PI_2 * t
+        };
+        arc_pts.push(arc_center + egui::vec2(angle.cos() * r, angle.sin() * r));
+    }
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(corner, fill);
+    for &p in &arc_pts {
+        mesh.colored_vertex(p, fill);
+    }
+    for i in 1..=steps as u32 {
+        mesh.add_triangle(0, i, i + 1);
+    }
+    painter.add(egui::Shape::mesh(mesh));
+    arc_pts
+}
 
 fn provider_of(label: &str) -> Option<Provider> {
     let l = label.to_ascii_lowercase();
@@ -163,15 +221,20 @@ impl Editor {
             .filter(|s| s.state == State::Completed)
             .count();
         let mood = self.agent_mood(true);
+        let tab_id = egui::Id::new("luma-notch-tab");
+        let mut active_tab: u8 = ui.ctx().data(|d| d.get_temp::<u8>(tab_id)).unwrap_or(0);
         let mut close = false;
         let mut open_palette_now = false;
         let mut open_hub_now = false;
+        let mut open_settings_now = false;
+        let mut open_guided_now = false;
 
-        // Coucou-style top toolbar inside the Notch: quick mode icons on the left,
-        // Luma effort pills + close on the right.
+        // Coucou-style top toolbar inside the Notch:
+        // Left: Home (Luma) · Chat (Orchestrate) · + (New chat) · Search (Ctrl+P)
+        // Right: Effort pills · Settings · Close
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
-            let pill_icon = |ui: &mut Ui, icon: Icon, tip: &str, active: bool| -> egui::Response {
+            ui.spacing_mut().item_spacing.x = 5.0;
+            let pill_icon = |ui: &mut Ui, icon: Option<Icon>, tip: &str, active: bool| -> egui::Response {
                 let (r, resp) = ui.allocate_exact_size(egui::vec2(30.0, 26.0), egui::Sense::click());
                 let bg = if active {
                     colors().elevated
@@ -181,29 +244,52 @@ impl Editor {
                     egui::Color32::TRANSPARENT
                 };
                 ui.painter().rect_filled(r, 13, bg);
-                draw_icon_sized(
-                    ui.painter(),
-                    r.center(),
-                    icon,
-                    if active || resp.hovered() {
-                        colors().text
-                    } else {
-                        colors().muted
-                    },
-                    14.0,
-                );
+                let fg = if active || resp.hovered() {
+                    colors().text
+                } else {
+                    colors().muted
+                };
+                match icon {
+                    Some(ic) => draw_icon_sized(ui.painter(), r.center(), ic, fg, 14.0),
+                    None => draw_chat_bubble(ui.painter(), r.center(), fg, 13.0),
+                }
                 pointer(resp).on_hover_text(tr(tip))
             };
-            let _ = pill_icon(ui, Icon::Sparkles, "Luma", true);
-            if pill_icon(ui, Icon::Search, "Search files and commands (Ctrl+P)", false).clicked() {
-                open_palette_now = true;
+            if pill_icon(ui, Some(Icon::Home), "Home", active_tab == 0).clicked() {
+                active_tab = 0;
             }
-            if pill_icon(ui, Icon::Hub, "Open Agent Hub", false).clicked() {
-                open_hub_now = true;
+            if pill_icon(ui, None, "Orchestrate with Luma", active_tab == 1).clicked() {
+                active_tab = 1;
+                self.hub.agents.luma.focus = true;
+            }
+            if pill_icon(ui, Some(Icon::Add), "New chat", false).clicked() {
+                if active_tab == 1 && !self.hub.agents.luma.draft.trim().is_empty() {
+                    self.hub.agents.luma.draft.clear();
+                    self.hub.agents.luma.focus = true;
+                } else if active_tab == 1 {
+                    open_hub_now = true;
+                } else {
+                    active_tab = 1;
+                    self.hub.agents.luma.draft.clear();
+                    self.hub.agents.luma.focus = true;
+                }
+            }
+            if pill_icon(
+                ui,
+                Some(Icon::Search),
+                "Search files and commands (Ctrl+P)",
+                false,
+            )
+            .clicked()
+            {
+                open_palette_now = true;
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if icon_button_sized(ui, Icon::Close, "Close companion", false, 26.0).clicked() {
                     close = true;
+                }
+                if icon_button_sized(ui, Icon::Settings, "Settings", false, 26.0).clicked() {
+                    open_settings_now = true;
                 }
                 ui.add_space(4.0);
                 self.luma_effort_pills(ui);
@@ -212,152 +298,175 @@ impl Editor {
 
         ui.add_space(10.0);
 
-        // Coucou-style split hero: two cleanly proportioned cards that never overflow.
-        let gap = 10.0;
-        let total_w = ui.available_width();
-        let left_outer = ((total_w - gap) * 0.56).floor().max(220.0);
-        let right_outer = (total_w - gap - left_outer).floor().max(150.0);
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = gap;
-            ui.allocate_ui_with_layout(
-                egui::vec2(left_outer, 94.0),
-                Layout::top_down(Align::Min),
-                |ui| {
-                    egui::Frame::new()
-                        .fill(colors().surface)
-                        .stroke(egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.45)))
-                        .corner_radius(14)
-                        .inner_margin(egui::Margin::same(12))
-                        .show(ui, |ui| {
-                            ui.set_width((left_outer - 24.0).max(120.0));
-                            ui.horizontal(|ui| {
-                                let (art, _) = ui.allocate_exact_size(
-                                    egui::vec2(58.0, 58.0),
-                                    egui::Sense::hover(),
-                                );
-                                self.identity.portrait(
-                                    ui,
-                                    art,
-                                    &self.preferences.identity,
-                                    mood,
-                                    self.preferences.reduce_motion,
-                                );
-                                ui.add_space(6.0);
-                                ui.vertical(|ui| {
-                                    ui.add_space(2.0);
-                                    ui.label(
-                                        RichText::new(tr("LUMA  ·  LEAD DEVELOPER"))
-                                            .size(10.0)
-                                            .color(colors().muted),
+        if active_tab == 0 {
+            // Coucou Home tab: clean split hero with minimalist interactive Luma on the left
+            // and quick workspace actions on the right.
+            let gap = 10.0;
+            let total_w = ui.available_width();
+            let left_outer = ((total_w - gap) * 0.56).floor().max(220.0);
+            let right_outer = (total_w - gap - left_outer).floor().max(150.0);
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                ui.allocate_ui_with_layout(
+                    egui::vec2(left_outer, 108.0),
+                    Layout::top_down(Align::Min),
+                    |ui| {
+                        egui::Frame::new()
+                            .fill(colors().surface)
+                            .stroke(egui::Stroke::new(
+                                1.0_f32,
+                                colors().border.gamma_multiply(0.45),
+                            ))
+                            .corner_radius(14)
+                            .inner_margin(egui::Margin::same(12))
+                            .show(ui, |ui| {
+                                ui.set_width((left_outer - 24.0).max(120.0));
+                                ui.horizontal(|ui| {
+                                    let (art, _) = ui.allocate_exact_size(
+                                        egui::vec2(72.0, 72.0),
+                                        egui::Sense::hover(),
                                     );
-                                    ui.add(
-                                        egui::Label::new(
-                                            RichText::new(tr(if waiting > 0 {
-                                                "Waiting for your OK"
-                                            } else if running > 0 {
-                                                "Work in motion"
-                                            } else {
-                                                "A quiet workspace"
-                                            }))
-                                            .size(16.0)
-                                            .strong(),
-                                        )
-                                        .truncate(),
+                                    self.identity.portrait(
+                                        ui,
+                                        art,
+                                        &self.preferences.identity,
+                                        mood,
+                                        self.preferences.reduce_motion,
                                     );
-                                    ui.add_space(4.0);
-                                    ui.horizontal_wrapped(|ui| {
-                                        ui.spacing_mut().item_spacing = egui::vec2(5.0, 4.0);
-                                        chip(
-                                            ui,
-                                            &trf("{n} running", &[("n", running.to_string())]),
-                                            colors().accent,
+                                    ui.add_space(6.0);
+                                    ui.vertical(|ui| {
+                                        ui.add_space(4.0);
+                                        ui.label(
+                                            RichText::new(tr("LUMA  ·  LEAD DEVELOPER"))
+                                                .size(10.0)
+                                                .color(colors().muted),
                                         );
-                                        if waiting > 0 {
+                                        ui.add(
+                                            egui::Label::new(
+                                                RichText::new(tr(if waiting > 0 {
+                                                    "Waiting for your OK"
+                                                } else if running > 0 {
+                                                    "Work in motion"
+                                                } else {
+                                                    "A quiet workspace"
+                                                }))
+                                                .size(16.0)
+                                                .strong(),
+                                            )
+                                            .truncate(),
+                                        );
+                                        ui.add_space(5.0);
+                                        ui.horizontal_wrapped(|ui| {
+                                            ui.spacing_mut().item_spacing = egui::vec2(5.0, 4.0);
                                             chip(
                                                 ui,
-                                                &trf("{n} waiting", &[("n", waiting.to_string())]),
-                                                colors().warning,
+                                                &trf("{n} running", &[("n", running.to_string())]),
+                                                colors().accent,
                                             );
-                                        }
-                                        if completed > 0 {
-                                            chip(
-                                                ui,
-                                                &trf("{n} done", &[("n", completed.to_string())]),
-                                                colors().success,
-                                            );
-                                        }
+                                            if waiting > 0 {
+                                                chip(
+                                                    ui,
+                                                    &trf(
+                                                        "{n} waiting",
+                                                        &[("n", waiting.to_string())],
+                                                    ),
+                                                    colors().warning,
+                                                );
+                                            }
+                                            if completed > 0 {
+                                                chip(
+                                                    ui,
+                                                    &trf(
+                                                        "{n} done",
+                                                        &[("n", completed.to_string())],
+                                                    ),
+                                                    colors().success,
+                                                );
+                                            }
+                                        });
                                     });
                                 });
                             });
-                        });
-                },
-            );
+                    },
+                );
 
-            ui.allocate_ui_with_layout(
-                egui::vec2(right_outer, 94.0),
-                Layout::top_down(Align::Min),
-                |ui| {
-                    egui::Frame::new()
-                        .fill(colors().surface)
-                        .stroke(egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.45)))
-                        .corner_radius(14)
-                        .inner_margin(egui::Margin::same(10))
-                        .show(ui, |ui| {
-                            let inner_w = (right_outer - 20.0).max(100.0);
-                            ui.set_width(inner_w);
-                            ui.spacing_mut().item_spacing.y = 6.0;
-                            let pill_row = |ui: &mut Ui,
-                                            icon: Icon,
-                                            color: egui::Color32,
-                                            label: &str|
-                             -> bool {
-                                let (r, resp) = ui.allocate_exact_size(
-                                    egui::vec2(inner_w, 30.0),
-                                    egui::Sense::click(),
-                                );
-                                ui.painter().rect(
-                                    r,
-                                    10,
-                                    if resp.hovered() {
-                                        colors().hover
-                                    } else {
-                                        colors().elevated
-                                    },
-                                    egui::Stroke::new(1.0_f32, color.gamma_multiply(0.28)),
-                                    egui::StrokeKind::Inside,
-                                );
-                                draw_icon_sized(
-                                    ui.painter(),
-                                    r.left_center() + egui::vec2(14.0, 0.0),
-                                    icon,
-                                    color,
-                                    13.0,
-                                );
-                                ui.painter()
-                                    .with_clip_rect(r.shrink2(egui::vec2(26.0, 0.0)))
-                                    .text(
-                                        r.left_center() + egui::vec2(28.0, 0.0),
-                                        egui::Align2::LEFT_CENTER,
-                                        tr(label),
-                                        egui::FontId::proportional(SMALL),
-                                        colors().text,
+                ui.allocate_ui_with_layout(
+                    egui::vec2(right_outer, 108.0),
+                    Layout::top_down(Align::Min),
+                    |ui| {
+                        egui::Frame::new()
+                            .fill(colors().surface)
+                            .stroke(egui::Stroke::new(
+                                1.0_f32,
+                                colors().border.gamma_multiply(0.45),
+                            ))
+                            .corner_radius(14)
+                            .inner_margin(egui::Margin::same(10))
+                            .show(ui, |ui| {
+                                let inner_w = (right_outer - 20.0).max(100.0);
+                                ui.set_width(inner_w);
+                                ui.spacing_mut().item_spacing.y = 5.0;
+                                let pill_row = |ui: &mut Ui,
+                                                icon: Icon,
+                                                color: egui::Color32,
+                                                label: &str|
+                                 -> bool {
+                                    let (r, resp) = ui.allocate_exact_size(
+                                        egui::vec2(inner_w, 26.0),
+                                        egui::Sense::click(),
                                     );
-                                pointer(resp).clicked()
-                            };
-                            if pill_row(ui, Icon::Search, colors().accent, "Search files (Ctrl+P)")
-                            {
-                                open_palette_now = true;
-                            }
-                            if pill_row(ui, Icon::Hub, colors().success, "Agents & sessions") {
-                                open_hub_now = true;
-                            }
-                        });
-                },
-            );
-        });
-
-        ui.add_space(10.0);
-        self.luma_panel(ui);
+                                    ui.painter().rect(
+                                        r,
+                                        9,
+                                        if resp.hovered() {
+                                            colors().hover
+                                        } else {
+                                            colors().elevated
+                                        },
+                                        egui::Stroke::new(1.0_f32, color.gamma_multiply(0.28)),
+                                        egui::StrokeKind::Inside,
+                                    );
+                                    draw_icon_sized(
+                                        ui.painter(),
+                                        r.left_center() + egui::vec2(13.0, 0.0),
+                                        icon,
+                                        color,
+                                        12.5,
+                                    );
+                                    ui.painter()
+                                        .with_clip_rect(r.shrink2(egui::vec2(26.0, 0.0)))
+                                        .text(
+                                            r.left_center() + egui::vec2(26.0, 0.0),
+                                            egui::Align2::LEFT_CENTER,
+                                            tr(label),
+                                            egui::FontId::proportional(SMALL),
+                                            colors().text,
+                                        );
+                                    pointer(resp).clicked()
+                                };
+                                if pill_row(
+                                    ui,
+                                    Icon::Search,
+                                    colors().accent,
+                                    "Search files (Ctrl+P)",
+                                ) {
+                                    open_palette_now = true;
+                                }
+                                if pill_row(ui, Icon::Hub, colors().success, "Agents & sessions") {
+                                    open_hub_now = true;
+                                }
+                                if pill_row(ui, Icon::Book, colors().warning, "Guided Mode") {
+                                    open_guided_now = true;
+                                }
+                            });
+                    },
+                );
+            });
+            ui.add_space(8.0);
+        } else {
+            // Coucou Chat tab: Luma orchestration log + team checklist + sleek bottom composer.
+            self.luma_panel(ui);
+        }
         let mut action = None;
         for session in self
             .companion
@@ -550,7 +659,13 @@ impl Editor {
         }
         ui.add_space(8.0);
         // Coucou-style sleek order input anchored at the bottom of the Notch
+        let had_draft = !self.hub.agents.luma.draft.trim().is_empty();
         self.luma_composer(ui);
+        if had_draft && self.hub.agents.luma.draft.is_empty() {
+            // User just submitted a prompt — jump to the Chat tab to watch Luma orchestrate.
+            active_tab = 1;
+        }
+        ui.ctx().data_mut(|d| d.insert_temp(tab_id, active_tab));
 
         if open_palette_now {
             self.companion.open = false;
@@ -560,6 +675,14 @@ impl Editor {
             self.companion.open = false;
             self.hub_open = true;
             self.studio_open = false;
+        }
+        if open_settings_now {
+            self.companion.open = false;
+            self.settings_open = true;
+        }
+        if open_guided_now {
+            self.companion.open = false;
+            self.guided.open = true;
         }
         if close {
             self.companion.open = false;
@@ -680,23 +803,61 @@ impl Editor {
                     sw: bottom_r,
                     se: bottom_r,
                 };
-                ui.painter().add(
-                    egui::Shadow {
-                        offset: [0, 14],
-                        blur: 36,
-                        spread: 0,
-                        color: egui::Color32::from_black_alpha(150),
-                    }
-                    .as_shape(outer, corner),
-                );
+                // Seamless Coucou Notch: exact same canvas fill as the top bar, zero drop
+                // shadow, and inverted concave fillets flowing smoothly out of the top bar.
                 let notch_fill = colors().canvas;
-                ui.painter().rect(
-                    outer,
-                    corner,
-                    notch_fill,
-                    egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.55)),
-                    egui::StrokeKind::Inside,
-                );
+                let bg_painter = ctx.layer_painter(ui.layer_id());
+                let top_bar_bottom = screen.top() + CHROME_HEIGHT;
+                let fillet_r = (16.0 * eased).min((outer.bottom() - top_bar_bottom).max(0.0));
+                bg_painter.rect_filled(outer, corner, notch_fill);
+                if eased > 0.15 && fillet_r >= 2.0 {
+                    let left_arc = paint_concave_fillet(
+                        &bg_painter,
+                        outer.left(),
+                        top_bar_bottom,
+                        fillet_r,
+                        true,
+                        notch_fill,
+                    );
+                    let right_arc = paint_concave_fillet(
+                        &bg_painter,
+                        outer.right(),
+                        top_bar_bottom,
+                        fillet_r,
+                        false,
+                        notch_fill,
+                    );
+                    // Subtle hairline only along the protruding curve below the top bar so
+                    // there is zero seam against the top bar itself.
+                    let rim = egui::Stroke::new(
+                        1.0_f32,
+                        colors().border.gamma_multiply(0.55 * eased),
+                    );
+                    let br = f32::from(bottom_r);
+                    let mut contour = Vec::with_capacity(64);
+                    contour.extend_from_slice(&left_arc);
+                    // Bottom-left corner arc
+                    let bl_c = egui::pos2(outer.left() + br, outer.bottom() - br);
+                    for i in 0..=8 {
+                        let a = std::f32::consts::PI - std::f32::consts::FRAC_PI_2 * (i as f32 / 8.0);
+                        contour.push(bl_c + egui::vec2(a.cos() * br, a.sin() * br));
+                    }
+                    // Bottom-right corner arc
+                    let br_c = egui::pos2(outer.right() - br, outer.bottom() - br);
+                    for i in 0..=8 {
+                        let a = std::f32::consts::FRAC_PI_2 * (1.0 - i as f32 / 8.0);
+                        contour.push(br_c + egui::vec2(a.cos() * br, a.sin() * br));
+                    }
+                    contour.extend_from_slice(&right_arc);
+                    bg_painter.add(egui::Shape::line(contour, rim));
+                } else {
+                    bg_painter.rect_stroke(
+                        outer,
+                        corner,
+                        egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.45)),
+                        egui::StrokeKind::Inside,
+                    );
+                }
                 if eased < 0.999 {
                     let (text, state) = self.island_summary();
                     let pill = egui::Rect::from_min_size(

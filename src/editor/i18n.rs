@@ -2052,6 +2052,10 @@ const SPANISH: &[(&str, &str)] = &[
     ("Allowed once.", "Permitido una vez."),
     ("Denied.", "Denegado."),
     ("project folder", "carpeta del proyecto"),
+    ("Home", "Inicio"),
+    ("Orchestrate with Luma", "Orquestar con Luma"),
+    ("New chat", "Nuevo chat"),
+    ("Guided Mode", "Modo Guiado"),
 ];
 
 #[cfg(test)]
