@@ -1,27 +1,42 @@
 #[cfg(all(test, windows))]
 mod evidence;
-#[cfg(test)]
+#[cfg(all(test, windows))]
 mod visual_tests;
 
+mod agent_chat;
+mod agent_hub;
 mod assets;
 mod brands;
 mod clean;
+mod cloud_sync;
+mod cloud_ui;
 mod companion;
+mod discord;
 mod dither;
 mod files;
+mod ghost;
+mod git_gutter;
+mod guided;
 mod hub;
 mod i18n;
 mod icons;
 mod identity;
+mod ligatures;
+mod lsp;
+mod luma_ui;
 mod mascot;
 mod motion;
+mod navigation;
 mod panels;
 mod preferences;
+mod preview;
+mod pty;
 mod sessions;
 mod shell;
 mod skills;
 mod studio;
 mod syntax;
+mod terminal;
 mod theme;
 mod tools;
 mod ui_icons;
@@ -54,6 +69,7 @@ enum Sidebar {
     Files,
     Search,
     Git,
+    Chats,
 }
 
 enum Pending {
@@ -105,6 +121,13 @@ pub struct Editor {
     companion: companion::Companion,
     identity: identity::Identity,
     tools: tools::Tools,
+    terminals: terminal::Terminals,
+    lsp: lsp::Lsp,
+    /// Inline ghost-text completion in the code editor.
+    ghost: ghost::Ghost,
+    /// Added, modified and deleted line markers against `HEAD`.
+    git_gutter: git_gutter::GitGutter,
+    preview: preview::Preview,
     palette: Option<shell::Palette>,
     chat: hub::Chat,
     chat_saved_revision: u64,
@@ -119,14 +142,33 @@ pub struct Editor {
     notice: Option<(bool, String)>,
     pending: Option<Pending>,
     force_close: bool,
-    new_file: Option<String>,
-    file_change: Option<(files::FileChange, String)>,
+    entry_draft: Option<files::EntryDraft>,
     pending_delete: Option<PathBuf>,
-    focus_new_file: bool,
     syntax: egui_extras::syntax_highlighting::CodeTheme,
     clean: clean::Clean,
     studio: studio::Studio,
     studio_open: bool,
+    nav: navigation::Navigation,
+    /// Side panel opened from the activity bar while no project is open.
+    sidebar_requested: bool,
+    /// User toggle for collapsing or expanding the sidebar (Ctrl+B).
+    sidebar_open: bool,
+    /// Live filename filter for the Explorer tree.
+    explorer_filter: String,
+    notifications: Vec<shell::Notification>,
+    notifications_open: bool,
+    notifications_query: String,
+    notifications_filter: shell::NotificationFilter,
+    discord: discord::Presence,
+    /// COVALOS account, Cloud Config Sync and the phone bridge.
+    cloud: cloud_ui::Cloud,
+    guided: guided::GuidedController,
+    session_started: u64,
+    splash_started: Option<std::time::Instant>,
+    explorer_rect: Option<egui::Rect>,
+    disk_checked: Option<std::time::Instant>,
+    /// Open files changed on disk while they had unsaved edits.
+    disk_conflicts: Vec<PathBuf>,
     #[cfg(test)]
     mood_override: Option<identity::Mood>,
 }
@@ -150,7 +192,10 @@ impl Editor {
     }
 
     fn new(ctx: &egui::Context, root: Option<PathBuf>, preferences: Preferences) -> Self {
-        theme::install_fonts(ctx);
+        theme::install_fonts(ctx, preferences.ubuntu_interface, preferences.hack_editor);
+        // Ctrl +/- must zoom the panel under the pointer, not the whole interface.
+        ctx.options_mut(|o| o.zoom_with_keyboard = false);
+        theme::set_brightness(preferences.brightness);
         theme::install(
             ctx,
             preferences.font_size,
@@ -184,6 +229,11 @@ impl Editor {
             companion: companion::Companion::default(),
             identity: identity::Identity::default(),
             tools: tools::Tools::default(),
+            terminals: terminal::Terminals::default(),
+            lsp: lsp::Lsp::default(),
+            ghost: ghost::Ghost::default(),
+            git_gutter: git_gutter::GitGutter::default(),
+            preview: preview::Preview::default(),
             palette: None,
             chat: hub::Chat::default(),
             chat_saved_revision: 0,
@@ -198,20 +248,47 @@ impl Editor {
             notice: None,
             pending: None,
             force_close: false,
-            new_file: None,
-            file_change: None,
+            entry_draft: None,
             pending_delete: None,
-            focus_new_file: false,
             clean: clean::Clean::default(),
             studio: studio::Studio::default(),
             studio_open: false,
+            nav: navigation::Navigation::default(),
+            sidebar_requested: false,
+            sidebar_open: true,
+            explorer_filter: String::new(),
+            notifications: Vec::new(),
+            notifications_open: false,
+            notifications_query: String::new(),
+            notifications_filter: shell::NotificationFilter::All,
+            discord: discord::Presence::default(),
+            cloud: cloud_ui::Cloud::default(),
+            guided: guided::GuidedController::default(),
+            session_started: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs()),
+            splash_started: if cfg!(test) {
+                None
+            } else {
+                Some(std::time::Instant::now())
+            },
+            explorer_rect: None,
+            disk_checked: None,
+            disk_conflicts: Vec::new(),
             #[cfg(test)]
             mood_override: None,
             syntax: egui_extras::syntax_highlighting::CodeTheme::dark(
                 egui::TextStyle::Monospace.resolve(&ctx.style()).size,
             ),
         };
-        if let Some(root) = root {
+        let startup_root = root.or_else(|| {
+            editor
+                .preferences
+                .last_workspace
+                .clone()
+                .filter(|p| p.is_dir())
+        });
+        if let Some(root) = startup_root {
             editor.open_workspace(root);
         }
         editor
@@ -239,6 +316,8 @@ impl Editor {
         if !self.save_conversation() {
             return;
         }
+        self.snapshot_workspace_state();
+        self.guided.save_to_disk(self.root.as_deref());
         self.preferences.remember(&root);
         self.reset_chat();
         self.hub.change_workspace(
@@ -246,19 +325,66 @@ impl Editor {
             self.preferences.tasks(&root),
         );
         self.include_project_note = false;
-        self.root = Some(root);
+        self.guided.clear(None);
+        self.guided.restore_for_workspace(&root);
+        self.entry_draft = None;
+        self.root = Some(root.clone());
         self.hub_open = false;
         self.tools.workspace_changed();
+        self.terminals.workspace_changed(self.root.as_deref());
         self.directories.clear();
         self.documents.clear();
         self.active = None;
         self.sidebar = Sidebar::Files;
+        self.sidebar_open = true;
+        self.explorer_filter.clear();
         self.workspace_query.clear();
         self.search_hits.clear();
         self.search_job = None;
         self.find_open = false;
         self.notice = None;
         self.restore_conversation();
+        // Restore previously open tabs and active file for this workspace.
+        if let Some(saved) = self.preferences.workspace_files(&root).cloned() {
+            for file in &saved.files {
+                if file.is_file() {
+                    self.open_file(file.clone());
+                }
+            }
+            if let Some(active_path) = saved.active
+                && let Some(idx) = self.documents.iter().position(|d| d.path == active_path)
+            {
+                self.activate(idx);
+            }
+        }
+    }
+
+    fn snapshot_workspace_state(&mut self) {
+        if let Some(root) = self.root.clone() {
+            let files: Vec<PathBuf> = self.documents.iter().map(|d| d.path.clone()).collect();
+            let active = self
+                .active
+                .and_then(|i| self.documents.get(i))
+                .map(|d| d.path.clone());
+            self.preferences
+                .remember_workspace_files(&root, files, active);
+        }
+        self.preferences.agent_model = self.hub.agents.chat.model.clone();
+        self.preferences.agent_effort = self.hub.agents.chat.effort.clone().unwrap_or_default();
+        self.preferences.agent_session = self.hub.agents.chat.dock.clone();
+        self.preferences.agent_detached = self.hub.agents.chat.detached.clone();
+    }
+
+    fn persist_all_state(&mut self) {
+        self.snapshot_workspace_state();
+        self.guided.save_to_disk(self.root.as_deref());
+        if let Some(rt) = self.hub.agents.runtime.as_mut() {
+            rt.save_sessions();
+        }
+        if let Some(path) = &self.preferences_path {
+            self.saved_preferences = self.preferences.clone();
+            let _ = self.preferences.save(path);
+        }
     }
 
     fn pick_file(&mut self) {
@@ -402,6 +528,7 @@ impl Editor {
                     self.conversation_exit_warning = true;
                     return;
                 }
+                self.persist_all_state();
                 self.force_close = true;
                 self.chat.run.take();
                 self.hub.general_chat.run.take();
@@ -410,6 +537,7 @@ impl Editor {
         }
     }
 
+    #[cfg(test)]
     fn create_file(&mut self, name: &str) -> bool {
         let Some(root) = &self.root else { return false };
         match workspace::create_file(root, name) {
@@ -430,7 +558,27 @@ impl Editor {
     fn error(&mut self, message: impl Into<String>) {
         let message = message.into();
         self.editor_log(&message);
+        self.notify(shell::NotificationSource::Covalos, message.clone(), true);
         self.notice = Some((true, message));
+    }
+
+    fn notify(
+        &mut self,
+        source: shell::NotificationSource,
+        message: impl Into<String>,
+        is_error: bool,
+    ) {
+        const MAX_NOTIFICATIONS: usize = 64;
+        let message = message.into();
+        if self.notifications.len() >= MAX_NOTIFICATIONS {
+            self.notifications.remove(0);
+        }
+        self.notifications.push(shell::Notification {
+            source,
+            message,
+            is_error,
+            unread: !self.notifications_open,
+        });
     }
 
     fn show_find(&mut self) {
@@ -660,6 +808,37 @@ impl Editor {
             .start(assistant::Scope::Workspace, root, input, ctx);
     }
 
+    /// Picks up files that agents, git or other tools changed on disk.
+    fn check_disk(&mut self, ctx: &egui::Context) {
+        if self
+            .disk_checked
+            .is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(900))
+        {
+            return;
+        }
+        self.disk_checked = Some(std::time::Instant::now());
+        ctx.request_repaint_after(std::time::Duration::from_secs(1));
+        let mut log = Vec::new();
+        for doc in &mut self.documents {
+            match doc.sync_from_disk() {
+                workspace::DiskState::Reloaded => {
+                    log.push(format!("Reloaded {} (changed on disk)", doc.path.display()));
+                }
+                workspace::DiskState::Conflict => {
+                    if !self.disk_conflicts.contains(&doc.path) {
+                        self.disk_conflicts.push(doc.path.clone());
+                    }
+                }
+                workspace::DiskState::Same => {}
+            }
+        }
+        for line in log {
+            self.editor_log(&line);
+        }
+        let open: Vec<PathBuf> = self.documents.iter().map(|d| d.path.clone()).collect();
+        self.disk_conflicts.retain(|p| open.contains(p));
+    }
+
     fn poll(&mut self) {
         if let Some(job) = &self.search_job {
             loop {
@@ -718,7 +897,15 @@ impl Editor {
         });
         self.poll();
         self.poll_chats(ctx);
+        self.poll_agent_runtime(ctx);
+        self.cloud_tick(ctx);
         self.tools.poll();
+        self.terminals.poll();
+        self.check_disk(ctx);
+        self.lsp_sync(ctx);
+        if self.terminals.busy() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
         let snapshots = self.hub.snapshots(&self.chat, self.root.as_deref());
         self.companion.sync(
             snapshots,
@@ -731,36 +918,49 @@ impl Editor {
             ctx,
             &self.preferences.identity,
             self.preferences.reduce_motion,
+            // The background only runs where it can be seen: Home (also when every
+            // file floats in Clean Code), the Agents area, or behind code if enabled.
             self.hub_open
                 || self.documents.is_empty()
-                || self.preferences.identity.behind_code
-                || self.settings_open,
+                || self.active.is_none()
+                || self.preferences.identity.behind_code,
             mood,
         );
+        if (ctx.zoom_factor() - self.preferences.ui_scale).abs() > 0.001 {
+            ctx.set_zoom_factor(self.preferences.ui_scale);
+        }
+        self.update_presence();
+        self.tick_guided();
         if ctx.input(|input| input.viewport().close_requested()) && !self.force_close {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.request(Pending::Exit, ctx);
         }
 
         if self.pending.is_none()
-            && self.new_file.is_none()
             && self.palette.is_none()
-            && self.file_change.is_none()
             && self.pending_delete.is_none()
             && !self.conversation_exit_warning
         {
             self.shortcuts(ctx);
         }
+        self.begin_navigation(ctx);
+        // The gaps around the rounded islands are not covered by any panel; fill them with
+        // the outer chrome colour so the window clear colour never shows as black seams.
+        ctx.layer_painter(egui::LayerId::background()).rect_filled(
+            ctx.content_rect(),
+            0,
+            theme::colors().canvas,
+        );
         self.top_bar(ctx);
         self.status_bar(ctx);
         if self.studio_open && !self.hub_open {
             self.activity_rail(ctx);
             egui::CentralPanel::default()
-                .frame(theme::island(egui::Margin::same(0)).fill(theme::colors().canvas))
+                .frame(theme::centre_island(egui::Margin::same(0)).fill(theme::colors().canvas))
                 .show(ctx, |ui| self.library_studio(ui));
         } else if self.hub_open {
             egui::CentralPanel::default()
-                .frame(theme::island(egui::Margin::same(0)).fill(theme::colors().canvas))
+                .frame(theme::centre_island(egui::Margin::same(0)).fill(theme::colors().canvas))
                 .show(ctx, |ui| self.agent_hub(ui));
         } else {
             let focus = self.clean.focus;
@@ -769,29 +969,200 @@ impl Editor {
             }
             self.activity_rail(ctx);
             if !focus {
-                self.sidebar(ctx);
+                // Without a project the welcome view takes the whole work area;
+                // the panel returns when a folder opens or the user asks for it.
+                if self.sidebar_visible() {
+                    self.sidebar(ctx);
+                }
                 self.assistant_panel(ctx);
             }
+            self.preview_panel(ctx);
             egui::CentralPanel::default()
-                .frame(theme::island(egui::Margin::same(0)).fill(theme::colors().inset))
+                .frame(theme::centre_island(egui::Margin::same(0)))
                 .show(ctx, |ui| self.editor_panel(ui));
         }
         if !self.hub_open && !self.studio_open {
             self.floating_editors(ctx);
         }
+        if !self.studio_open {
+            self.floating_agents(ctx);
+        }
+        self.guided_overlay(ctx);
+        self.tunnel_modal(ctx);
         self.settings_window(ctx);
         self.about_window(ctx);
+        self.notifications_modal(ctx);
         self.palette_modal(ctx);
         self.modals(ctx);
+        self.agent_usage_modal(ctx);
         self.conversation_close_modal(ctx);
         self.file_dialogs(ctx);
         self.companion_surface(ctx);
+        self.startup_splash(ctx);
+        self.end_navigation(ctx);
+        theme::pointer_cursor(ctx);
+    }
+
+    /// Brief atmospheric ASCII 'C' loading splash on launch, fading smoothly into the editor.
+    fn startup_splash(&mut self, ctx: &egui::Context) {
+        let Some(started) = self.splash_started else {
+            return;
+        };
+        if self.preferences.reduce_motion
+            || ctx.input(|i| i.pointer.any_pressed() || !i.keys_down.is_empty())
+        {
+            self.splash_started = None;
+            return;
+        }
+        const HOLD: f32 = 1.45;
+        const FADE: f32 = 0.55;
+        const TOTAL: f32 = HOLD + FADE;
+        let elapsed = started.elapsed().as_secs_f32();
+        if elapsed >= TOTAL {
+            self.splash_started = None;
+            return;
+        }
+        let fade = if elapsed <= HOLD {
+            1.0
+        } else {
+            1.0 - egui::emath::easing::cubic_out(((elapsed - HOLD) / FADE).clamp(0.0, 1.0))
+        };
+        let load_t = (elapsed / HOLD).clamp(0.0, 1.0);
+        let screen = ctx.content_rect();
+        egui::Area::new(egui::Id::new("covalos-startup-splash"))
+            .order(egui::Order::Tooltip)
+            .fixed_pos(screen.min)
+            .interactable(false)
+            .show(ctx, |ui| {
+                let painter = ui.painter();
+                painter.rect_filled(
+                    screen,
+                    0,
+                    egui::Color32::from_rgba_unmultiplied(8, 7, 12, (255.0 * fade) as u8),
+                );
+                const LOGO: &[&str] = &[
+                    "      ░▒▓███████▓▒░      ",
+                    "    ░▓█████████████▓░    ",
+                    "   ▓█████▓▒░░░▒▓█████░   ",
+                    "  ▓████▒         ░▒▓▒░   ",
+                    "  ████▓                  ",
+                    "  ████▓                  ",
+                    "  ▓████▒         ░▒▓▒░   ",
+                    "   ▓█████▓▒░░░▒▓█████░   ",
+                    "    ░▓█████████████▓░    ",
+                    "      ░▒▓███████▓▒░      ",
+                ];
+                let accent = theme::colors().accent;
+                let text_col = theme::colors().text;
+                let line_h = 18.0_f32;
+                let total_h = LOGO.len() as f32 * line_h;
+                let top_y = screen.center().y - total_h * 0.5;
+                for (idx, row) in LOGO.iter().enumerate() {
+                    let row_t = ((load_t * (LOGO.len() as f32 + 2.5)) - idx as f32).clamp(0.0, 1.0);
+                    if row_t <= 0.01 {
+                        continue;
+                    }
+                    let shimmer = (1.0 - (idx as f32 / LOGO.len() as f32 - load_t).abs() * 2.8)
+                        .clamp(0.0, 1.0);
+                    let col = motion::blend(accent.gamma_multiply(0.75), text_col, shimmer * 0.85)
+                        .gamma_multiply(row_t * fade);
+                    painter.text(
+                        egui::pos2(screen.center().x, top_y + idx as f32 * line_h),
+                        egui::Align2::CENTER_CENTER,
+                        *row,
+                        egui::FontId::monospace(15.0),
+                        col,
+                    );
+                }
+            });
+        ctx.request_repaint_after(std::time::Duration::from_millis(16));
     }
 }
+impl Editor {
+    /// Coarse, privacy-safe activity for Discord Rich Presence. Paths and file names are
+    /// never sent; the project name only with explicit opt-in.
+    fn update_presence(&mut self) {
+        let prefs = self.preferences.discord.clone();
+        let language = self
+            .active
+            .and_then(|i| self.documents.get(i))
+            .and_then(|d| d.path.extension())
+            .and_then(|e| e.to_str())
+            .map(language_name);
+        let state = if !prefs.show_activity {
+            None
+        } else if self.studio_open {
+            Some("In Library Studio".to_owned())
+        } else if self.hub_open || self.chat.run.is_some() {
+            Some("Coordinating agents".to_owned())
+        } else if self.sidebar == Sidebar::Git && self.tools.showing_diff() {
+            Some("Reviewing changes".to_owned())
+        } else if let Some(language) = language.filter(|_| prefs.show_language) {
+            Some(format!("Editing {language}"))
+        } else if self.active.is_some() {
+            Some("Editing code".to_owned())
+        } else if self.root.is_some() {
+            Some("Working on a project".to_owned())
+        } else {
+            None
+        };
+        let state = match (state, self.root.as_deref().filter(|_| prefs.show_project)) {
+            (Some(state), Some(root)) => Some(format!("{state} · {}", workspace::filename(root))),
+            (state, _) => state,
+        };
+        let (language_asset, language_text) = match language.filter(|_| prefs.show_language) {
+            Some(lang) => (
+                Some(
+                    lang.to_ascii_lowercase()
+                        .replace('#', "sharp")
+                        .replace("++", "pp"),
+                ),
+                Some(lang.to_owned()),
+            ),
+            None => (None, None),
+        };
+        let activity = discord::Activity {
+            details: "Covalos · In Beta".to_owned(),
+            state,
+            started: prefs.show_elapsed.then_some(self.session_started),
+            language_asset,
+            language_text,
+        };
+        self.discord.update(&prefs, activity);
+    }
+}
+
+fn language_name(extension: &str) -> &'static str {
+    match extension.to_ascii_lowercase().as_str() {
+        "rs" => "Rust",
+        "ts" | "tsx" | "mts" | "cts" => "TypeScript",
+        "js" | "jsx" | "mjs" | "cjs" => "JavaScript",
+        "py" => "Python",
+        "go" => "Go",
+        "java" => "Java",
+        "kt" | "kts" => "Kotlin",
+        "cs" => "C#",
+        "c" | "h" => "C",
+        "cpp" | "cc" | "hpp" => "C++",
+        "swift" => "Swift",
+        "rb" => "Ruby",
+        "php" => "PHP",
+        "html" | "htm" => "HTML",
+        "css" | "scss" => "CSS",
+        "md" => "Markdown",
+        "json" => "JSON",
+        "toml" => "TOML",
+        "yaml" | "yml" => "YAML",
+        _ => "code",
+    }
+}
+
 impl eframe::App for Editor {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.render(ctx);
+        self.sync_preview(ctx, frame);
         self.autosave_conversation(ctx);
+        self.snapshot_workspace_state();
         if self.preferences != self.saved_preferences
             && !ctx.input(|input| input.pointer.any_down())
         {
@@ -802,6 +1173,11 @@ impl eframe::App for Editor {
                 self.error(format!("Could not save editor settings. {error}"));
             }
         }
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        let _ = self.save_conversation();
+        self.persist_all_state();
     }
 }
 

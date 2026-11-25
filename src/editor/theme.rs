@@ -5,18 +5,18 @@ pub(crate) const BRAND: &str = crate::brand::NAME;
 pub(crate) const TITLE: &str = crate::brand::TITLE;
 
 pub(super) const UNIT: f32 = 4.0;
-pub(super) const SMALL: f32 = 12.0;
-pub(super) const BODY: f32 = 13.0;
-pub(super) const LEAD: f32 = 15.0;
+pub(super) const SMALL: f32 = 12.5;
+pub(super) const BODY: f32 = 13.5;
+pub(super) const LEAD: f32 = 15.5;
 pub(super) const HEADING: f32 = 20.0;
 pub(super) const DISPLAY: f32 = 40.0;
-pub(super) const CHROME_HEIGHT: f32 = 44.0;
-pub(super) const RAIL_WIDTH: f32 = 48.0;
-pub(super) const TAB_HEIGHT: f32 = 36.0;
-pub(super) const BREADCRUMB_HEIGHT: f32 = 28.0;
-pub(super) const STATUS_HEIGHT: f32 = 25.0;
-pub(super) const PANEL_PADDING: i8 = 12;
-pub(super) const CONTROL_RADIUS: u8 = 6;
+pub(super) const CHROME_HEIGHT: f32 = 40.0;
+pub(super) const RAIL_WIDTH: f32 = 44.0;
+pub(super) const TAB_HEIGHT: f32 = 34.0;
+pub(super) const BREADCRUMB_HEIGHT: f32 = 26.0;
+pub(super) const STATUS_HEIGHT: f32 = 24.0;
+pub(super) const PANEL_PADDING: i8 = 10;
+pub(super) const CONTROL_RADIUS: u8 = 8;
 pub(super) const CHECKBOX_RADIUS: u8 = 2;
 pub(super) const MODAL_RADIUS: u8 = 12;
 pub(super) const HOVER_SECONDS: f32 = super::motion::HOVER;
@@ -29,34 +29,44 @@ pub(super) const COMPACT_CODE_LINE_HEIGHT: f32 = 1.16;
 #[serde(rename_all = "snake_case")]
 pub(super) enum Theme {
     #[default]
+    Obsidian,
+    OledDark,
     Nocturne,
     Dark,
     Midnight,
     Violet,
     Light,
+    /// Matte warm-paper light theme for screens under direct sunlight or glare.
+    Daylight,
     HighContrast,
 }
 impl Theme {
-    pub(super) const ALL: [Self; 6] = [
+    pub(super) const ALL: [Self; 9] = [
+        Self::Obsidian,
         Self::Nocturne,
+        Self::OledDark,
         Self::Dark,
         Self::Midnight,
         Self::Violet,
         Self::Light,
+        Self::Daylight,
         Self::HighContrast,
     ];
     pub(super) fn name(self) -> &'static str {
         match self {
-            Self::Nocturne => "COVALOS Nocturne",
-            Self::Dark => "COVALOS Graphite",
-            Self::Midnight => "COVALOS Midnight",
-            Self::Violet => "COVALOS Violet",
-            Self::Light => "COVALOS Light",
+            Self::Obsidian => "Covalos Obsidian",
+            Self::Nocturne => "Covalos Nocturne",
+            Self::OledDark => "OLED Dark",
+            Self::Dark => "Covalos Graphite",
+            Self::Midnight => "Covalos Midnight",
+            Self::Violet => "Covalos Violet",
+            Self::Light => "Covalos Light",
+            Self::Daylight => "Covalos Daylight",
             Self::HighContrast => "High Contrast",
         }
     }
     pub(super) fn is_dark(self) -> bool {
-        self != Self::Light
+        !matches!(self, Self::Light | Self::Daylight)
     }
 }
 #[derive(Clone, Copy)]
@@ -88,30 +98,68 @@ pub(super) struct Palette {
 impl Theme {
     pub(super) fn colors(self) -> Palette {
         match self {
+            // Continuous medium-gray outer shell (top bar, rail, Explorer, perimeter)
+            // framing a darker rounded editor well with hairline borders.
+            Self::Obsidian => Palette {
+                canvas: Color32::from_rgb(28, 28, 32),
+                surface: Color32::from_rgb(28, 28, 32),
+                inset: Color32::from_rgb(15, 15, 18),
+                elevated: Color32::from_rgb(39, 39, 45),
+                hover: Color32::from_rgb(49, 49, 57),
+                border: Color32::from_rgb(52, 52, 60),
+                control_border: Color32::from_rgb(74, 74, 85),
+                text: Color32::from_rgb(242, 242, 245),
+                secondary: Color32::from_rgb(188, 188, 200),
+                muted: Color32::from_rgb(154, 154, 168),
+                disabled: Color32::from_rgb(108, 108, 120),
+                accent: Color32::from_rgb(112, 180, 255),
+                accent_hover: Color32::from_rgb(152, 204, 255),
+                accent_bg: Color32::from_rgb(24, 42, 70),
+                success: Color32::from_rgb(116, 224, 168),
+                error: Color32::from_rgb(255, 136, 150),
+                warning: Color32::from_rgb(246, 200, 122),
+                syntax_string: Color32::from_rgb(134, 226, 174),
+                syntax_number: Color32::from_rgb(248, 184, 122),
+                caret: Color32::from_rgb(102, 174, 255),
+                selection: Color32::from_rgba_unmultiplied(59, 130, 246, 76),
+            },
             // Deep violet-black base: surfaces separated by value, hairline borders, a lilac
             // accent and a luminous pink caret. Neutrals carry a slight violet cast.
+            // The code well stays pure black; the chrome, cards and floating surfaces step up
+            // in value so bars, islands and popups keep a readable edge on OLED panels.
+            Self::OledDark => Palette {
+                canvas: Color32::from_rgb(10, 9, 13),
+                inset: Color32::BLACK,
+                surface: Color32::from_rgb(17, 16, 22),
+                elevated: Color32::from_rgb(29, 27, 37),
+                hover: Color32::from_rgb(41, 38, 52),
+                border: Color32::from_rgb(52, 48, 64),
+                control_border: Color32::from_rgb(80, 74, 98),
+                ..Self::Nocturne.colors()
+            },
+            // Plum-charcoal surfaces, ivory text, low-contrast hairlines and a lilac accent.
             Self::Nocturne => Palette {
-                canvas: Color32::from_rgb(9, 8, 13),
-                surface: Color32::from_rgb(17, 15, 23),
-                inset: Color32::from_rgb(13, 11, 19),
-                elevated: Color32::from_rgb(26, 23, 35),
-                hover: Color32::from_rgb(33, 29, 44),
-                border: Color32::from_rgb(35, 31, 46),
-                control_border: Color32::from_rgb(60, 54, 76),
-                text: Color32::from_rgb(232, 228, 240),
-                secondary: Color32::from_rgb(170, 164, 186),
-                muted: Color32::from_rgb(140, 133, 158),
-                disabled: Color32::from_rgb(98, 92, 112),
-                accent: Color32::from_rgb(201, 164, 255),
-                accent_hover: Color32::from_rgb(222, 197, 255),
-                accent_bg: Color32::from_rgb(40, 31, 60),
-                success: Color32::from_rgb(126, 220, 190),
-                error: Color32::from_rgb(255, 138, 158),
-                warning: Color32::from_rgb(245, 199, 126),
-                syntax_string: Color32::from_rgb(134, 225, 193),
-                syntax_number: Color32::from_rgb(247, 168, 124),
-                caret: Color32::from_rgb(255, 122, 198),
-                selection: Color32::from_rgba_unmultiplied(150, 104, 255, 72),
+                canvas: Color32::from_rgb(18, 16, 24),
+                surface: Color32::from_rgb(25, 22, 33),
+                inset: Color32::from_rgb(15, 13, 21),
+                elevated: Color32::from_rgb(35, 31, 46),
+                hover: Color32::from_rgb(46, 41, 60),
+                border: Color32::from_rgb(56, 50, 72),
+                control_border: Color32::from_rgb(82, 74, 104),
+                text: Color32::from_rgb(241, 236, 245),
+                secondary: Color32::from_rgb(186, 179, 200),
+                muted: Color32::from_rgb(156, 148, 172),
+                disabled: Color32::from_rgb(108, 101, 124),
+                accent: Color32::from_rgb(212, 178, 255),
+                accent_hover: Color32::from_rgb(232, 208, 255),
+                accent_bg: Color32::from_rgb(49, 39, 72),
+                success: Color32::from_rgb(134, 224, 192),
+                error: Color32::from_rgb(255, 146, 164),
+                warning: Color32::from_rgb(247, 204, 134),
+                syntax_string: Color32::from_rgb(142, 228, 196),
+                syntax_number: Color32::from_rgb(249, 178, 136),
+                caret: Color32::from_rgb(255, 142, 208),
+                selection: Color32::from_rgba_unmultiplied(166, 122, 255, 76),
             },
             Self::Dark => Palette {
                 canvas: Color32::from_rgb(16, 19, 24),
@@ -205,6 +253,31 @@ impl Theme {
                 caret: Color32::from_rgb(160, 40, 130),
                 selection: Color32::from_rgba_unmultiplied(98, 66, 166, 52),
             },
+            // Matte warm paper for glare: no burnt-out white anywhere in the chrome, near-black
+            // ink, firm borders and a selection that stays visible under direct light.
+            Self::Daylight => Palette {
+                canvas: Color32::from_rgb(230, 226, 216),
+                surface: Color32::from_rgb(238, 235, 227),
+                inset: Color32::from_rgb(245, 242, 234),
+                elevated: Color32::from_rgb(250, 248, 242),
+                hover: Color32::from_rgb(220, 214, 201),
+                border: Color32::from_rgb(184, 177, 162),
+                control_border: Color32::from_rgb(122, 115, 100),
+                text: Color32::from_rgb(20, 18, 14),
+                secondary: Color32::from_rgb(52, 48, 40),
+                muted: Color32::from_rgb(76, 71, 61),
+                disabled: Color32::from_rgb(112, 106, 94),
+                accent: Color32::from_rgb(84, 40, 168),
+                accent_hover: Color32::from_rgb(66, 28, 138),
+                accent_bg: Color32::from_rgb(222, 212, 240),
+                success: Color32::from_rgb(22, 98, 60),
+                error: Color32::from_rgb(158, 30, 44),
+                warning: Color32::from_rgb(112, 70, 0),
+                syntax_string: Color32::from_rgb(24, 98, 36),
+                syntax_number: Color32::from_rgb(146, 60, 0),
+                caret: Color32::from_rgb(178, 18, 110),
+                selection: Color32::from_rgba_unmultiplied(84, 40, 168, 82),
+            },
             Self::HighContrast => Palette {
                 canvas: Color32::from_rgb(0, 0, 0),
                 surface: Color32::from_rgb(6, 6, 6),
@@ -233,17 +306,52 @@ impl Theme {
 }
 thread_local! {
     // egui renders on its UI thread. Each test and viewport installs its palette before drawing.
-    static ACTIVE_THEME: std::cell::Cell<Theme> = const { std::cell::Cell::new(Theme::Nocturne) };
+    static ACTIVE_THEME: std::cell::Cell<Theme> = const { std::cell::Cell::new(Theme::Obsidian) };
+    static SURFACE_BRIGHTNESS: std::cell::Cell<f32> = const { std::cell::Cell::new(0.35) };
 }
 pub(super) fn active() -> Theme {
     ACTIVE_THEME.with(|theme| theme.get())
 }
 
-pub(super) fn colors() -> Palette {
-    ACTIVE_THEME.with(|theme| theme.get().colors())
+pub(super) fn set_brightness(brightness: f32) {
+    let clamped = if brightness.is_finite() {
+        brightness.clamp(0.0, 1.0)
+    } else {
+        0.35
+    };
+    SURFACE_BRIGHTNESS.with(|b| b.set(clamped));
 }
 
-pub(super) fn install_fonts(ctx: &Context) {
+fn shift_rgb(color: Color32, delta: i16) -> Color32 {
+    let apply = |c: u8| (i16::from(c) + delta).clamp(0, 255) as u8;
+    Color32::from_rgba_unmultiplied(
+        apply(color.r()),
+        apply(color.g()),
+        apply(color.b()),
+        color.a(),
+    )
+}
+
+pub(super) fn colors() -> Palette {
+    let theme = ACTIVE_THEME.with(|theme| theme.get());
+    let mut palette = theme.colors();
+    if theme.is_dark() && !matches!(theme, Theme::HighContrast | Theme::OledDark) {
+        let brightness = SURFACE_BRIGHTNESS.with(|b| b.get());
+        let delta = ((brightness - 0.35) * 32.0).round() as i16;
+        if delta != 0 {
+            palette.canvas = shift_rgb(palette.canvas, delta);
+            palette.surface = shift_rgb(palette.surface, delta);
+            palette.inset = shift_rgb(palette.inset, (delta * 3) / 4);
+            palette.elevated = shift_rgb(palette.elevated, delta);
+            palette.hover = shift_rgb(palette.hover, delta);
+            palette.border = shift_rgb(palette.border, delta);
+            palette.control_border = shift_rgb(palette.control_border, delta);
+        }
+    }
+    palette
+}
+
+pub(super) fn install_fonts(ctx: &Context, ubuntu: bool, hack: bool) {
     let mut definitions = egui::FontDefinitions::default();
     definitions.font_data.insert(
         "Geist".into(),
@@ -257,16 +365,20 @@ pub(super) fn install_fonts(ctx: &Context) {
             "../../assets/fonts/IBMPlexMono.ttf"
         ))),
     );
-    definitions
-        .families
-        .entry(egui::FontFamily::Proportional)
-        .or_default()
-        .insert(0, "Geist".into());
-    definitions
-        .families
-        .entry(egui::FontFamily::Monospace)
-        .or_default()
-        .insert(0, "IBM Plex Mono".into());
+    for (family, bundled, use_alternative) in [
+        (egui::FontFamily::Proportional, "Geist", ubuntu),
+        (egui::FontFamily::Monospace, "IBM Plex Mono", hack),
+    ] {
+        let fonts = definitions.families.entry(family).or_default();
+        fonts.insert(
+            if use_alternative {
+                1.min(fonts.len())
+            } else {
+                0
+            },
+            bundled.into(),
+        );
+    }
     ctx.set_fonts(definitions);
 }
 
@@ -277,7 +389,7 @@ pub(super) fn install(ctx: &Context, font_size: f32, high_contrast: bool, theme:
     style.spacing.button_padding = egui::vec2(10.0, 5.0);
     style.spacing.interact_size.y = 28.0;
     style.spacing.window_margin = Margin::same(20);
-    style.spacing.menu_margin = Margin::same(6);
+    style.spacing.menu_margin = Margin::same(5);
     style.spacing.indent = 16.0;
     style.spacing.scroll.bar_width = 6.0;
     style.spacing.scroll.floating_width = 3.0;
@@ -322,7 +434,9 @@ pub(super) fn install(ctx: &Context, font_size: f32, high_contrast: bool, theme:
     );
     visuals.window_corner_radius = MODAL_RADIUS.into();
     visuals.window_highlight_topmost = false;
-    visuals.menu_corner_radius = CONTROL_RADIUS.into();
+    visuals.window_shadow = floating_shadow(theme, 28);
+    visuals.popup_shadow = floating_shadow(theme, 18);
+    visuals.menu_corner_radius = 10.into();
     visuals.extreme_bg_color = colors().inset;
     visuals.faint_bg_color = colors().surface;
     visuals.selection.bg_fill = colors().selection;
@@ -345,7 +459,7 @@ pub(super) fn install(ctx: &Context, font_size: f32, high_contrast: bool, theme:
             if high_contrast {
                 colors().secondary
             } else {
-                colors().control_border
+                colors().border
             },
         );
         widget.fg_stroke = Stroke::new(1.0_f32, colors().text);
@@ -354,21 +468,67 @@ pub(super) fn install(ctx: &Context, font_size: f32, high_contrast: bool, theme:
     }
     visuals.widgets.hovered.bg_fill = colors().hover;
     visuals.widgets.hovered.weak_bg_fill = colors().hover;
-    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, colors().muted);
+    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, colors().control_border);
+    visuals.widgets.hovered.expansion = 0.0;
     visuals.widgets.active.bg_fill = colors().accent_bg;
     visuals.widgets.active.weak_bg_fill = colors().accent_bg;
     visuals.widgets.active.bg_stroke = Stroke::new(1.0_f32, colors().accent);
     visuals.widgets.open.weak_bg_fill = colors().accent_bg;
-    ctx.set_style(style);
+    let mode = if theme.is_dark() {
+        egui::Theme::Dark
+    } else {
+        egui::Theme::Light
+    };
+    ctx.set_theme(mode);
+    ctx.set_style_of(mode, style);
 }
 
-/// Corner radius and spacing of the panel "islands": every tool window is a rounded
-/// surface floating on the darker canvas, separated by a 6 pt gutter (IntelliJ-style).
-pub(super) const ISLAND_RADIUS: u8 = 10;
-pub(super) const ISLAND_GAP: i8 = 3;
+/// Soft drop shadow for popups, menus and floating windows; stronger on dark themes so
+/// elevated surfaces separate from near-black backgrounds.
+pub(super) fn floating_shadow(theme: Theme, blur: u8) -> egui::Shadow {
+    egui::Shadow {
+        offset: [0, i8::try_from(blur / 3).unwrap_or(8)],
+        blur,
+        spread: 0,
+        color: Color32::from_black_alpha(if theme.is_dark() { 150 } else { 46 }),
+    }
+}
 
-/// Window chrome (title bar, activity rail, status bar): flat, on the canvas.
+/// Hand cursor over the small, enabled, click-only control under the pointer (buttons,
+/// tabs, rows, chips) when it did not choose a cursor itself. Large click areas such as
+/// empty backgrounds, and text fields (which also sense drags), keep the default cursor.
+pub(super) fn pointer_cursor(ctx: &Context) {
+    let Some(hit) = ctx.viewport(|viewport| viewport.hits.click) else {
+        return;
+    };
+    let size = hit.interact_rect.size();
+    let control = hit.enabled
+        && hit.sense.senses_click()
+        && !hit.sense.senses_drag()
+        && size.x <= 640.0
+        && size.y <= 72.0;
+    if control && ctx.output(|o| o.cursor_icon) == egui::CursorIcon::Default {
+        ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+}
+
+/// Shows the hand cursor over an interactive control and returns it unchanged.
+pub(super) fn pointer(response: egui::Response) -> egui::Response {
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Corner radius and spacing of the workbench islands: recessed outer chrome framing
+/// elevated, rounded content surfaces with 1px hairline borders.
+pub(super) const ISLAND_RADIUS: u8 = 10;
+pub(super) const ISLAND_GAP: i8 = 4;
+
+/// Window chrome (title bar, activity rail, status bar): flat, on the continuous outer shell.
 pub(super) fn panel_frame(margin: Margin) -> Frame {
+    Frame::new().fill(colors().canvas).inner_margin(margin)
+}
+
+/// Sidebar frame drawn as one shape with the top bar and the window outline.
+pub(super) fn sidebar_frame(margin: Margin) -> Frame {
     Frame::new().fill(colors().canvas).inner_margin(margin)
 }
 
@@ -378,6 +538,36 @@ pub(super) fn island(margin: Margin) -> Frame {
         .fill(colors().surface)
         .inner_margin(margin)
         .outer_margin(Margin::same(ISLAND_GAP))
+        .corner_radius(ISLAND_RADIUS)
+        .stroke(Stroke::new(1.0_f32, colors().border))
+}
+
+/// Darker recessed center card framed inside the continuous outer chrome.
+pub(super) fn centre_island(margin: Margin) -> Frame {
+    Frame::new()
+        .fill(colors().inset)
+        .inner_margin(margin)
+        .outer_margin(Margin {
+            left: 2,
+            right: 6,
+            top: 0,
+            bottom: 4,
+        })
+        .corner_radius(ISLAND_RADIUS)
+        .stroke(Stroke::new(1.0_f32, colors().border))
+}
+
+/// Right-side dock card aligned flush with the top edge of the center island.
+pub(super) fn side_island(margin: Margin) -> Frame {
+    Frame::new()
+        .fill(colors().surface)
+        .inner_margin(margin)
+        .outer_margin(Margin {
+            left: 4,
+            right: 6,
+            top: 0,
+            bottom: 4,
+        })
         .corner_radius(ISLAND_RADIUS)
         .stroke(Stroke::new(1.0_f32, colors().border))
 }
@@ -399,6 +589,57 @@ pub(super) fn primary(text: &str) -> egui::Button<'_> {
         .fill(colors().accent)
         .stroke(Stroke::NONE)
         .corner_radius(CONTROL_RADIUS)
+}
+
+pub(super) fn search_field(
+    ui: &mut egui::Ui,
+    salt: &str,
+    text: &mut String,
+    hint: &str,
+    limit: usize,
+) -> egui::Response {
+    let id = ui.make_persistent_id(salt);
+    let focused = ui.memory(|m| m.has_focus(id));
+    let progress = super::motion::state(ui, id.with("focus-ring"), focused, super::motion::CONTROL);
+    let stroke = super::motion::blend(colors().control_border, colors().accent, progress);
+    Frame::new()
+        .fill(colors().inset)
+        .stroke(Stroke::new(1.0_f32, stroke))
+        .corner_radius(CONTROL_RADIUS)
+        .inner_margin(Margin::symmetric(7, 3))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 5.0;
+                let (r, icon) =
+                    ui.allocate_exact_size(egui::vec2(14.0, 21.0), egui::Sense::click());
+                draw_icon_sized(ui.painter(), r.center(), Icon::Search, colors().muted, 13.0);
+                let width = ui.available_width() - if text.is_empty() { 0.0 } else { 26.0 };
+                let input = ui.add(
+                    egui::TextEdit::singleline(text)
+                        .margin(Margin::ZERO)
+                        .id(id)
+                        .frame(false)
+                        .desired_width(width.max(16.0))
+                        .hint_text(tr(hint))
+                        .char_limit(limit),
+                );
+                if icon.clicked() {
+                    input.request_focus();
+                }
+                if !text.is_empty()
+                    && icon_button_sized(ui, Icon::Close, "Clear filter", false, 20.0).clicked()
+                {
+                    text.clear();
+                    input.request_focus();
+                    let mut response = input;
+                    response.mark_changed();
+                    return response;
+                }
+                input
+            })
+            .inner
+        })
+        .inner
 }
 
 pub(super) fn checkbox(
@@ -522,7 +763,7 @@ pub(super) fn row(ui: &mut egui::Ui, label: &str, detail: &str, selected: bool) 
             egui::StrokeKind::Inside,
         );
     }
-    response
+    pointer(response)
 }
 
 /// Interface icons. Everything except the COVALOS mark is a Lucide icon (ISC) rasterized to a
@@ -533,6 +774,7 @@ pub(super) fn row(ui: &mut egui::Ui, label: &str, detail: &str, selected: bool) 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Icon {
     Brand,
+    Home,
     Explorer,
     Search,
     Git,
@@ -607,6 +849,7 @@ impl Icon {
     pub(super) fn asset(self) -> Option<&'static str> {
         Some(match self {
             Self::Brand => return None,
+            Self::Home => "lucide-house",
             Self::Explorer => "lucide-files",
             Self::Search => "lucide-search",
             Self::Git => "lucide-git-branch",
@@ -688,11 +931,22 @@ pub(super) fn icon_button(
     label: &str,
     selected: bool,
 ) -> egui::Response {
+    icon_button_sized(ui, icon, label, selected, 32.0)
+}
+
+pub(super) fn icon_button_sized(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    label: &str,
+    selected: bool,
+    side: f32,
+) -> egui::Response {
     let response = ui.add(
         egui::Button::new("")
+            .small()
             .frame(false)
             .selected(selected)
-            .min_size(egui::vec2(32.0, 32.0)),
+            .min_size(egui::Vec2::splat(side)),
     );
     #[cfg(test)]
     super::motion::record(ui, label, response.rect);
@@ -711,28 +965,26 @@ pub(super) fn icon_button(
     if selected || progress > 0.0 {
         ui.painter().rect_filled(
             response.rect.shrink(1.0),
-            CONTROL_RADIUS,
+            8,
             if selected {
-                colors().accent_bg
+                colors().elevated
             } else {
                 colors().hover.gamma_multiply(progress)
             },
         );
     }
     if selected {
-        ui.painter().rect_filled(
-            egui::Rect::from_min_size(
-                response.rect.left_center() + egui::vec2(-5.0, -7.0),
-                egui::vec2(2.0, 14.0),
-            ),
-            1,
-            colors().accent,
+        ui.painter().rect_stroke(
+            response.rect.shrink(1.0),
+            8,
+            Stroke::new(1.0_f32, colors().border),
+            egui::StrokeKind::Inside,
         );
     }
     if response.has_focus() {
         ui.painter().rect_stroke(
             response.rect,
-            CONTROL_RADIUS,
+            8,
             Stroke::new(1.0_f32, colors().accent),
             egui::StrokeKind::Inside,
         );
@@ -749,7 +1001,7 @@ pub(super) fn icon_button(
         icon,
         color,
     );
-    response.on_hover_text(tr(label))
+    pointer(response).on_hover_text(tr(label))
 }
 
 pub(super) fn draw_icon(painter: &egui::Painter, center: egui::Pos2, icon: Icon, color: Color32) {
@@ -788,11 +1040,30 @@ pub(super) fn modal_frame() -> Frame {
         .inner_margin(Margin::same(20))
         .corner_radius(MODAL_RADIUS)
         .stroke(Stroke::new(1.0_f32, colors().control_border))
+        .shadow(floating_shadow(active(), 32))
 }
 
-/// Short surface entry; input remains available throughout the transition.
-pub(super) fn enter(ui: &mut egui::Ui, id: egui::Id) {
-    super::motion::enter(ui, id, super::motion::VIEW);
+/// Thin accent-tinted highlight along the top edge of a card or editor surface.
+pub(super) fn ambient_top_glow(painter: &egui::Painter, rect: egui::Rect, inset: f32) {
+    if !active().is_dark() || active() == Theme::HighContrast {
+        return;
+    }
+    let width = (rect.width() - inset * 2.0).max(0.0);
+    if width < 24.0 {
+        return;
+    }
+    let y = rect.top() + 1.0;
+    let center = rect.center().x;
+    let half = width * 0.42;
+    painter.line_segment(
+        [egui::pos2(center - half, y), egui::pos2(center + half, y)],
+        Stroke::new(1.0_f32, colors().accent.gamma_multiply(0.22)),
+    );
+    let inner = half * 0.45;
+    painter.line_segment(
+        [egui::pos2(center - inner, y), egui::pos2(center + inner, y)],
+        Stroke::new(1.0_f32, colors().accent_hover.gamma_multiply(0.18)),
+    );
 }
 
 #[cfg(test)]

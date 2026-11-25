@@ -242,13 +242,24 @@ pub(super) fn paint(ui: &egui::Ui, rect: Rect, name: &'static str) {
 
 /// Paint an embedded RGBA mask tinted with `color`.
 pub(super) fn tinted(painter: &egui::Painter, rect: Rect, name: &'static str, color: Color32) {
-    let texture = texture(painter.ctx(), name);
-    painter.image(
-        texture.id(),
-        snap(painter.ctx(), rect),
+    tinted_region(
+        painter,
+        rect,
+        name,
         Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
         color,
     );
+}
+
+pub(super) fn tinted_region(
+    painter: &egui::Painter,
+    rect: Rect,
+    name: &'static str,
+    uv: Rect,
+    color: Color32,
+) {
+    let texture = texture(painter.ctx(), name);
+    painter.image(texture.id(), snap(painter.ctx(), rect), uv, color);
 }
 
 pub(super) fn file(ui: &egui::Ui, center: egui::Pos2, path: &Path) {

@@ -1,6 +1,9 @@
 //! Embeds the Windows executable icon (`RT_GROUP_ICON` / `RT_ICON`) and PE version metadata
 //! (`RT_VERSION`) directly as a standard COFF `.rsrc` object without requiring `rc.exe` or
 //! `windres` on PATH. No-op on non-Windows targets.
+#[cfg(all(windows, target_env = "gnu"))]
+extern crate webview2_com_sys as _;
+
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -17,13 +20,62 @@ fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let ico_path = manifest_dir.join("assets/brand/covalos-icon.ico");
     let ico_bytes = fs::read(&ico_path).expect("read assets/brand/covalos-icon.ico");
-    let version = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.4.0".into());
+    let version = env!("CARGO_PKG_VERSION").to_owned();
 
     let obj_bytes = build_rsrc_coff(&ico_bytes, &version);
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
     let obj_path = out_dir.join("covalos_rsrc.o");
     write_if_changed(&obj_path, &obj_bytes);
     println!("cargo:rustc-link-arg={}", obj_path.display());
+    if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("gnu") {
+        let arch = match env::var("CARGO_CFG_TARGET_ARCH").as_deref() {
+            Ok("x86_64") => "x64",
+            Ok("x86") => "x86",
+            Ok("aarch64") => "arm64",
+            _ => return,
+        };
+        stage_webview_loader(&out_dir, arch);
+    }
+}
+
+fn stage_webview_loader(out: &Path, architecture: &str) {
+    let Some(build) = out
+        .ancestors()
+        .find(|dir| dir.file_name().is_some_and(|name| name == "build"))
+    else {
+        return;
+    };
+    let binary = Path::new(architecture).join("WebView2Loader.dll");
+    let new_layout = build.join("webview2-com-sys");
+    let directories = |path: &Path| {
+        fs::read_dir(path)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| entry.path())
+            .collect::<Vec<_>>()
+    };
+    let mut candidates = directories(&new_layout);
+    candidates.extend(directories(build).into_iter().filter(|dir| {
+        dir.file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("webview2-com-sys-"))
+    }));
+    for source in candidates
+        .into_iter()
+        .map(|dir| dir.join("out").join(&binary))
+    {
+        if let Ok(bytes) = fs::read(&source) {
+            println!("cargo:rerun-if-changed={}", source.display());
+            write_if_changed(&out.join("WebView2Loader.dll"), &bytes);
+            println!("cargo:rustc-link-search=native={}", out.display());
+            if let Some(profile) = build.parent() {
+                write_if_changed(&profile.join("WebView2Loader.dll"), &bytes);
+            }
+            return;
+        }
+    }
+    println!("cargo:warning=WebView2Loader.dll was not found in the Cargo build output");
 }
 
 fn write_if_changed(path: &Path, bytes: &[u8]) {

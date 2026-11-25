@@ -5,175 +5,218 @@
 <h1 align="center">COVALOS</h1>
 
 <p align="center">
-  <strong>A native Rust IDE built for speed, craft, and multi-agent development.</strong><br/>
-  Nocturne design system, GPU Dither Field, Clean Code floating editors, Library Studio, and full developer control — with zero Electron overhead.
+  Native desktop code editor written in Rust, with a built-in team of coding agents
+  (Claude Code, Codex, Gemini) that run on your own CLIs and accounts.
 </p>
 
 <p align="center">
   <img alt="Rust Edition 2024" src="https://img.shields.io/badge/Rust-Edition_2024-8B5CF6?style=flat-square&logo=rust&logoColor=white" />
-  <img alt="Renderer eframe/egui + OpenGL" src="https://img.shields.io/badge/Renderer-eframe_%2F_egui_+_OpenGL-6366F1?style=flat-square" />
-  <img alt="Design System Nocturne" src="https://img.shields.io/badge/Design_System-Nocturne-3B82F6?style=flat-square" />
-  <img alt="Release v0.4.0" src="https://img.shields.io/badge/Release-v0.4.0-110F17?style=flat-square&labelColor=231F2E" />
+  <img alt="eframe/egui + OpenGL" src="https://img.shields.io/badge/UI-eframe_%2F_egui_+_OpenGL-6366F1?style=flat-square" />
+  <img alt="Beta 0.8.8" src="https://img.shields.io/badge/Release-Beta_0.8.8-110F17?style=flat-square&labelColor=231F2E" />
 </p>
 
----
+## Overview
 
-## Vision
+COVALOS is a single Rust binary drawn with `eframe`/`egui` on OpenGL. There is no bundled
+browser runtime, and background shaders stop when the window loses focus.
 
-**COVALOS** is a native desktop IDE written in Rust that brings together the speed, ergonomics, and visual discipline of **IntelliJ IDEA**, **Zed**, **Linear**, and **Raycast** with the multi-agent workflows of **Cursor**, **Kiro**, and **Google Antigravity**.
+It covers the daily editing workflow (files, search, terminal, Git, LSP) and adds two things
+most editors do not have:
 
-The name comes from *covalent* — distinct nuclei sharing a common field to form a stable structure. That is the core model of COVALOS: the developer and multiple AI agents operating over a shared workspace with explicit supervision, bounded authority, and zero black-box surprises.
+- **Luma**, a lead agent that takes an order, rates how hard it is, and staffs it with one
+  agent or a planned team on the CLIs you already use. Writes, commands and installs stop for
+  your approval.
+- **Guided Mode**, which turns a plan into steps you type yourself, with explanations per
+  line for people learning to code.
 
-**Core principles:**
-- **True native performance:** Single compiled Rust binary (`covalos.exe`) rendered on OpenGL — no bundled browser runtime.
-- **Minimalist futuristic craft:** The *Nocturne* dark design system — rounded island surfaces, crisp 1 px borders, disciplined typography, and critically damped spring motion (never noisy, gamer, or bloated).
-- **Developer control first:** Agents plan, review, and propose edits; code modifications and package installations require explicit user approval, backed by real snapshots and rollback.
+The project is in beta. Windows is the primary platform. macOS and Linux builds are produced
+by the release workflow since 0.8.8 and get less testing; see the platform table in
+[`docs/RELEASE.md`](docs/RELEASE.md).
 
----
+## Screenshots
 
-## Real Captures
-
-> Every screenshot below is captured directly from a real Windows Release build (`covalos.exe`) running on OpenGL.
-
-| Home · *Nocturne + Dither Field* | Rust Editor · *Nocturne Syntax* |
+| Home (Nocturne) | Rust editor |
 | :---: | :---: |
-| ![COVALOS Home with Dither Field](artifacts/covalos-verification/design-system/01-home/home-nocturne-dither-field-1366x768@100.png) | ![COVALOS Rust Editor in Nocturne](artifacts/covalos-verification/design-system/03-editor/rust/editor-rust-nocturne-1366x768@100.png) |
+| ![Home view in the Nocturne theme](assets/screenshots/home-nocturne.png) | ![Editing a Rust file](assets/screenshots/editor-rust.png) |
 
-| Clean Code · *Floating editors sharing the live buffer* | Library Studio · *Offline-first catalog + install review* |
+| Floating editors | Library Studio |
 | :---: | :---: |
-| ![Clean Code floating editor](artifacts/covalos-verification/design-system/05-clean-code/clean-floating-single-1366x768@100.png) | ![Library Studio install review](artifacts/covalos-verification/library-studio/10-install-review-1366x768@100.png) |
+| ![Editor tabs detached into floating windows](assets/screenshots/clean-code-floating.png) | ![Library Studio catalog](assets/screenshots/library-studio.png) |
 
----
+## Install
 
-## What Is Built
+Download the build for your system from the
+[latest release](https://github.com/DevModee/Covalos/releases/latest):
 
-### 1. Native Editor & Daily Workflow
-- **Explorer & tabs:** Open folders and files, create/rename/move/delete with confirmation guards, recent workspaces, and breadcrumbs.
-- **Reliable file handling:** UTF-8 files up to 1 MiB, BOM and CRLF/LF preservation, external-change detection before overwriting, in-file find (`Ctrl+F`, `F3` / `Shift+F3`), and ignore-aware workspace search (`Ctrl+Shift+F`).
-- **Semantic syntax highlighting:** `syntect` grammars paired with a semantic token classifier and independent code color schemes (*Nocturne*, *Graphite*, *Daylight*, *High Contrast*).
-- **Quick Access (`Ctrl+P`):** Unified modal for workspace files, editor commands (`>`), recent projects (`@`), and Codex queries (`?`).
-- **Integrated Git:** Branch detection, status grouped by state (*staged*, *working tree*, *untracked*, *conflicts*), and inline diffs in the editor area.
-- **Bottom tools panel:** Workspace command runner with live output and cancellation, editor log, and agent activity stream.
-
-### 2. Nocturne Design System & Motion
-- **Island architecture:** Rounded panels floating over a deep `#09080D` canvas with hairline 1 px borders and high-contrast visual hierarchy.
-- **Dither Field & Dither Bloom:** Original two-pass GLSL background renderer (value-noise fbm → Bayer 8×8 ordered dithering → square pixel grid with pointer trail and click ripples). Pauses automatically without focus or with *Reduce Motion*. Benchmarked on AMD Ryzen 5 5600G + integrated Radeon Graphics at ~2.1% total CPU (~6% GPU) in steady-state animation and 0.0% CPU/GPU when disabled.
-- **Spring motion engine (`src/editor/motion.rs`):** Interruptible critically damped springs (*Snappy*, *Smooth*, *Gentle*), global motion intensity slider, and full *Reduce Motion* support.
-- **Customization & localization:** 6 themes (*COVALOS Nocturne*, *Graphite*, *Midnight*, *Violet*, *Light*, *High Contrast*), configurable font size, compact/comfortable density, live syntax preview, and full **English** / **Spanish** localization.
-
-### 3. Clean Code (Floating Editors)
-- Detach any open tab into a floating editor window without copying state: every floating surface operates directly on the shared `Document` buffer, dirty flag, save path, and exit guards.
-- Supports multiple simultaneous floating editors, focus mode, and spring-animated docking back into the tab strip.
-
-### 4. Library Studio
-- **Local-first component catalog:** Incremental ETag sync across 10 official registries (**2,050+ real entries** synced in ~3–4 s), 5 link-only sources, and 7 offline native COVALOS resources with live interactive playgrounds.
-- **Strict license compliance:** Permissive (MIT/ISC) sources cache source code locally; non-redistributable sources (Commons Clause / Aceternity) store metadata only and fetch source on demand; commercial libraries show links only.
-- **Honest compatibility & verified install/rollback:** Detects project framework and package manager (`npm`, `pnpm`, `yarn`, `bun`), previews exact CLI commands, target files, dependencies, and conflicts before running, backs up manifests and conflicting files, and supports full rollback (verified end-to-end with real `npm` / `npx shadcn@latest`).
-- **Structured Agent CLI (`--library`):** JSON output designed for agent workflows with explicit untrusted-data notices.
-
-### 5. Agent Hub & Luma Companion
-- **Workspace & isolated agent sessions:** Working adapters for **Codex** and **Claude Code** (with discovery wired for **Gemini CLI** and **Antigravity**), bounded active-file context attachment, and persistent per-workspace conversations with interrupted-session recovery.
-- **Ask / Assist / Auto workflows:** Read-only planning and review, single-buffer patch preview with approval, local project memory, and reviewed `SKILL.md` imports from public GitHub repositories.
-- **Hook bridge (`--agent-hook`) & Luma:** Live agent status tracking and scoped permission approvals reflected by Luma, an original procedural vector companion rendered natively in `egui`.
-
-### 6. Native Packaging & Safe Migration
-- **Windows executable identity:** `build.rs` embeds a multi-resolution `.ico` (16–256 px) and standard Windows PE `VERSIONINFO` (`COVALOS`, `0.4.0.0`) directly into `covalos.exe` with zero external build tools required.
-- **Non-destructive migration from AEROS:** Automatically detects legacy `AerosEditor` profiles on first launch, migrates settings, conversations, Library Studio state, and agent-bridge data once without overwriting existing COVALOS files or deleting legacy folders, and maps `aeros/*` native IDs to `covalos/*`.
-
----
-
-## Tech Stack & Assets
-
-### Core Rust Stack
-| Area | Crates / Technology | Role |
-| --- | --- | --- |
-| Language | **Rust (Edition 2024)** | Native desktop performance, memory safety, thin-LTO release builds |
-| UI & Renderer | **`eframe` + `egui` 0.33.3 (`glow`)** | Native OpenGL desktop UI, floating surfaces, custom GLSL shaders |
-| Syntax | **`syntect` 5.3 + `egui_extras`** | Sublime grammars + custom semantic token classifier & themes |
-| Workspace I/O | **`ignore`**, **`regex`**, **`rfd`**, **`tempfile`** | `.gitignore`-aware indexing, native OS dialogs, atomic file writes |
-| Data & Imaging | **`serde`**, **`serde_json`**, **`png`** | Preferences, offline catalog, state persistence, mipmapped RGBA8 textures |
-| OS Integration | **`windows-sys` 0.61**, **`libc`** | System locale detection, filesystem APIs, clean subprocess handling |
-
-### Typography, Icons & Third-Party Marks
-- **Fonts:** *Geist* (UI) and *IBM Plex Mono* (code), licensed under **SIL OFL** (`assets/fonts/`).
-- **UI Icons:** *Lucide 0.460.0* (**ISC**), 71 mipmapped monochrome icon masks (`assets/icons/ui/`).
-- **File & Folder Icons:** *Material Icon Theme 5.40.0* (**MIT**), 116 icons (`assets/icons/material/`).
-- **Provider Marks:** Documented with full terms and provenance in [`assets/brands/PROVENANCE.md`](assets/brands/PROVENANCE.md).
-- **COVALOS Mark (Provisional):** Centralized in [`assets/brand/`](assets/brand/PROVENANCE.md) and regenerated from a single master SVG via [`tools/generate_brand_assets.py`](tools/generate_brand_assets.py).
-
----
-
-## Building & Running
-
-### Prerequisites
-- Stable Rust toolchain (`rustup` / `cargo`)
-- OpenGL 3.3+ capable GPU (tested on integrated AMD Radeon Graphics)
-- Optional: `git`, `node` / `npm` (for Library Studio React component installs), and `codex` / `claude` CLIs for Agent Hub.
-
-### Build, Lint & Test
-
-```powershell
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test
-cargo build --release
-
-# Launch COVALOS directly into a workspace
-.\target\release\covalos.exe C:\path\to\your\project
-```
-
-### Library Studio CLI (JSON)
-
-```powershell
-covalos.exe --library search "animated button" --project C:\path\to\project --compatible --limit 10
-covalos.exe --library show shadcn/button --project C:\path\to\project
-covalos.exe --library compat shadcn/button --project C:\path\to\project
-covalos.exe --library plan shadcn/button --project C:\path\to\project
-covalos.exe --library sources
-covalos.exe --library sync [source]
-covalos.exe --library installed
-```
-
-### Configuration & Environment Variables
-
-| Path / Variable | Purpose |
+| System | File |
 | --- | --- |
-| `%LOCALAPPDATA%\Covalos` | Default profile location on Windows (`~/Library/Application Support/Covalos` on macOS, `~/.config/covalos` on Linux) |
-| `COVALOS_CONFIG_DIR` | Override configuration directory (falls back to `AEROS_CONFIG_DIR` for compatibility) |
-| `COVALOS_CODEX_BIN` / `COVALOS_CLAUDE_BIN` | Optional absolute path override for agent CLIs (`COVALOS_GEMINI_BIN` and `COVALOS_AGY_BIN` supported as well) |
+| Windows 10/11 x64 | `Covalos-Windows-x64-Setup.exe` (per-user install, no admin rights) |
+| macOS, Apple silicon | `Covalos-macOS-arm64.dmg` |
+| macOS, Intel | `Covalos-macOS-x64.dmg` |
+| Linux x86_64 | `Covalos-Linux-x86_64.AppImage` or `Covalos-Linux-amd64.deb` |
 
----
+Every file has a `.sha256` checksum next to it. Builds are not code-signed yet, so Windows
+SmartScreen and macOS Gatekeeper ask for confirmation on first launch (on macOS, right-click
+the app and choose Open).
 
-## Keyboard Shortcuts
+To build from source, see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+## Features
+
+### Interface
+
+- Island layout: side panels, editor and agent panel sit on separate rounded surfaces over
+  the window background. Themes include **Nocturne** (default dark: plum-charcoal surfaces,
+  ivory text, lilac accent) and a matte light theme for screens in direct light.
+- Optional animated GLSL backgrounds (Dither Field, Dither Bloom, ASCII Flow). They pause when
+  the window is unfocused or Reduce Motion is on.
+- English and Spanish interface. Font size, density and UI scale are configurable.
+
+### Luma
+
+Luma lives in the Notch at the top of the window.
+
+- **Home** tab: Luma, recent workspace actions and shortcuts to Guided Mode, the terminal and
+  search.
+- **Chat** tab: the order box, Luma's log of what it launched, the team checklist with live
+  status, and approval requests (Allow / Deny).
+- **Effort ceiling** (Low, Medium, High): Luma rates each order from its wording and never
+  staffs it above the ceiling you set. The ceiling decides the model, the reasoning effort
+  and whether one agent or a planned team does the work.
+- Agents run through the official CLIs: Claude Code, Codex, Gemini CLI, plus Antigravity and
+  OpenCode. COVALOS does not proxy your account; it starts the CLI you installed and signed
+  in to.
+- When a task fails, Luma shows the CLI's actual error instead of a generic message.
+
+### Agents and Agent Hub
+
+- Agent panel with model and effort selection (`/model`, `/effort`), conversations grouped
+  by project, pin, archive and delete.
+- Optional git worktree per session. Unchanged worktrees are removed when the session closes.
+- Scoped approvals through the `--agent-hook` bridge: allow once, for the session, or deny.
+- Local agent rules (`agent-rules.md`) and `SKILL.md` import from public GitHub repositories.
+- Agent Hub: provider accounts, live sessions with their approvals, and the autonomous
+  engine.
+
+### Guided Mode and Learn mode
+
+Guided Mode turns a prompt, a repository or a course link into a step-by-step code-along
+synced to the editor buffer: the line you are typing is highlighted and the step advances as
+the buffer matches.
+
+- **Learn** and **Code only** are separate styles. Learn adds a short explanation per line,
+  "Explain another way" (asks the agent for a simpler explanation of the current block), XP
+  and a streak counter. Code only shows the lines to type without explanation cards.
+- **Learn hover**: while a session is active, hovering a code block in the editor highlights
+  it and lists what it declares and which functions it calls (local, imported or method
+  calls).
+- Local imports (TS/JS, Rust, Python) are inspected before starting, so steps never reference
+  a file that does not exist yet. Two orderings: just-in-time (start in the entry file and
+  branch out when a dependency is needed) or dependencies first.
+- Steps are reconciled with the files on disk, so code written by an agent or in another
+  editor marks steps as done.
+- **Pop out** moves Guided Mode into its own OS window, for a second monitor. Progress is
+  saved per workspace.
+
+### Editor
+
+- Explorer with live filter, project switcher, tabs, breadcrumbs, resizable panels and session
+  restore (workspace, tabs, active file, agent session, Guided progress).
+- UTF-8 files up to 1 MiB with BOM and line-ending preservation, and external change
+  detection before overwrite.
+- `Ctrl+P` searches files, commands and Settings options (English and Spanish labels) from one
+  box.
+- Find in file (`Ctrl+F`, `F3`/`Shift+F3`) and `.gitignore`-aware workspace search
+  (`Ctrl+Shift+F`).
+- LSP client (diagnostics, completion) on top of `syntect` highlighting.
+- Code minimap on the right edge with click and drag scrubbing. When it is off, hold `Alt` to
+  peek.
+- Integrated terminal: ConPTY on Windows, a Unix PTY with `$SHELL` elsewhere. Dev server URLs
+  in the output are detected.
+- Git: status, stage, commit, history, inline diffs, and a GitHub PR/issue tab using `gh`.
+- Floating editors: any tab can be detached into a floating window that shares the same
+  buffer, dirty state and save path.
+
+### Library Studio
+
+- Local component catalog synced with ETags from 10 registries, plus link-only sources.
+- Respects source licenses: permissive sources are cached, non-redistributable ones keep only
+  metadata, commercial ones are link-only.
+- Shows the exact commands and affected files before installing, backs up touched files and
+  supports rollback. Also available as a JSON CLI (`--library`) for scripts and agents.
+
+### Account and sync (optional)
+
+Signing in to a COVALOS account enables Cloud Config Sync: theme, fonts, density, pinned
+chats, `agent-rules.md` and skills follow you between computers. Workspace paths, recent
+folders, notes, open tabs, provider accounts and API keys never leave the machine, and text
+that looks like a secret is dropped before upload. The editor works fully without an account.
+
+## Privacy
+
+- Files, prompts and agent output stay on your machine. Agents talk to their providers
+  through the CLIs you installed, under your own accounts.
+- API keys go to the Windows Credential Manager. On macOS and Linux they are kept in memory
+  only until Keychain / Secret Service support lands.
+- Discord Rich Presence is off by default; when on, it never sends paths, file names or
+  prompts.
+
+## Keyboard shortcuts
 
 | Shortcut | Action |
 | --- | --- |
-| `Ctrl / Cmd + P` | Quick Access (files, `>` commands, `@` recent projects, `?` Codex) |
-| `Ctrl / Cmd + Shift + L` | Toggle Library Studio *(configurable in Settings)* |
-| `Ctrl / Cmd + O` | Open folder |
-| `Ctrl / Cmd + Shift + O` | Open file |
-| `Ctrl / Cmd + N` | New file |
-| `Ctrl / Cmd + S` | Save active file |
-| `Ctrl / Cmd + W` | Close active tab |
-| `Ctrl / Cmd + F` | Find in active file (`F3` / `Shift + F3` next / previous) |
-| `Ctrl / Cmd + Shift + F` | Search workspace |
-| `` Ctrl / Cmd + ` `` | Toggle bottom tools & terminal panel |
+| `Ctrl+P` | Search files, commands and settings |
+| `Ctrl+O` / `Ctrl+Shift+O` | Open folder / open file |
+| `Ctrl+N` / `Ctrl+S` / `Ctrl+W` | New file / save / close tab |
+| `Ctrl+F` / `Ctrl+Shift+F` | Find in file / search workspace |
+| `Ctrl+B` | Toggle Explorer |
+| `` Ctrl+` `` | Toggle terminal |
+| `Ctrl+Shift+A` | Toggle agent panel |
+| `Ctrl+Shift+L` | Library Studio (configurable) |
+| `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Zoom in / out / reset |
+| `Alt` (hold) | Peek the minimap |
+| `Alt+Left` / `Alt+Right` | Back / forward |
+| `Esc` | Close the topmost overlay |
 
----
+On macOS use `Cmd` instead of `Ctrl`.
+
+## Configuration
+
+| Path / variable | Purpose |
+| --- | --- |
+| `%LOCALAPPDATA%\Covalos` | Profile directory on Windows (`~/Library/Application Support/Covalos` on macOS, `~/.config/covalos` on Linux) |
+| `COVALOS_CONFIG_DIR` | Overrides the profile directory (`AEROS_CONFIG_DIR` is still read) |
+| `COVALOS_CODEX_BIN`, `COVALOS_CLAUDE_BIN`, `COVALOS_GEMINI_BIN`, `COVALOS_AGY_BIN` | Absolute paths to the agent CLIs |
 
 ## Roadmap
 
-- [ ] **Final brand isotype sign-off** and Windows installer packaging.
-- [ ] **Full multi-agent orchestration:** Verified headless adapters for **Gemini CLI** and **Antigravity (`agy`)**, shared cross-agent memory, and automatic Library Studio CLI guidance inside Agent Hub.
-- [ ] **Isolated WebView2 previews** for React components in Library Studio.
-- [ ] **Advanced IDE capabilities:** LSP (completion, diagnostics, formatting, go-to-definition), DAP debugging, persistent PTY terminal, and extension support.
-- [ ] **Instant minimize pause on borderless Windows frames** using native `IsIconic` state detection.
-
----
+- Code signing and notarization for Windows and macOS.
+- Ports manager, credential store and web preview on macOS and Linux.
+- DAP debugging, formatting and go-to-definition through LSP.
+- Final brand mark.
 
 ## Documentation
 
-- [`docs/CHECKPOINT.md`](docs/CHECKPOINT.md) — Current build status, benchmark metrics, E2E verification, and next steps.
-- [`docs/DESIGN_SYSTEM.md`](docs/DESIGN_SYSTEM.md) — Nocturne design system specification, tokens, and GLSL shaders.
-- [`assets/brand/PROVENANCE.md`](assets/brand/PROVENANCE.md) — Provisional brand assets and one-step replacement workflow.
-- [`assets/brands/PROVENANCE.md`](assets/brands/PROVENANCE.md) — Third-party provider mark licenses and terms.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md): building, testing, branches, commits and pull requests.
+- [`CHANGELOG.md`](CHANGELOG.md): changes per release.
+- [`docs/RELEASE.md`](docs/RELEASE.md): versioning, the release workflow and platform status.
+- [`docs/WINDOWS_INSTALLER.md`](docs/WINDOWS_INSTALLER.md): installer build, verification and signing.
+- [`docs/DESIGN_SYSTEM.md`](docs/DESIGN_SYSTEM.md): design tokens and shaders.
+- [`docs/CLOUD_ACCOUNT.md`](docs/CLOUD_ACCOUNT.md): account server setup.
+
+## Third-party assets
+
+- Fonts: Geist and IBM Plex Mono (SIL OFL), in `assets/fonts/`.
+- UI icons: Lucide 0.460.0 (ISC), in `assets/icons/ui/`.
+- File icons: Material Icon Theme 5.40.0 (MIT), in `assets/icons/material/`.
+- Provider marks: see [`assets/brands/PROVENANCE.md`](assets/brands/PROVENANCE.md).
+- COVALOS mark: see [`assets/brand/PROVENANCE.md`](assets/brand/PROVENANCE.md), generated by
+  [`tools/generate_brand_assets.py`](tools/generate_brand_assets.py).
+
+Release builds bundle the license notices of every Rust dependency (`THIRD_PARTY_NOTICES.txt`).
+
+## License
+
+The repository does not include a license file yet. Until one is added, the code is not
+licensed for reuse; contributions are welcome under the terms described in
+[`CONTRIBUTING.md`](CONTRIBUTING.md).

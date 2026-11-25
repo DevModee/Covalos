@@ -5,7 +5,9 @@ use std::time::{Duration, Instant};
 #[ignore = "opens native windows to capture the real application at the requested pixel size and scale"]
 #[cfg(windows)]
 fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
-    use eframe::egui::{Event, UserData, ViewportBuilder, ViewportCommand};
+    use eframe::egui::{
+        Event, Modifiers, PointerButton, UserData, ViewportBuilder, ViewportCommand,
+    };
     use winit::platform::windows::EventLoopBuilderExtWindows;
     const SCREENS: &[&str] = &[
         "home",
@@ -23,6 +25,21 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
         "companion",
         "motion-start",
         "motion-end",
+        "beta-providers",
+        "beta-model-picker",
+        "beta-chat-home",
+        "beta-chat-docked",
+        "gemini-migration",
+        "antigravity-setup",
+        "usage-limits",
+        "document-context-menu",
+        "explorer-create-folder",
+        "explorer-create-file",
+        "terminal-at-folder",
+        "home-context-menu",
+        "explorer-name-collision",
+        "explorer-cancel",
+        "chat-waiting",
     ];
 
     struct Review {
@@ -30,12 +47,14 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
         root: PathBuf,
         output: PathBuf,
         scale: f32,
+        entry_width: f32,
         stage: usize,
         settle: usize,
         requested: bool,
         hook: Option<std::process::Child>,
         approval_seen: Option<Instant>,
         deadline: Instant,
+        queued: Vec<Event>,
     }
     impl Drop for Review {
         fn drop(&mut self) {
@@ -49,7 +68,9 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
         fn enter(&mut self, ctx: &egui::Context) {
             self.editor.palette = None;
             self.editor.settings_open = false;
-            self.editor.new_file = None;
+            if self.stage != 28 {
+                self.editor.entry_draft = None;
+            }
             self.editor.hub_open = false;
             self.editor.preferences.tools_open = false;
             self.editor.sidebar = Sidebar::Files;
@@ -69,7 +90,15 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
                     self.editor.review_fixture(SCREENS[self.stage]);
                 }
                 8 => self.editor.settings_open = true,
-                9 => self.editor.new_file = Some("src/window.rs".into()),
+                9 => {
+                    self.entry_width = self.editor.preferences.sidebar_width;
+                    self.editor.begin_entry(
+                        files::EntryKind::File,
+                        self.root.join("src").canonicalize().unwrap(),
+                        None,
+                    );
+                    self.editor.entry_draft.as_mut().unwrap().name = "window.rs".into();
+                }
                 10 => self.editor.preferences.tools_open = true,
                 11 => {
                     self.editor.sidebar = Sidebar::Git;
@@ -98,6 +127,86 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
                         self.hook = Some(child);
                     }
                 }
+                15 => {
+                    assert!(self.editor.ensure_runtime(ctx));
+                    self.editor
+                        .hub
+                        .agents
+                        .runtime
+                        .as_mut()
+                        .unwrap()
+                        .seed_review_accounts();
+                    self.editor.open_providers();
+                }
+                16 => {
+                    self.editor.documents.clear();
+                    self.editor.active = None;
+                    self.editor.hub.agents.chat.dock = None;
+                    self.editor.restore_chat_layout();
+                }
+                17 => {
+                    egui::Popup::close_all(ctx);
+                    let runtime = self.editor.hub.agents.runtime.as_mut().unwrap();
+                    let account = runtime.seed_review_accounts();
+                    let id = runtime.seed_review_conversation(self.root.clone(), account);
+                    self.editor.preferences.assistant_open = true;
+                    self.editor.hub.agents.chat.dock = Some(id);
+                    assert!(self.editor.in_session_home());
+                }
+                18 => {
+                    let id = self.editor.hub.agents.chat.dock.clone();
+                    self.editor.open_file(self.root.join("src/main.rs"));
+                    assert!(!self.editor.in_session_home());
+                    assert_eq!(self.editor.hub.agents.chat.dock, id);
+                }
+                19 => self.editor.review_gemini_migration(),
+                20 => self.editor.open_providers(),
+                21 => {
+                    let rt = self.editor.hub.agents.runtime.as_mut().unwrap();
+                    let account = rt.seed_review_accounts();
+                    rt.limits.insert(
+                        account,
+                        Ok(vec![
+                            crate::agent_provider::LimitWindow {
+                                label: "Session".into(),
+                                left: 100.0,
+                                resets_at: None,
+                            },
+                            crate::agent_provider::LimitWindow {
+                                label: "Weekly".into(),
+                                left: 22.0,
+                                resets_at: Some(
+                                    time::OffsetDateTime::now_utc().unix_timestamp() + 5460,
+                                ),
+                            },
+                        ]),
+                    );
+                    ctx.data_mut(|d| d.insert_temp(egui::Id::new("agent-usage-open"), true));
+                }
+                22 => {
+                    ctx.data_mut(|data| data.insert_temp(egui::Id::new("agent-usage-open"), false));
+                    self.editor.preferences.assistant_open = false;
+                    self.editor.sidebar_open = true;
+                    self.editor.open_file(self.root.join("src/main.rs"));
+                }
+                26 => {
+                    self.editor.documents.clear();
+                    self.editor.active = None;
+                    self.editor.hub.agents.chat.dock = None;
+                }
+                27 => egui::Popup::close_all(ctx),
+                29 => {
+                    self.editor.sidebar = Sidebar::Chats;
+                    self.editor.sidebar_open = true;
+                    self.editor.documents.clear();
+                    self.editor.active = None;
+                    let runtime = self.editor.hub.agents.runtime.as_mut().unwrap();
+                    let account = runtime.seed_review_accounts();
+                    let id = runtime.seed_review_conversation(self.root.clone(), account);
+                    runtime.review_waiting(&id);
+                    self.editor.hub.agents.chat.dock = Some(id);
+                    self.editor.preferences.assistant_open = true;
+                }
                 13 | 14 => {
                     self.editor.companion.open = false;
                     self.editor.documents.clear();
@@ -112,6 +221,10 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     impl eframe::App for Review {
+        fn raw_input_hook(&mut self, _: &egui::Context, input: &mut egui::RawInput) {
+            input.focused = true;
+            input.events.append(&mut self.queued);
+        }
         fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
             assert!(
                 Instant::now() < self.deadline,
@@ -122,7 +235,11 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
             }
             let screenshot = ctx.input(|input| {
                 input.events.iter().find_map(|event| {
-                    if let Event::Screenshot { image, .. } = event {
+                    if let Event::Screenshot {
+                        image, user_data, ..
+                    } = event
+                        && user_data.data.is_none()
+                    {
                         Some(image.clone())
                     } else {
                         None
@@ -173,6 +290,90 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
             }
             self.editor.render(ctx);
             self.settle += 1;
+            if matches!((self.stage, self.settle), (23, 12) | (24, 17)) {
+                assert!(
+                    self.editor.entry_draft.is_some(),
+                    "expected inline naming field at stage {}",
+                    self.stage
+                );
+                self.queued.push(Event::Text(
+                    if self.stage == 23 { "views" } else { "lib.rs" }.into(),
+                ));
+            }
+            if matches!((self.stage, self.settle), (23, 17) | (24, 21)) {
+                self.queued.push(Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: Modifiers::NONE,
+                });
+                self.queued.push(Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed: false,
+                    repeat: false,
+                    modifiers: Modifiers::NONE,
+                });
+            }
+            if (self.stage, self.settle) == (27, 17) {
+                self.queued.push(Event::Text("README.md".into()));
+            }
+            if matches!((self.stage, self.settle), (27, 22) | (28, 6)) {
+                let key = if self.stage == 27 {
+                    egui::Key::Enter
+                } else {
+                    egui::Key::Escape
+                };
+                for pressed in [true, false] {
+                    self.queued.push(Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed,
+                        repeat: false,
+                        modifiers: Modifiers::NONE,
+                    });
+                }
+            }
+            if let Some(control) = match (self.stage, self.settle) {
+                (26, 6) => Some("Home background"),
+                (27, 5) => Some("Explorer background"),
+                (27, 11) => Some("New file"),
+                (22, 6) => Some("Document text"),
+                (23, 5) => Some("New folder"),
+                (24, 5) => Some("Folder src"),
+                (24, 11) => Some("New file"),
+                (25, 5) => Some("Document text"),
+                (25, 12) => Some("New terminal here"),
+                (16, 6) => Some("Model picker"),
+                (20, 6) => Some("Set up Antigravity"),
+                _ => None,
+            } {
+                let pos = ctx
+                    .data(|data| {
+                        data.get_temp::<std::collections::HashMap<String, egui::Rect>>(
+                            egui::Id::new("native-review-targets"),
+                        )
+                    })
+                    .and_then(|targets| targets.get(control).map(egui::Rect::center))
+                    .expect("review control");
+                self.queued.push(Event::PointerMoved(pos));
+                for pressed in [true, false] {
+                    self.queued.push(Event::PointerButton {
+                        pos,
+                        button: if matches!(
+                            (self.stage, self.settle),
+                            (22, 6) | (24, 5) | (25, 5) | (26, 6) | (27, 5)
+                        ) {
+                            PointerButton::Secondary
+                        } else {
+                            PointerButton::Primary
+                        },
+                        pressed,
+                        modifiers: Modifiers::NONE,
+                    });
+                }
+            }
             let settle_frames = if self.stage == 12 || self.stage == 14 {
                 65
             } else {
@@ -187,6 +388,78 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
                     .approval_seen
                     .is_some_and(|at| at.elapsed() > Duration::from_millis(350));
             if self.settle > settle_frames && !self.requested && approval_ready {
+                match self.stage {
+                    9 => assert!(
+                        self.editor.preferences.sidebar_width <= self.entry_width + 1.0,
+                        "inline naming resized sidebar from {} to {}",
+                        self.entry_width,
+                        self.editor.preferences.sidebar_width
+                    ),
+                    26 => assert!(egui::Popup::is_any_open(ctx), "missing Home context menu"),
+                    27 => {
+                        assert!(
+                            self.editor.entry_draft.is_some(),
+                            "duplicate name must keep field open"
+                        );
+                        assert_eq!(
+                            std::fs::read_to_string(self.root.join("README.md")).unwrap(),
+                            "# Covalos workspace\n"
+                        );
+                    }
+                    28 => assert!(
+                        self.editor.entry_draft.is_none(),
+                        "Escape must cancel inline naming"
+                    ),
+                    22 => assert!(
+                        egui::Popup::is_any_open(ctx),
+                        "missing document context menu"
+                    ),
+                    23 => assert!(
+                        self.root.join("src/views").is_dir(),
+                        "new folder must be relative to active file"
+                    ),
+                    24 => {
+                        let expected = self
+                            .root
+                            .join("src/lib.rs")
+                            .canonicalize()
+                            .expect("file created in selected folder");
+                        assert_eq!(
+                            self.editor.documents[self.editor.active.unwrap()].path,
+                            expected
+                        );
+                    }
+                    25 => {
+                        assert!(self.editor.preferences.tools_open);
+                        assert_eq!(
+                            self.editor
+                                .terminals
+                                .active_directory()
+                                .unwrap()
+                                .canonicalize()
+                                .unwrap(),
+                            self.root.join("src").canonicalize().unwrap()
+                        );
+                    }
+                    _ => {}
+                }
+                if self.stage == 8 {
+                    assert!(
+                        ctx.data(
+                            |data| data.get_temp::<bool>(egui::Id::new("review-settings-blurred"))
+                        )
+                        .unwrap_or(false),
+                        "settings rendered without the blurred snapshot"
+                    );
+                }
+                if self.stage == 20 {
+                    let runtime = self.editor.hub.agents.runtime.as_ref().unwrap();
+                    assert!(runtime.profiles.accounts().iter().any(|a| {
+                        a.provider == covalos_agents::ProviderKind::Antigravity
+                            && a.method == covalos_agents::ConnectionMethod::SystemCli
+                    }));
+                    assert!(runtime.notice.is_none());
+                }
                 ctx.send_viewport_cmd(ViewportCommand::Screenshot(UserData::default()));
                 self.requested = true;
             }
@@ -231,14 +504,14 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
         viewport: ViewportBuilder::default()
             .with_inner_size([width, height])
             .with_decorations(false)
-            .with_title("COVALOS visual review"),
+            .with_title("Covalos visual review"),
         event_loop_builder: Some(Box::new(|builder| {
             builder.with_any_thread(true);
         })),
         ..Default::default()
     };
     eframe::run_native(
-        "COVALOS visual review",
+        "Covalos visual review",
         options,
         Box::new(move |cc| {
             let requested_theme = std::env::var("COVALOS_REVIEW_THEME")
@@ -277,12 +550,14 @@ fn capture_design_review() -> Result<(), Box<dyn std::error::Error>> {
                 root,
                 output,
                 scale,
+                entry_width: 0.0,
                 stage: 0,
                 settle: 0,
                 requested: false,
                 hook: None,
                 approval_seen: None,
-                deadline: Instant::now() + Duration::from_secs(90),
+                queued: Vec::new(),
+                deadline: Instant::now() + Duration::from_secs(130),
             }))
         }),
     )?;
@@ -307,7 +582,7 @@ fn main() -> eframe::Result {
     };
 
     eframe::run_native(
-        "COVALOS",
+        "Covalos",
         options,
         Box::new(move |cc| {
             let editor = Editor::new(&cc.egui_ctx, root);
@@ -343,7 +618,9 @@ fn capture_recovered_conversation() -> Result<(), Box<dyn std::error::Error>> {
             );
             let image = ctx.input(|i| {
                 i.events.iter().find_map(|event| match event {
-                    Event::Screenshot { image, .. } => Some(image.clone()),
+                    Event::Screenshot {
+                        image, user_data, ..
+                    } if user_data.data.is_none() => Some(image.clone()),
                     _ => None,
                 })
             });
@@ -389,14 +666,14 @@ fn capture_recovered_conversation() -> Result<(), Box<dyn std::error::Error>> {
         viewport: ViewportBuilder::default()
             .with_inner_size([1366.0, 768.0])
             .with_decorations(false)
-            .with_title("COVALOS recovery verification"),
+            .with_title("Covalos recovery verification"),
         event_loop_builder: Some(Box::new(|b| {
             b.with_any_thread(true);
         })),
         ..Default::default()
     };
     eframe::run_native(
-        "COVALOS recovery verification",
+        "Covalos recovery verification",
         options,
         Box::new(move |cc| {
             let mut original =
@@ -487,7 +764,7 @@ fn capture_precision_interactions() -> Result<(), Box<dyn std::error::Error>> {
         Capture("companion"),
         DismissFixtureCompanion,
         Click("Settings"),
-        Click("Theme COVALOS Light"),
+        Click("Theme Covalos Light"),
         Check(7),
         Capture("light-settings"),
         Click("Settings"),
@@ -561,7 +838,11 @@ fn capture_precision_interactions() -> Result<(), Box<dyn std::error::Error>> {
             }
             let image = ctx.input(|i| {
                 i.events.iter().find_map(|event| {
-                    if let Event::Screenshot { image, .. } = event {
+                    if let Event::Screenshot {
+                        image, user_data, ..
+                    } = event
+                        && user_data.data.is_none()
+                    {
                         Some(image.clone())
                     } else {
                         None
@@ -747,14 +1028,14 @@ fn capture_precision_interactions() -> Result<(), Box<dyn std::error::Error>> {
         viewport: ViewportBuilder::default()
             .with_inner_size([1366.0, 768.0])
             .with_decorations(false)
-            .with_title("COVALOS Precision Interaction Review"),
+            .with_title("Covalos Precision Interaction Review"),
         event_loop_builder: Some(Box::new(|b| {
             b.with_any_thread(true);
         })),
         ..Default::default()
     };
     eframe::run_native(
-        "COVALOS Precision Interaction Review",
+        "Covalos Precision Interaction Review",
         options,
         Box::new(move |cc| {
             let mut editor = Editor::new(&cc.egui_ctx, Some(root), Preferences::default());

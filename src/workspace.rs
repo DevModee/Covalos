@@ -73,6 +73,23 @@ pub struct Document {
     saved_text: String,
     bom: bool,
     crlf: bool,
+    /// Length and modification time last seen on disk.
+    stamp: Option<(u64, std::time::SystemTime)>,
+}
+
+/// Result of comparing an open document with its file.
+#[derive(Debug, PartialEq, Eq)]
+pub enum DiskState {
+    Same,
+    /// The buffer was clean and now holds the new file contents.
+    Reloaded,
+    /// The file changed while the buffer has unsaved edits.
+    Conflict,
+}
+
+fn stamp(path: &Path) -> Option<(u64, std::time::SystemTime)> {
+    let meta = fs::metadata(path).ok()?;
+    Some((meta.len(), meta.modified().ok()?))
 }
 
 impl Document {
@@ -87,6 +104,7 @@ impl Document {
             raw.to_owned()
         };
         Ok(Self {
+            stamp: stamp(&path),
             path,
             saved_text: text.clone(),
             text,
@@ -95,6 +113,46 @@ impl Document {
             bom,
             crlf,
         })
+    }
+
+    /// Notices edits made outside the editor (agents, git, other tools).
+    /// A clean buffer reloads; a dirty one reports a conflict once.
+    pub fn sync_from_disk(&mut self) -> DiskState {
+        let now = stamp(&self.path);
+        if now.is_none() || now == self.stamp {
+            return DiskState::Same;
+        }
+        self.stamp = now;
+        let Ok(bytes) = read_bytes(&self.path) else {
+            return DiskState::Same;
+        };
+        if bytes == self.original {
+            return DiskState::Same;
+        }
+        if self.dirty {
+            return DiskState::Conflict;
+        }
+        match Self::open(self.path.clone()) {
+            Ok(fresh) => {
+                *self = fresh;
+                DiskState::Reloaded
+            }
+            Err(_) => DiskState::Same,
+        }
+    }
+
+    /// Discards unsaved edits and loads the file as it is on disk.
+    pub fn reload(&mut self) -> io::Result<()> {
+        *self = Self::open(self.path.clone())?;
+        Ok(())
+    }
+
+    /// Keeps the buffer and lets the next save replace the disk version.
+    pub fn keep_mine(&mut self) {
+        if let Ok(bytes) = read_bytes(&self.path) {
+            self.original = bytes;
+            self.stamp = stamp(&self.path);
+        }
     }
 
     pub fn update_dirty(&mut self) {
@@ -136,6 +194,7 @@ impl Document {
         self.saved_text.clone_from(&self.text);
         self.original = bytes;
         self.dirty = false;
+        self.stamp = stamp(&self.path);
         Ok(())
     }
 }
@@ -407,6 +466,28 @@ pub fn cursor_position(text: &str, cursor: usize) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn external_edits_reload_clean_buffers_and_flag_dirty_ones() -> io::Result<()> {
+        let folder = tempfile::tempdir()?;
+        let path = folder.path().join("app.tsx");
+        fs::write(&path, "export const a = 1;\n")?;
+        let mut doc = Document::open(path.clone())?;
+        assert_eq!(doc.sync_from_disk(), DiskState::Same);
+        fs::write(&path, "export const a = 2; // agent edit\n")?;
+        assert_eq!(doc.sync_from_disk(), DiskState::Reloaded);
+        assert!(doc.text.contains("agent edit") && !doc.dirty);
+        doc.text.push_str("// mine\n");
+        doc.update_dirty();
+        fs::write(&path, "export const a = 3;\n")?;
+        assert_eq!(doc.sync_from_disk(), DiskState::Conflict);
+        assert_eq!(doc.sync_from_disk(), DiskState::Same, "reported once");
+        assert!(doc.save().is_err(), "save still refuses to clobber");
+        doc.keep_mine();
+        doc.save()?;
+        assert!(fs::read_to_string(&path)?.contains("// mine"));
+        Ok(())
+    }
 
     #[test]
     fn preserves_bom_and_crlf_and_rejects_external_changes() -> io::Result<()> {

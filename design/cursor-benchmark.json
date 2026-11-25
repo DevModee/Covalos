@@ -1,9 +1,0 @@
-{
-  "profile": "release",
-  "bytes": 810000,
-  "iterations": 200,
-  "original_ms": 258.039,
-  "direct_ms": 90.747,
-  "note": "Microbenchmark of line/column calculation, not keyboard latency",
-  "stdout": "\nrunning 1 test\ncursor benchmark: bytes=810000 iterations=200 original_ms=258.039 direct_ms=90.747\ntest workspace::tests::benchmark_cursor_positions ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 24 filtered out; finished in 0.35s\n\n"
-}

@@ -80,15 +80,18 @@ pub(super) enum SyntaxStyle {
     Nocturne,
     Graphite,
     Daylight,
+    /// Dark, saturated ink for the Daylight theme under direct sunlight.
+    Sunlight,
     HighContrast,
 }
 
 impl SyntaxStyle {
-    pub(super) const ALL: [Self; 5] = [
+    pub(super) const ALL: [Self; 6] = [
         Self::Auto,
         Self::Nocturne,
         Self::Graphite,
         Self::Daylight,
+        Self::Sunlight,
         Self::HighContrast,
     ];
     pub(super) fn name(self) -> &'static str {
@@ -97,6 +100,7 @@ impl SyntaxStyle {
             Self::Nocturne => "Nocturne",
             Self::Graphite => "Graphite",
             Self::Daylight => "Daylight",
+            Self::Sunlight => "Sunlight",
             Self::HighContrast => "High Contrast",
         }
     }
@@ -104,9 +108,10 @@ impl SyntaxStyle {
         match self {
             Self::Auto => match theme {
                 Theme::Light => Self::Daylight,
+                Theme::Daylight => Self::Sunlight,
                 Theme::HighContrast => Self::HighContrast,
-                Theme::Dark | Theme::Midnight => Self::Graphite,
-                Theme::Nocturne | Theme::Violet => Self::Nocturne,
+                Theme::Obsidian | Theme::Dark | Theme::Midnight => Self::Graphite,
+                Theme::OledDark | Theme::Nocturne | Theme::Violet => Self::Nocturne,
             },
             other => other,
         }
@@ -131,34 +136,34 @@ const fn hex(v: u32) -> Color32 {
 
 pub(super) fn palette(style: SyntaxStyle) -> Palette {
     match style.resolve(Theme::Nocturne) {
-        // Nocturne: pink-lilac control flow, lilac declarations, aqua strings, warm yellow
-        // calls, periwinkle types and soft orange literals on a violet-black canvas.
+        // Nocturne: warm ivory text, pink-lilac control flow, lilac declarations, aqua strings,
+        // warm yellow calls, periwinkle types and soft orange literals on a twilight canvas.
         SyntaxStyle::Nocturne | SyntaxStyle::Auto => Palette {
-            text: hex(0xE6E1F0),
-            keyword: hex(0xF392D3),
-            declaration: hex(0xC9A2FF),
-            ty: hex(0x92B6FF),
-            function: hex(0xF6D58E),
-            method: hex(0xEBCB8B),
-            macro_: hex(0x8FD6F2),
-            parameter: hex(0xEBD3C2),
-            property: hex(0xC7CFEF),
-            constant: hex(0xF8A97E),
-            string: hex(0x86E1C1),
-            escape: hex(0xF392D3),
-            number: hex(0xF8A97E),
-            operator: hex(0xB4A9CC),
-            punctuation: hex(0x8C85A1),
-            comment: hex(0x6F6A83),
-            attribute: hex(0xB29BEA),
-            namespace: hex(0xA9B1D4),
-            tag: hex(0xF392D3),
-            lifetime: hex(0xF8A97E),
-            invalid: hex(0xFF6E87),
-            active_line: Color32::from_rgba_unmultiplied(205, 170, 255, 11),
-            guide: Color32::from_rgba_unmultiplied(150, 138, 186, 30),
-            guide_active: Color32::from_rgba_unmultiplied(201, 162, 255, 120),
-            bracket: hex(0xF392D3),
+            text: hex(0xF0EBF5),
+            keyword: hex(0xF59AD6),
+            declaration: hex(0xCFA8FF),
+            ty: hex(0x96BAFF),
+            function: hex(0xF7DA96),
+            method: hex(0xEED092),
+            macro_: hex(0x92DAF5),
+            parameter: hex(0xF0D8C8),
+            property: hex(0xCCD4F2),
+            constant: hex(0xF9B086),
+            string: hex(0x8CE6C6),
+            escape: hex(0xF59AD6),
+            number: hex(0xF9B086),
+            operator: hex(0xBCB0D4),
+            punctuation: hex(0x948CA8),
+            comment: hex(0x7E7694),
+            attribute: hex(0xBAA4EE),
+            namespace: hex(0xB0B8DA),
+            tag: hex(0xF59AD6),
+            lifetime: hex(0xF9B086),
+            invalid: hex(0xFF748C),
+            active_line: Color32::from_rgba_unmultiplied(212, 178, 255, 16),
+            guide: Color32::from_rgba_unmultiplied(156, 144, 192, 32),
+            guide_active: Color32::from_rgba_unmultiplied(212, 178, 255, 130),
+            bracket: hex(0xF59AD6),
         },
         SyntaxStyle::Daylight => Palette {
             text: hex(0x2B2F3A),
@@ -186,6 +191,34 @@ pub(super) fn palette(style: SyntaxStyle) -> Palette {
             guide: Color32::from_rgba_unmultiplied(40, 44, 60, 40),
             guide_active: Color32::from_rgba_unmultiplied(122, 63, 209, 110),
             bracket: hex(0x7A3FD1),
+        },
+        // Sunlight: deep, saturated ink that keeps its hue under glare on warm paper.
+        SyntaxStyle::Sunlight => Palette {
+            text: hex(0x14120E),
+            keyword: hex(0x5E1FB8),
+            declaration: hex(0x3F2BA6),
+            ty: hex(0x00605A),
+            function: hex(0x0B4AA8),
+            method: hex(0x1550A8),
+            macro_: hex(0x8A3A00),
+            parameter: hex(0x7A3416),
+            property: hex(0x274573),
+            constant: hex(0x704700),
+            string: hex(0x14622A),
+            escape: hex(0x8E1666),
+            number: hex(0x8C3800),
+            operator: hex(0x005A6B),
+            punctuation: hex(0x4A463D),
+            comment: hex(0x6A6457),
+            attribute: hex(0x8E1A5C),
+            namespace: hex(0x2F4D6B),
+            tag: hex(0x9E1530),
+            lifetime: hex(0x9E1530),
+            invalid: hex(0xB00020),
+            active_line: Color32::from_rgba_unmultiplied(84, 40, 168, 20),
+            guide: Color32::from_rgba_unmultiplied(40, 36, 28, 52),
+            guide_active: Color32::from_rgba_unmultiplied(84, 40, 168, 140),
+            bracket: hex(0x5E1FB8),
         },
         SyntaxStyle::HighContrast => Palette {
             text: hex(0xFFFFFF),
@@ -246,6 +279,11 @@ pub(super) fn palette(style: SyntaxStyle) -> Palette {
 }
 
 impl Palette {
+    /// Ink for operators, also used by the ligature layer.
+    pub(super) fn operator(&self) -> Color32 {
+        self.operator
+    }
+
     fn color(&self, token: Token) -> Color32 {
         match token {
             Token::Text | Token::Variable => self.text,

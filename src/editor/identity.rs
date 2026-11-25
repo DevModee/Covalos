@@ -92,6 +92,11 @@ pub(super) struct IdentityPreferences {
     pub(super) mascot_motion: bool,
     pub(super) mascot_intensity: f32,
     pub(super) interactive: bool,
+    /// Set once the user picks a background. Profiles from before Dither Field became
+    /// the default stored the old default (Orbital) without a choice; those move to
+    /// Dither Field once, explicit choices are never overwritten.
+    #[serde(default)]
+    pub(super) background_chosen: bool,
 }
 impl Default for IdentityPreferences {
     fn default() -> Self {
@@ -111,11 +116,15 @@ impl Default for IdentityPreferences {
             mascot_motion: true,
             mascot_intensity: 0.65,
             interactive: true,
+            background_chosen: false,
         }
     }
 }
 impl IdentityPreferences {
     pub(super) fn sanitize(&mut self) {
+        if !self.background_chosen && self.background == Background::Orbital {
+            self.background = Background::Dither;
+        }
         self.fps = self.fps.clamp(5, 60);
         self.speed = finite(self.speed, 0.6).clamp(0.1, 2.0);
         self.density = finite(self.density, 0.45).clamp(0.1, 1.0);
@@ -260,19 +269,11 @@ impl Identity {
         self.influence = if self.scene_active { pointer } else { None };
         let dithered = matches!(prefs.background, Background::Dither | Background::Bloom);
         if dithered && self.scene_active && background_visible {
-            self.dither.record(now, pointer, click);
-            if click {
-                self.until = self.until.max(now + super::dither::RIPPLE_SECONDS);
-            }
+            self.dither.record(now, pointer, false);
         } else {
             self.dither.clear();
         }
-        if click && !dithered && visible && prefs.interactive && !reduce && prefs.animated {
-            self.ripple = pointer.map(|p| (p, now));
-        }
-        if self.ripple.is_some_and(|(_, start)| now - start > 1.1) {
-            self.ripple = None;
-        }
+        self.ripple = None;
         let background_active = visible
             && !reduce
             && background_visible
@@ -339,6 +340,10 @@ impl Identity {
         p
     }
     pub(super) fn paint(&mut self, ui: &Ui, rect: Rect, prefs: &IdentityPreferences, _mood: Mood) {
+        if theme::active() == theme::Theme::OledDark {
+            ui.painter_at(rect).rect_filled(rect, 0, Color32::BLACK);
+            return;
+        }
         if prefs.background == Background::Off || rect.width() < 80.0 {
             return;
         }
@@ -802,6 +807,9 @@ impl Identity {
         #[cfg(test)]
         super::motion::record(ui, "Luma", rect);
         self.mascot_hover = response.hovered();
+        if prefs.interactive && response.hovered() {
+            theme::pointer_cursor(ui.ctx());
+        }
         if response.clicked() {
             self.mascot_click = self.now;
             ui.ctx().request_repaint();
@@ -845,14 +853,11 @@ impl Identity {
         } else {
             0.0
         };
-        let live = motion > 0.0 && prefs.interactive && self.mascot_clock.active;
-        let look = super::mascot::look(
-            ui.ctx(),
-            id.with("look"),
-            center,
-            self.previous_pointer,
-            live,
-        );
+        let live = motion > 0.0 && prefs.interactive;
+        let pointer = ui
+            .input(|i| i.pointer.hover_pos())
+            .or(self.previous_pointer);
+        let look = super::mascot::look(ui.ctx(), id.with("look"), center, pointer, live);
         let hover = if motion > 0.0 && prefs.interactive {
             super::motion::state(ui, id.with("curious"), hovered, super::motion::CONTROL)
         } else {
@@ -880,7 +885,7 @@ impl Identity {
             motion,
         }
     }
-    /// A larger, non-interactive Luma for empty states and the Companion.
+    /// A larger, interactive Luma for empty states and the Companion Notch.
     pub(super) fn portrait(
         &self,
         ui: &Ui,
@@ -892,8 +897,16 @@ impl Identity {
         let id = ui
             .id()
             .with(("luma-portrait", rect.min.x as i32, rect.min.y as i32));
-        let pose = self.pose(ui, id, rect.center(), prefs, mood, reduce, false);
-        super::mascot::paint(&ui.painter_at(rect.expand(8.0)), rect, pose);
+        let hovered = ui.input(|i| {
+            i.pointer
+                .hover_pos()
+                .is_some_and(|p| rect.expand(14.0).contains(p))
+        });
+        let pose = self.pose(ui, id, rect.center(), prefs, mood, reduce, hovered);
+        super::mascot::paint(&ui.painter_at(rect.expand(16.0)), rect, pose);
+        if pose.motion > 0.0 && (hovered || ui.input(|i| i.pointer.delta().length_sq() > 0.01)) {
+            ui.ctx().request_repaint();
+        }
     }
 }
 fn sphere(
@@ -1119,7 +1132,7 @@ mod interaction_tests {
             0.3,
         );
         assert!(frame.trail[0][2] < 1.0, "{:?}", frame.trail);
-        assert!(frame.ripples[0][2] >= 0.0, "{:?}", frame.ripples);
+        assert!(frame.ripples[0][2] < 0.0, "{:?}", frame.ripples);
     }
 
     #[test]

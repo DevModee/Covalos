@@ -178,15 +178,16 @@ pub(super) struct Hub {
     task_request: String,
     note: String,
     tab: HubTab,
+    pub(super) agents: super::agent_hub::State,
 }
 
 #[derive(Default, PartialEq, Eq)]
 enum HubTab {
-    #[default]
     Conversations,
-    Companion,
+    Accounts,
+    #[default]
+    Sessions,
     Tasks,
-    Memory,
     Skills,
 }
 
@@ -267,6 +268,13 @@ impl Hub {
     pub(super) fn focus_approvals(&mut self) {
         self.tab = HubTab::Tasks;
     }
+    pub(super) fn focus_agents(&mut self, page: &str) {
+        self.tab = match page {
+            "accounts" => HubTab::Accounts,
+            "skills" | "rules" => HubTab::Skills,
+            _ => HubTab::Sessions,
+        };
+    }
     pub(super) fn snapshots(
         &self,
         workspace: &Chat,
@@ -315,13 +323,64 @@ impl Hub {
                     chat.activity.into()
                 },
                 scope: if id == "workspace" {
-                    root.map(|p| p.display().to_string()).unwrap_or_default()
+                    root.map(|p| {
+                        let s = p.display().to_string();
+                        s.strip_prefix(r"\\?\").unwrap_or(&s).to_owned()
+                    })
+                    .unwrap_or_default()
                 } else {
                     "Isolated conversation · workspace tools disabled".into()
                 },
                 file,
                 external: None,
             });
+        }
+        // Surface real active Agent Hub sessions with their connected provider (Claude, Gemini, etc.)
+        if let Some(runtime) = &self.agents.runtime {
+            for s in &runtime.sessions {
+                let has_approval = runtime
+                    .approvals
+                    .iter()
+                    .any(|a| a.session == s.meta.id.as_str());
+                let state = if has_approval {
+                    State::Waiting
+                } else {
+                    match s.meta.status {
+                        crate::agents_runtime::Status::Running => State::Running,
+                        crate::agents_runtime::Status::Failed => State::Failed,
+                        _ => continue,
+                    }
+                };
+                let provider_label = runtime
+                    .profiles
+                    .accounts()
+                    .iter()
+                    .find(|a| a.id == s.meta.account)
+                    .map(|a| a.label.clone())
+                    .unwrap_or_else(|| format!("{:?}", s.meta.provider));
+                let scope = root
+                    .map(|p| {
+                        let s = p.display().to_string();
+                        s.strip_prefix(r"\\?\").unwrap_or(&s).to_owned()
+                    })
+                    .unwrap_or_default();
+                sessions.push(super::companion::Snapshot {
+                    id: s.meta.id.as_str().to_owned(),
+                    label: format!("{} · {}", provider_label, s.meta.title),
+                    state,
+                    operation: s
+                        .meta
+                        .log
+                        .iter()
+                        .rev()
+                        .find(|l| l.kind == "tool" || l.kind == "status")
+                        .map(|l| l.text.clone())
+                        .unwrap_or_default(),
+                    scope,
+                    file: None,
+                    external: None,
+                });
+            }
         }
         sessions
     }
@@ -412,6 +471,12 @@ impl Editor {
             &self.preferences.identity,
             mood,
         );
+        // Reading scrim: the identity field stays as ambience, never behind text.
+        ui.painter().rect_filled(
+            ui.available_rect_before_wrap(),
+            0,
+            colors().canvas.gamma_multiply(0.84),
+        );
         let ctx = ui.ctx().clone();
         let width = ui.available_width().min(1280.0);
         let rect = ui.available_rect_before_wrap();
@@ -424,16 +489,13 @@ impl Editor {
             let nav =
                 egui::Rect::from_min_size(content.min, egui::vec2(nav_width, content.height()));
             ui.scope_builder(egui::UiBuilder::new().max_rect(nav), |ui| {
-                self.luma_dock(ui);
                 ui.add_space(8.0);
                 ui.label(RichText::new(tr("Agent Hub")).size(HEADING).strong());
                 ui.add_space(24.0);
                 for (tab, label) in [
-                    (HubTab::Conversations, "Conversations"),
-                    (HubTab::Companion, "Live agents"),
-                    (HubTab::Tasks, "Tasks"),
-                    (HubTab::Memory, "Project memory"),
-                    (HubTab::Skills, "Skills"),
+                    (HubTab::Sessions, "Agents"),
+                    (HubTab::Accounts, "Providers"),
+                    (HubTab::Skills, "Skills & rules"),
                 ] {
                     if row(ui, label, "", self.hub.tab == tab).clicked() {
                         self.hub.tab = tab;
@@ -456,9 +518,8 @@ impl Editor {
             ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
                 ui.set_width(body.width());
                 match self.hub.tab {
-                    HubTab::Companion => {
-                        egui::ScrollArea::vertical().show(ui, |ui| self.companion_panel(ui));
-                    }
+                    HubTab::Accounts => self.accounts_panel(ui),
+                    HubTab::Sessions => self.sessions_panel(ui),
                     HubTab::Tasks => {
                         section(
                             ui,
@@ -467,21 +528,32 @@ impl Editor {
                         );
                         self.task_panel(ui);
                     }
-                    HubTab::Memory => {
-                        section(
-                            ui,
-                            "Project memory",
-                            "Keep goals and decisions with this workspace.",
-                        );
-                        self.memory_panel(ui);
-                    }
                     HubTab::Skills => {
-                        section(
-                            ui,
-                            "Skills",
-                            "Review reusable instructions and choose them for tasks.",
-                        );
-                        self.skills_panel(ui);
+                        egui::ScrollArea::vertical()
+                            .id_salt("skills-rules")
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                section(
+                                    ui,
+                                    "Skills",
+                                    "Review reusable instructions and choose them for tasks.",
+                                );
+                                self.skills_panel(ui);
+                                ui.add_space(18.0);
+                                section(
+                                    ui,
+                                    "Rules",
+                                    "Strict rules every model, agent and Luma follows.",
+                                );
+                                self.rules_panel(ui);
+                                ui.add_space(18.0);
+                                section(
+                                    ui,
+                                    "Project notes",
+                                    "Goals and decisions kept with this workspace.",
+                                );
+                                self.memory_panel(ui);
+                            });
                     }
                     HubTab::Conversations => {
                         let providers_width = (body.width() * 0.28).clamp(200.0, 260.0);
@@ -846,6 +918,38 @@ impl Editor {
                 }
             }
         });
+    }
+
+    /// Edits the same local rules file as Settings, sharing its draft.
+    fn rules_panel(&mut self, ui: &mut Ui) {
+        let draft_id = egui::Id::new("settings-agent-rules-draft");
+        let loaded_id = egui::Id::new("settings-agent-rules-loaded");
+        let ctx = ui.ctx().clone();
+        if !ctx.data(|d| d.get_temp::<bool>(loaded_id)).unwrap_or(false) {
+            let loaded = super::preferences::Preferences::load_agent_rules();
+            ctx.data_mut(|d| {
+                d.insert_temp(loaded_id, true);
+                d.insert_temp(draft_id, loaded);
+            });
+        }
+        let mut draft: String = ctx.data(|d| d.get_temp(draft_id)).unwrap_or_default();
+        ui.add(
+            egui::TextEdit::multiline(&mut draft)
+                .hint_text(tr(
+                    "Write strict rules for all AI models, Agent Hub, and Luma…",
+                ))
+                .desired_rows(5)
+                .desired_width(f32::INFINITY)
+                .char_limit(24_000),
+        );
+        ui.add_space(6.0);
+        if ui.add(primary(tr("Save rules"))).clicked() {
+            match super::preferences::Preferences::save_agent_rules(&draft) {
+                Ok(_) => self.notice = Some((false, tr("Saved local agent rules.").to_owned())),
+                Err(err) => self.error(format!("Could not save agent rules. {err}")),
+            }
+        }
+        ctx.data_mut(|d| d.insert_temp(draft_id, draft));
     }
 
     fn memory_panel(&mut self, ui: &mut Ui) {
@@ -1582,7 +1686,24 @@ fn round_button(ui: &mut Ui, send: bool, enabled: bool, label: &str) -> egui::Re
     response.on_hover_text(tr(label))
 }
 
-fn markdown(ui: &mut Ui, text: &str) {
+pub(super) fn markdown(ui: &mut Ui, text: &str) {
+    render_markdown(ui, text, None);
+}
+
+pub(super) fn markdown_in_project(
+    ui: &mut Ui,
+    text: &str,
+    root: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    render_markdown(ui, text, Some(root))
+}
+
+fn render_markdown(
+    ui: &mut Ui,
+    text: &str,
+    root: Option<&std::path::Path>,
+) -> Option<std::path::PathBuf> {
+    let mut opened = None;
     let fence = char::from(96u8).to_string().repeat(3);
     let mut body = Vec::new();
     let mut language = None;
@@ -1617,21 +1738,77 @@ fn markdown(ui: &mut Ui, text: &str) {
                 let (dot, _) = ui.allocate_exact_size(egui::vec2(12.0, 18.0), egui::Sense::hover());
                 ui.painter()
                     .circle_filled(dot.center(), 2.0, colors().accent);
-                ui.add(egui::Label::new(inline(item)).wrap().selectable(true));
+                opened = prose(ui, item, root).or(opened.take());
             });
         } else if line.trim().is_empty() {
             ui.add_space(6.0);
         } else {
-            ui.add(egui::Label::new(inline(line)).wrap().selectable(true));
+            opened = prose(ui, line, root).or(opened);
         }
     }
     if let Some(language) = language {
         code_block(ui, &body.join("\n"), language);
     }
+    opened
+}
+
+fn prose(ui: &mut Ui, line: &str, root: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
+    static LINK: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"\[([^\]\r\n]+)\]\(([^)\r\n]+)\)").expect("Markdown link regex")
+    });
+    let mut paths = Vec::new();
+    let mut shown = String::new();
+    let mut previous = 0;
+    for link in LINK.captures_iter(line) {
+        let token = link.get(0).expect("match");
+        shown.push_str(&line[previous..token.start()]);
+        previous = token.end();
+        if let Some(path) = root.and_then(|root| project_link(&link[2], root)) {
+            shown.push_str(&link[1]);
+            paths.push((link[1].to_owned(), path));
+        } else {
+            shown.push_str(token.as_str());
+        }
+    }
+    shown.push_str(&line[previous..]);
+    ui.add(egui::Label::new(inline(&shown)).wrap().selectable(true));
+    if paths.is_empty() {
+        return None;
+    }
+    ui.horizontal_wrapped(|ui| {
+        paths.into_iter().find_map(|(label, path)| {
+            ui.link(RichText::new(label).monospace())
+                .on_hover_text(path.display().to_string())
+                .clicked()
+                .then_some(path)
+        })
+    })
+    .inner
+}
+
+fn project_link(target: &str, root: &std::path::Path) -> Option<std::path::PathBuf> {
+    let target = target.split('#').next()?;
+    let file_url = target.strip_prefix("file:///");
+    if file_url.is_none() && target.contains("://") {
+        return None;
+    }
+    let path = if let Some(path) = file_url {
+        if cfg!(windows) {
+            std::path::PathBuf::from(path)
+        } else {
+            std::path::Path::new("/").join(path)
+        }
+    } else {
+        std::path::PathBuf::from(target)
+    };
+    let root = root.canonicalize().ok()?;
+    let path = root.join(path).canonicalize().ok()?;
+    (path.starts_with(&root) && path.is_file()).then_some(path)
 }
 
 /// Inline code spans rendered in the monospace face with a soft background.
 fn inline(line: &str) -> egui::text::LayoutJob {
+    let body_size = BODY + 1.0;
     let tick = char::from(96u8);
     let mut job = egui::text::LayoutJob::default();
     for (i, part) in line.split(tick).enumerate() {
@@ -1639,14 +1816,37 @@ fn inline(line: &str) -> egui::text::LayoutJob {
             continue;
         }
         let code = i % 2 == 1;
+        if !code {
+            let mut bold = false;
+            for (index, span) in part.split("**").enumerate() {
+                if index > 0 {
+                    bold = !bold;
+                }
+                job.append(
+                    span,
+                    0.0,
+                    egui::TextFormat {
+                        font_id: egui::FontId::proportional(body_size),
+                        color: if bold {
+                            colors().accent_hover
+                        } else {
+                            colors().text
+                        },
+                        line_height: Some(body_size * 1.5),
+                        ..Default::default()
+                    },
+                );
+            }
+            continue;
+        }
         job.append(
             part,
             0.0,
             egui::TextFormat {
                 font_id: if code {
-                    egui::FontId::monospace(BODY - 0.5)
+                    egui::FontId::monospace(body_size - 0.5)
                 } else {
-                    egui::FontId::proportional(BODY)
+                    egui::FontId::proportional(body_size)
                 },
                 color: if code {
                     colors().accent_hover
@@ -1658,7 +1858,7 @@ fn inline(line: &str) -> egui::text::LayoutJob {
                 } else {
                     egui::Color32::TRANSPARENT
                 },
-                line_height: Some(BODY * 1.5),
+                line_height: Some(body_size * 1.5),
                 ..Default::default()
             },
         );
@@ -1757,12 +1957,12 @@ fn code_block(ui: &mut Ui, text: &str, language: &str) {
     ui.add_space(4.0);
 }
 
-#[cfg(test)]
+#[cfg(all(test, windows))]
 impl Editor {
     pub(super) fn review_fixture(&mut self, screen: &str) {
         self.hub.tab = match screen {
             "tasks" => HubTab::Tasks,
-            "memory" => HubTab::Memory,
+            "memory" => HubTab::Skills,
             "skills" => HubTab::Skills,
             _ => HubTab::Conversations,
         };

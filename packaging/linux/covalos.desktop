@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Covalos
+GenericName=Code Editor
+Comment=Native Rust code editor with coding agents
+Exec=covalos %F
+Icon=covalos
+Terminal=false
+Categories=Development;IDE;TextEditor;
+MimeType=text/plain;inode/directory;
+StartupWMClass=covalos
+Keywords=editor;ide;rust;agents;
