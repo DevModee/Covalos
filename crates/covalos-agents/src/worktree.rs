@@ -166,22 +166,26 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let repo = dir.path().join("repo");
         fs::create_dir(&repo).unwrap();
+        // Signing is off so a global `commit.gpgsign` cannot break the throwaway repository.
         let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args([
+                    "-c",
+                    "user.name=test",
+                    "-c",
+                    "user.email=test@example.invalid",
+                    "-c",
+                    "commit.gpgsign=false",
+                ])
+                .args(args)
+                .output()
+                .unwrap();
             assert!(
-                Command::new("git")
-                    .arg("-C")
-                    .arg(&repo)
-                    .args([
-                        "-c",
-                        "user.name=test",
-                        "-c",
-                        "user.email=test@example.invalid"
-                    ])
-                    .args(args)
-                    .output()
-                    .unwrap()
-                    .status
-                    .success()
+                output.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
             );
         };
         git(&["init", "-q", "-b", "main"]);
