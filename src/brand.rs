@@ -13,7 +13,7 @@ pub const DESCRIPTION: &str = "Native Rust IDE with multi-agent orchestration";
 /// increasing independently of the public release name.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Public release name shown to people. See docs/RELEASE.md.
-pub const RELEASE: &str = "Beta 0.8.7";
+pub const RELEASE: &str = "Beta 0.8.8";
 pub const USER_AGENT: &str = "COVALOS-Library-Studio";
 
 pub const APP_ICON_PNG: &[u8] = include_bytes!("../assets/brand/covalos-app-256.png");
@@ -46,5 +46,15 @@ mod tests {
         assert_eq!(icon.width, 256);
         assert_eq!(icon.height, 256);
         assert_eq!(icon.rgba.len(), (icon.width * icon.height * 4) as usize);
+    }
+
+    /// The release workflow tags `v<Cargo version>`, so the public name must carry the
+    /// same number or About and the top bar show the previous release.
+    #[test]
+    fn public_release_name_matches_the_build_version() {
+        assert!(
+            RELEASE.ends_with(VERSION),
+            "brand::RELEASE ({RELEASE}) does not end with the Cargo version ({VERSION})"
+        );
     }
 }
