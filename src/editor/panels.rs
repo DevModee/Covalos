@@ -2012,7 +2012,7 @@ fn decorate(
     let active_line = lines.get(active_row).copied().unwrap_or(0);
     let mut shapes = Vec::new();
     // Active line band across gutter and text, covering every wrapped row of the line,
-    // with soft rounded edges and a warm accent bookmark pill in the gutter.
+    // with rounded ends and an accent marker in the gutter.
     for (i, row) in rows.iter().enumerate().take(last).skip(first) {
         if lines[i] == active_line {
             let y = origin.y + row.pos.y;
@@ -2360,7 +2360,7 @@ impl Editor {
                 .add(floating_shadow(active(), 18).as_shape(map_rect, 10));
         }
         let painter = ui.painter().with_clip_rect(map_rect);
-        // Clean frosted card backdrop
+        // Card backdrop.
         painter.rect(
             map_rect,
             10,

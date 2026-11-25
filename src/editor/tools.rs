@@ -525,7 +525,7 @@ impl Editor {
         {
             self.git_refresh(ui.ctx(), None);
         }
-        // Clean 2-tab switch: Changes & History vs GitHub (PRs / Issues).
+        // Two tabs: Changes and History, and GitHub (PRs and issues).
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             for (tab, label) in [

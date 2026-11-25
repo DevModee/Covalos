@@ -42,8 +42,7 @@ fn palette(mood: Mood) -> Palette {
         Mood::Success => theme.success,
         _ => accent,
     };
-    // Coucou-inspired minimalist soft squircle body: luminous pastel-tinted body with
-    // crisp dark eyes on dark themes, and rich theme-accented body with light eyes on light themes.
+    // Light body with dark eyes on dark themes; accent-tinted body with light eyes on light themes.
     Palette {
         edge: if dark {
             blend(theme.text, accent, 0.34)
@@ -140,7 +139,7 @@ pub(super) fn paint(painter: &Painter, rect: Rect, pose: Pose) {
     let w = size * 0.36 * squash * (1.0 + breath * 0.012 * m);
     let h = size * 0.29 / squash * (1.0 - breath * 0.01 * m);
 
-    // Facing direction: eyes smoothly track the mouse cursor, with gentle mood overrides.
+    // Facing direction follows the cursor; some moods override it.
     let mut look = pose.look;
     match pose.mood {
         Mood::Thinking => look = look * 0.45 + vec2(0.28, -0.42),
@@ -151,7 +150,7 @@ pub(super) fn paint(painter: &Painter, rect: Rect, pose: Pose) {
     let yaw = look.x.clamp(-1.0, 1.0);
     let pitch = look.y.clamp(-1.0, 1.0);
 
-    // Soft ambient halo behind Luma (Coucou-style gentle glow).
+    // Halo behind the body; its strength follows the mood.
     let pulse = (t * 3.0).sin() * 0.5 + 0.5;
     let glow = match pose.mood {
         Mood::Approval => 0.22 + pulse * 0.16,
@@ -167,10 +166,10 @@ pub(super) fn paint(painter: &Painter, rect: Rect, pose: Pose) {
         pal.signal.gamma_multiply(glow * 0.45),
     );
 
-    // Minimalist floating little paws (waves on hover or greeting, like Coucou's mascot!)
+    // Paws: the right one waves on hover and on greeting.
     if size >= 34.0 {
         let paw_r = (size * 0.058).clamp(2.4, 5.5);
-        // Left resting little round paw
+        // Left paw, resting.
         let left_bob = if pose.mood == Mood::Coding {
             (t * 9.0).sin() * paw_r * 0.45
         } else {
@@ -206,7 +205,7 @@ pub(super) fn paint(painter: &Painter, rect: Rect, pose: Pose) {
         }
     }
 
-    // Minimalist plump squircle body with soft vertical gradient (clean, no noisy grid lines).
+    // Squircle body with a vertical gradient.
     let mut mesh = Mesh::default();
     let rings = 6;
     let slices = 44;
@@ -217,7 +216,7 @@ pub(super) fn paint(painter: &Painter, rect: Rect, pose: Pose) {
             let edge = squircle(Pos2::ZERO, 1.0, 1.0, a);
             let nx = edge.x * r;
             let ny = edge.y * r;
-            // Smooth top-to-bottom tint: brighter at top, gentle theme accent toward bottom.
+            // Brighter at the top, fading to the theme accent at the bottom.
             let v_grad = ((ny + 1.0) * 0.5).clamp(0.0, 1.0);
             let mut c = blend(pal.light, pal.body, (v_grad * 0.65).min(1.0));
             c = blend(c, pal.edge, (v_grad.powi(2) * 0.55).min(1.0));
@@ -245,7 +244,7 @@ pub(super) fn paint(painter: &Painter, rect: Rect, pose: Pose) {
     };
     let eye_w = (size * 0.064).max(1.8);
     let eye_h = (size * 0.132 * (1.0 + pose.hover * 0.06)).max(2.6);
-    // Soft rosy cheeks when happy, idle on hover, or dizzy
+    // Cheeks when happy, hovered while idle, or dizzy.
     if pose.hover > 0.2 || matches!(pose.mood, Mood::Success | Mood::Error) {
         let blush_color = Color32::from_rgba_unmultiplied(244, 132, 178, 86);
         for side in [-1.0_f32, 1.0] {
@@ -319,7 +318,7 @@ pub(super) fn paint(painter: &Painter, rect: Rect, pose: Pose) {
         );
     }
 
-    // Coucou-style top-left mood badge (3 animated dots when working, amber dot for OK, z when sleeping)
+    // Mood badge, top left: three dots while working, amber dot when waiting for an OK, z when asleep.
     if size >= 24.0 {
         let badge_pos = center + vec2(-w * 0.80, -h * 0.72);
         match pose.mood {

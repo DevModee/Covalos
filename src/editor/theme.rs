@@ -137,8 +137,7 @@ impl Theme {
                 control_border: Color32::from_rgb(80, 74, 98),
                 ..Self::Nocturne.colors()
             },
-            // Warm twilight velvet: softer dark surfaces with a subtle plum-charcoal warmth,
-            // creamy ivory ink, gentle hairline borders and an inviting lilac accent.
+            // Plum-charcoal surfaces, ivory text, low-contrast hairlines and a lilac accent.
             Self::Nocturne => Palette {
                 canvas: Color32::from_rgb(18, 16, 24),
                 surface: Color32::from_rgb(25, 22, 33),
@@ -528,7 +527,7 @@ pub(super) fn panel_frame(margin: Margin) -> Frame {
     Frame::new().fill(colors().canvas).inner_margin(margin)
 }
 
-/// Seamless sidebar frame connected continuously to the top bar and outer window contour.
+/// Sidebar frame drawn as one shape with the top bar and the window outline.
 pub(super) fn sidebar_frame(margin: Margin) -> Frame {
     Frame::new().fill(colors().canvas).inner_margin(margin)
 }
@@ -1044,8 +1043,7 @@ pub(super) fn modal_frame() -> Frame {
         .shadow(floating_shadow(active(), 32))
 }
 
-/// Delicate top rim highlight tinted with the theme accent so cards and editor surfaces
-/// feel warm and softly lit rather than flat technical boxes.
+/// Thin accent-tinted highlight along the top edge of a card or editor surface.
 pub(super) fn ambient_top_glow(painter: &egui::Painter, rect: egui::Rect, inset: f32) {
     if !active().is_dark() || active() == Theme::HighContrast {
         return;

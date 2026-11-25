@@ -615,7 +615,7 @@ impl Editor {
         });
     }
 
-    /// Warm, contextual project home shown once a workspace is open and no file tab is active.
+    /// Project home, shown when a workspace is open and no file tab is active.
     fn project_session_home(&mut self, ui: &mut Ui, area: egui::Rect) {
         let width = (area.width() - 64.0).clamp(340.0, 680.0).min(area.width());
         let left = area.center().x - width * 0.5;
@@ -748,7 +748,7 @@ impl Editor {
                         );
                     });
                     ui.add_space(18.0);
-                    // Floating rounded prompt composer with delicate ambient top highlight.
+                    // Prompt composer with an accent highlight along the top edge.
                     let composer = egui::Frame::new()
                         .fill(colors().surface)
                         .corner_radius(14)
@@ -1015,7 +1015,7 @@ impl Editor {
                     }
 
                     ui.add_space(12.0);
-                    // Readable quick-start rows inside a frosted card over the background.
+                    // Quick-start rows on a translucent card so they stay readable over the background.
                     egui::Frame::new()
                         .fill(colors().surface)
                         .corner_radius(12)

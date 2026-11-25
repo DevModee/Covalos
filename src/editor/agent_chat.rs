@@ -1814,7 +1814,7 @@ fn timeline(ui: &mut Ui, session: &LiveSession, actions: &mut Vec<Action>) {
             } else {
                 tr("Preparing session")
             };
-            // Collect steps since the last user prompt for the Antigravity-style checklist card
+            // Steps since the last user prompt, for the progress card.
             let turn_start = last_user.map_or(0, |i| i + 1);
             let mut done_steps: Vec<String> = meta.log[turn_start..]
                 .iter()
@@ -1826,7 +1826,7 @@ fn timeline(ui: &mut Ui, session: &LiveSession, actions: &mut Vec<Action>) {
                 let keep = done_steps.len() - 6;
                 done_steps.drain(..keep);
             }
-            antigravity_progress_card(ui, &done_steps, phase, elapsed);
+            progress_card(ui, &done_steps, phase, elapsed);
             if !session.streaming.is_empty() {
                 let (path, _) = agent_message(
                     ui,
@@ -1843,10 +1843,9 @@ fn timeline(ui: &mut Ui, session: &LiveSession, actions: &mut Vec<Action>) {
     }
 }
 
-/// Antigravity-style live processing card: rounded hairline container with circular
-/// checkmarks for completed steps, a 2x2 pulsing four-dot grid for the active step in
-/// bold, and a quiet focus + elapsed timer footer underneath.
-fn antigravity_progress_card(ui: &mut Ui, done_steps: &[String], active_step: &str, elapsed: u64) {
+/// Live progress card: completed steps with checkmarks, the active step in bold next to
+/// a pulsing four-dot grid, and the elapsed time underneath.
+fn progress_card(ui: &mut Ui, done_steps: &[String], active_step: &str, elapsed: u64) {
     ui.add_space(6.0);
     let live = ui.style().animation_time > 0.0;
     let t = ui.input(|i| i.time) as f32;

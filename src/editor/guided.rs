@@ -34,10 +34,10 @@ pub(super) enum MatchMode {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum GuidedStyle {
-    /// Cozy interactive tutor: bite-sized explanations, call-flow hover, re-explain, and XP.
+    /// Short explanations per line, call-flow hover, "Explain another way" and XP.
     #[default]
     Learn,
-    /// Pure code-along: clean karaoke lines without long theory cards.
+    /// Code-along only: the lines to type, without explanation cards.
     CodeOnly,
 }
 
@@ -1159,7 +1159,7 @@ impl super::Editor {
         self.open_file(full);
     }
 
-    /// Renders the Studio / Teleprompter Guided Mode surface (or the cozy Learn / Code-only
+    /// Renders the Studio / Teleprompter Guided Mode surface (or the Learn / Code-only
     /// launcher when no session is active), either floating inside the editor or detached
     /// into an independent native OS window movable across monitors.
     pub(super) fn guided_overlay(&mut self, ctx: &egui::Context) {
@@ -1377,7 +1377,7 @@ struct GuidedUiActions {
     font_delta: i32,
 }
 
-/// Cozy Guided Studio launcher shown when no guided session is active yet:
+/// Guided Studio launcher, shown when no guided session is active yet:
 /// choose Learn vs Code-only, paste a prompt or link (e.g. aprenderust.dev or GitHub repo),
 /// or click a quick-start preset.
 fn render_guided_launcher(
@@ -2391,7 +2391,7 @@ pub(super) fn learn_block_for_hover(
     }
 
     // 2. Fallback: highlight the enclosing `{ ... }` block (or compact 3-line slice)
-    // around `hovered_line` and explain what it declares, does, and calls!
+    // around `hovered_line` and explain what it declares, does and calls.
     let (start, end) = find_brace_block_range(buffer_text, hovered_line)?;
     let slice: Vec<String> = buf_lines
         .iter()

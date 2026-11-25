@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 const ISLAND_COMPACT: egui::Vec2 = egui::vec2(232.0, 21.0);
 const ISLAND_WIDTH: f32 = 576.0;
 
-/// Draw a Coucou-style minimal speech-bubble icon (chat tab).
+/// Speech-bubble icon for the Chat tab.
 fn draw_chat_bubble(painter: &egui::Painter, center: egui::Pos2, color: egui::Color32, size: f32) {
     let w = size * 0.92;
     let h = size * 0.68;
@@ -230,7 +230,7 @@ impl Editor {
         let mut open_settings_now = false;
         let mut open_guided_now = false;
 
-        // Coucou-style top toolbar inside the Notch:
+        // Notch toolbar.
         // Left: Home (Luma) · Chat (Orchestrate) · + (New chat) · Search (Ctrl+P)
         // Right: Effort pills · Settings · Close
         ui.horizontal(|ui| {
@@ -302,8 +302,7 @@ impl Editor {
         ui.add_space(10.0);
 
         if active_tab == 0 {
-            // Coucou Home tab: clean split hero with minimalist interactive Luma on the left
-            // and quick workspace actions on the right.
+            // Home tab: Luma on the left, workspace shortcuts on the right.
             let gap = 10.0;
             let total_w = ui.available_width();
             let left_outer = ((total_w - gap) * 0.56).floor().max(220.0);
@@ -467,7 +466,7 @@ impl Editor {
             });
             ui.add_space(8.0);
         } else {
-            // Coucou Chat tab: Luma orchestration log + team checklist + sleek bottom composer.
+            // Chat tab: Luma log, team checklist and the order composer.
             self.luma_panel(ui);
         }
         let mut action = None;
@@ -560,7 +559,7 @@ impl Editor {
                             {
                                 ui.horizontal(|ui| {
                                     ui.spacing_mut().item_spacing.x = 8.0;
-                                    // Coucou-style red Deny & green Allow pills
+                                    // Deny and Allow buttons.
                                     let deny = egui::Button::new(
                                         RichText::new(format!("×  {}", tr("Deny")))
                                             .strong()
@@ -664,7 +663,7 @@ impl Editor {
             }
         }
         ui.add_space(8.0);
-        // Coucou-style sleek order input anchored at the bottom of the Notch
+        // Order input pinned to the bottom of the Notch.
         let had_draft = !self.hub.agents.luma.draft.trim().is_empty();
         self.luma_composer(ui);
         if had_draft && self.hub.agents.luma.draft.is_empty() {
@@ -780,8 +779,7 @@ impl Editor {
             .unwrap_or(320.0)
             .min(screen.height() - CHROME_HEIGHT - 72.0)
             .max(ISLAND_COMPACT.y);
-        // Coucou-style top-center Dynamic Notch: anchored flush at the top edge of the
-        // window and expanding downward smoothly on a spring.
+        // The Notch hangs from the top edge of the window and grows downward on a spring.
         let width = egui::lerp(ISLAND_COMPACT.x..=full_width, eased);
         let height = egui::lerp(ISLAND_COMPACT.y..=target_h, eased);
         let top = if eased > 0.05 {
@@ -809,8 +807,8 @@ impl Editor {
                     sw: bottom_r,
                     se: bottom_r,
                 };
-                // Seamless Coucou Notch: exact same canvas fill as the top bar, zero drop
-                // shadow, and inverted concave fillets flowing smoothly out of the top bar.
+                // Same fill as the top bar and no shadow, so the Notch reads as part of it; concave
+                // fillets join the two shapes.
                 let notch_fill = colors().canvas;
                 let bg_painter = ctx.layer_painter(ui.layer_id());
                 let top_bar_bottom = screen.top() + CHROME_HEIGHT;

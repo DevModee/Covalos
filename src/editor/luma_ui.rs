@@ -416,7 +416,7 @@ impl Editor {
         }
     }
 
-    /// Luma's chat log, confirmations and team status (rendered inside the Coucou Notch).
+    /// Luma's chat log, confirmations and team status (rendered inside the Notch).
     pub(super) fn luma_panel(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
         self.ensure_runtime(&ctx);
@@ -463,7 +463,7 @@ impl Editor {
         });
     }
 
-    /// Coucou-style sleek dark bottom composer bar for giving orders to Luma.
+    /// Composer at the bottom of the Notch for giving Luma an order.
     pub(super) fn luma_composer(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
         self.ensure_runtime(&ctx);
@@ -613,7 +613,7 @@ impl Editor {
         ui.add_space(6.0);
     }
 
-    /// Antigravity-style checklist card for Luma's active plan tasks and running sessions.
+    /// Checklist of the active plan tasks and running sessions.
     fn luma_team(&mut self, ui: &mut Ui) {
         let Some(runtime) = self.hub.agents.runtime.as_ref() else {
             return;
