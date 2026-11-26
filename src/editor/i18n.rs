@@ -2011,6 +2011,243 @@ const SPANISH: &[(&str, &str)] = &[
     ("project folder", "carpeta del proyecto"),
     ("Home", "Inicio"),
     ("Orchestrate with Luma", "Orquestar con Luma"),
+    ("Guided Mode options", "Opciones del Modo Guiado"),
+    ("Lesson", "Lección"),
+    ("Matching", "Comparación"),
+    (
+        "Ignores quote style, extra spaces and trailing semicolons",
+        "Ignora el tipo de comillas, los espacios de más y el punto y coma final",
+    ),
+    (
+        "The line must match character by character",
+        "La línea tiene que coincidir carácter por carácter",
+    ),
+    ("Learning helpers", "Ayudas para aprender"),
+    ("Step summary", "Resumen del paso"),
+    (
+        "Show why this step exists above the code",
+        "Muestra arriba del código para qué sirve este paso",
+    ),
+    ("Line explanation", "Explicación de la línea"),
+    (
+        "Explain what each part of the current line does",
+        "Explica qué hace cada parte de la línea actual",
+    ),
+    ("Text size", "Tamaño del texto"),
+    (
+        "Column {col}: you typed {found}, the line has {expected}.",
+        "Columna {col}: escribiste {found}, la línea tiene {expected}.",
+    ),
+    (
+        "The line ends here; remove the extra {found}.",
+        "La línea termina acá; borrá el {found} de más.",
+    ),
+    ("a space", "un espacio"),
+    ("a tab", "un tab"),
+    ("A number value.", "Un valor numérico."),
+    (
+        "Calls the function {name} and uses what it returns.",
+        "Llama a la función {name} y usa lo que devuelve.",
+    ),
+    (
+        "Calls the method {name} on the value before the dot.",
+        "Llama al método {name} del valor que está antes del punto.",
+    ),
+    (
+        "Reads {name} from the value before the dot.",
+        "Lee {name} del valor que está antes del punto.",
+    ),
+    ("Text value (a string).", "Un valor de texto (string)."),
+    (
+        "The module path or package name to import.",
+        "La ruta del módulo o el nombre del paquete a importar.",
+    ),
+    (
+        "The name being declared: {name}.",
+        "El nombre que se declara: {name}.",
+    ),
+    (
+        "Brings code from another module into this file.",
+        "Trae código de otro módulo a este archivo.",
+    ),
+    (
+        "Names the module the import comes from.",
+        "Indica de qué módulo viene lo importado.",
+    ),
+    (
+        "Makes this available to other files.",
+        "Lo deja disponible para otros archivos.",
+    ),
+    (
+        "The main thing a module exports.",
+        "Lo principal que exporta un módulo.",
+    ),
+    (
+        "Declares a name whose value is not reassigned.",
+        "Declara un nombre cuyo valor no se reasigna.",
+    ),
+    ("Declares a variable.", "Declara una variable."),
+    (
+        "Declares a variable (older JavaScript form).",
+        "Declara una variable (forma vieja de JavaScript).",
+    ),
+    (
+        "Allows the value to change after it is set.",
+        "Permite que el valor cambie después de asignarlo.",
+    ),
+    ("Declares a function.", "Declara una función."),
+    (
+        "Sends a value back to whoever called the function.",
+        "Devuelve un valor a quien llamó a la función.",
+    ),
+    (
+        "Marks code that can wait for slow work without blocking.",
+        "Marca código que puede esperar trabajo lento sin bloquear.",
+    ),
+    (
+        "Waits for an async result before going on.",
+        "Espera un resultado async antes de seguir.",
+    ),
+    (
+        "Runs the block only when the condition is true.",
+        "Ejecuta el bloque solo si la condición es verdadera.",
+    ),
+    (
+        "Runs when the condition before it was false.",
+        "Se ejecuta cuando la condición anterior fue falsa.",
+    ),
+    (
+        "Repeats the block for each item.",
+        "Repite el bloque por cada elemento.",
+    ),
+    (
+        "Repeats the block while the condition stays true.",
+        "Repite el bloque mientras la condición siga siendo verdadera.",
+    ),
+    (
+        "Picks a branch by comparing a value against cases.",
+        "Elige una rama comparando un valor contra casos.",
+    ),
+    (
+        "Creates an object from a class.",
+        "Crea un objeto a partir de una clase.",
+    ),
+    (
+        "Declares a class: data plus the functions that use it.",
+        "Declara una clase: datos más las funciones que los usan.",
+    ),
+    (
+        "Declares a type that groups named fields.",
+        "Declara un tipo que agrupa campos con nombre.",
+    ),
+    (
+        "Declares a type that is one of a fixed set of variants.",
+        "Declara un tipo que es una de varias variantes fijas.",
+    ),
+    (
+        "Describes the shape of a value for the type checker.",
+        "Describe la forma de un valor para el chequeo de tipos.",
+    ),
+    ("Adds methods to a type.", "Agrega métodos a un tipo."),
+    (
+        "Makes it visible outside this module.",
+        "Lo hace visible fuera de este módulo.",
+    ),
+    (
+        "Brings a path into scope so it can be used by its short name.",
+        "Trae una ruta al scope para usarla por su nombre corto.",
+    ),
+    (
+        "Raises an error that stops this code path.",
+        "Lanza un error que corta este camino del código.",
+    ),
+    (
+        "Runs code that may fail, so the error can be handled.",
+        "Ejecuta código que puede fallar para poder manejar el error.",
+    ),
+    (
+        "Handles the error raised in the try block.",
+        "Maneja el error lanzado en el bloque try.",
+    ),
+    (
+        "Gives the type of a value as text.",
+        "Da el tipo de un valor como texto.",
+    ),
+    ("Means there is no value.", "Significa que no hay valor."),
+    (
+        "A yes or no value (boolean).",
+        "Un valor de sí o no (booleano).",
+    ),
+    (
+        "Node's global object with information about the running program.",
+        "El objeto global de Node con información del programa en ejecución.",
+    ),
+    (
+        "Environment variables: settings that live outside the code.",
+        "Variables de entorno: configuración que vive fuera del código.",
+    ),
+    (
+        "The developer console, for printing messages.",
+        "La consola de desarrollo, para imprimir mensajes.",
+    ),
+    (
+        "Strict equality: same value and same type.",
+        "Igualdad estricta: mismo valor y mismo tipo.",
+    ),
+    (
+        "Strict inequality: different value or type.",
+        "Desigualdad estricta: distinto valor o tipo.",
+    ),
+    (
+        "Arrow function: parameters on the left, body on the right.",
+        "Función flecha: parámetros a la izquierda, cuerpo a la derecha.",
+    ),
+    (
+        "Optional chaining: stops if the value is null or undefined.",
+        "Encadenamiento opcional: se detiene si el valor es null o undefined.",
+    ),
+    (
+        "Uses the right side when the left is null or undefined.",
+        "Usa el lado derecho cuando el izquierdo es null o undefined.",
+    ),
+    (
+        "Both sides must be true.",
+        "Los dos lados tienen que ser verdaderos.",
+    ),
+    (
+        "Either side can be true; also gives a fallback value.",
+        "Alcanza con que un lado sea verdadero; también da un valor de respaldo.",
+    ),
+    (
+        "Path separator: reaches inside a module or type.",
+        "Separador de ruta: entra a un módulo o tipo.",
+    ),
+    (
+        "The return type comes next.",
+        "A continuación viene el tipo de retorno.",
+    ),
+    (
+        "Spreads the items of an array or object.",
+        "Expande los elementos de un array u objeto.",
+    ),
+    ("Equality comparison.", "Comparación de igualdad."),
+    ("Inequality comparison.", "Comparación de desigualdad."),
+    (
+        "Assigns the value on the right to the name on the left.",
+        "Asigna el valor de la derecha al nombre de la izquierda.",
+    ),
+    (
+        "Negates: true becomes false and the other way around.",
+        "Niega: verdadero pasa a falso y al revés.",
+    ),
+    (
+        "Returns the error early if this failed.",
+        "Devuelve el error antes si esto falló.",
+    ),
+    (
+        "Destructuring: takes named parts out of a module or object.",
+        "Desestructuración: saca partes con nombre de un módulo u objeto.",
+    ),
 ];
 
 #[cfg(test)]

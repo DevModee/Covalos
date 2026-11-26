@@ -9,7 +9,7 @@ use std::path::{Component, Path, PathBuf};
 use eframe::egui::{self, Align, Color32, Frame, Id, Layout, Margin, RichText};
 use serde::{Deserialize, Serialize};
 
-use super::i18n::tr;
+use super::i18n::{tr, trf};
 use super::theme::{BODY, LEAD, SMALL, colors};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -157,6 +157,179 @@ impl GuidedStep {
     }
 }
 
+fn is_ident_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_' || c == '$'
+}
+
+/// What a keyword does, in one plain sentence.
+fn keyword_note(word: &str) -> Option<&'static str> {
+    Some(match word {
+        "import" => "Brings code from another module into this file.",
+        "from" => "Names the module the import comes from.",
+        "export" => "Makes this available to other files.",
+        "default" => "The main thing a module exports.",
+        "const" => "Declares a name whose value is not reassigned.",
+        "let" => "Declares a variable.",
+        "var" => "Declares a variable (older JavaScript form).",
+        "mut" => "Allows the value to change after it is set.",
+        "fn" | "function" | "def" | "func" => "Declares a function.",
+        "return" => "Sends a value back to whoever called the function.",
+        "async" => "Marks code that can wait for slow work without blocking.",
+        "await" => "Waits for an async result before going on.",
+        "if" => "Runs the block only when the condition is true.",
+        "else" => "Runs when the condition before it was false.",
+        "for" => "Repeats the block for each item.",
+        "while" => "Repeats the block while the condition stays true.",
+        "match" | "switch" => "Picks a branch by comparing a value against cases.",
+        "new" => "Creates an object from a class.",
+        "class" => "Declares a class: data plus the functions that use it.",
+        "struct" => "Declares a type that groups named fields.",
+        "enum" => "Declares a type that is one of a fixed set of variants.",
+        "interface" | "type" => "Describes the shape of a value for the type checker.",
+        "impl" => "Adds methods to a type.",
+        "pub" => "Makes it visible outside this module.",
+        "use" => "Brings a path into scope so it can be used by its short name.",
+        "throw" => "Raises an error that stops this code path.",
+        "try" => "Runs code that may fail, so the error can be handled.",
+        "catch" | "except" => "Handles the error raised in the try block.",
+        "typeof" => "Gives the type of a value as text.",
+        "null" | "undefined" | "None" => "Means there is no value.",
+        "true" | "false" => "A yes or no value (boolean).",
+        "process" => "Node's global object with information about the running program.",
+        "env" => "Environment variables: settings that live outside the code.",
+        "console" => "The developer console, for printing messages.",
+        _ => return None,
+    })
+}
+
+/// The parts of a code line worth explaining (keywords, calls, members, operators and
+/// literals), each with what it does. At most six, in reading order.
+pub(super) fn line_pieces(line: &str) -> Vec<(String, String)> {
+    let chars: Vec<char> = line.chars().collect();
+    let mut pieces: Vec<(String, String)> = Vec::new();
+    let mut add = |token: String, note: String| {
+        if pieces.len() < 6 && !pieces.iter().any(|(t, _)| *t == token) {
+            pieces.push((token, note));
+        }
+    };
+    let mut i = 0;
+    let mut last_word = String::new();
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '/' && chars.get(i + 1) == Some(&'/') {
+            break;
+        }
+        if c == '"' || c == '\'' || c == '`' {
+            let end = chars[i + 1..]
+                .iter()
+                .position(|&x| x == c)
+                .map_or(chars.len(), |p| i + 2 + p);
+            let token: String = chars[i..end].iter().collect();
+            let note = if last_word == "from" || last_word == "import" {
+                tr("The module path or package name to import.").to_owned()
+            } else {
+                tr("Text value (a string).").to_owned()
+            };
+            add(token, note);
+            i = end;
+            continue;
+        }
+        if is_ident_char(c) {
+            let start = i;
+            while i < chars.len() && is_ident_char(chars[i]) {
+                i += 1;
+            }
+            let word: String = chars[start..i].iter().collect();
+            let next = chars[i..].iter().find(|c| !c.is_whitespace()).copied();
+            let after_dot = start > 0 && chars[start - 1] == '.';
+            if word.chars().all(|c| c.is_ascii_digit() || c == '_') {
+                add(word.clone(), tr("A number value.").to_owned());
+            } else if let Some(note) = keyword_note(&word) {
+                add(word.clone(), tr(note).to_owned());
+            } else if after_dot && next == Some('(') {
+                add(
+                    format!(".{word}()"),
+                    tr("Calls the method {name} on the value before the dot.")
+                        .replace("{name}", &word),
+                );
+            } else if after_dot {
+                add(
+                    format!(".{word}"),
+                    tr("Reads {name} from the value before the dot.").replace("{name}", &word),
+                );
+            } else if next == Some('(') {
+                add(
+                    format!("{word}()"),
+                    tr("Calls the function {name} and uses what it returns.")
+                        .replace("{name}", &word),
+                );
+            } else if matches!(last_word.as_str(), "const" | "let" | "var" | "mut") {
+                add(
+                    word.clone(),
+                    tr("The name being declared: {name}.").replace("{name}", &word),
+                );
+            }
+            last_word = word;
+            continue;
+        }
+        let rest: String = chars[i..chars.len().min(i + 3)].iter().collect();
+        let op = [
+            ("===", "Strict equality: same value and same type."),
+            ("!==", "Strict inequality: different value or type."),
+            (
+                "=>",
+                "Arrow function: parameters on the left, body on the right.",
+            ),
+            (
+                "?.",
+                "Optional chaining: stops if the value is null or undefined.",
+            ),
+            (
+                "??",
+                "Uses the right side when the left is null or undefined.",
+            ),
+            ("&&", "Both sides must be true."),
+            (
+                "||",
+                "Either side can be true; also gives a fallback value.",
+            ),
+            ("::", "Path separator: reaches inside a module or type."),
+            ("->", "The return type comes next."),
+            ("...", "Spreads the items of an array or object."),
+            ("==", "Equality comparison."),
+            ("!=", "Inequality comparison."),
+        ]
+        .into_iter()
+        .find(|(op, _)| rest.starts_with(op));
+        if let Some((op, note)) = op {
+            add(op.to_owned(), tr(note).to_owned());
+            i += op.chars().count();
+            continue;
+        }
+        // Rust's `?` sits right after a call or name; a spaced `?` is a ternary.
+        let try_operator = c == '?'
+            && i > 0
+            && (is_ident_char(chars[i - 1]) || chars[i - 1] == ')')
+            && chars
+                .get(i + 1)
+                .is_none_or(|n| matches!(n, ';' | '.' | ')' | ','));
+        let single = match c {
+            '=' => Some("Assigns the value on the right to the name on the left."),
+            '!' => Some("Negates: true becomes false and the other way around."),
+            '?' if try_operator => Some("Returns the error early if this failed."),
+            '{' if matches!(last_word.as_str(), "import" | "const" | "let") => {
+                Some("Destructuring: takes named parts out of a module or object.")
+            }
+            _ => None,
+        };
+        if let Some(note) = single {
+            add(c.to_string(), tr(note).to_owned());
+        }
+        i += 1;
+    }
+    pieces
+}
+
 /// Plain-language description of what a code line does, for steps without notes.
 pub(super) fn describe_line(line: &str) -> &'static str {
     let line = line.trim();
@@ -248,10 +421,22 @@ pub(super) struct GuidedPlan {
     pub(super) steps: Vec<GuidedStep>,
 }
 
+/// Where the typed line stops matching the target line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Typo {
+    /// Char index in the target line where the typed text diverges (its length when the
+    /// typed text runs past the end).
+    pub(super) at: usize,
+    /// The character typed there instead.
+    pub(super) found: char,
+}
+
 /// Live progress snapshot returned when syncing with the active editor buffer.
 #[derive(Clone, Debug, Default)]
 pub(super) struct SyncSnapshot {
     pub(super) on_target_file: bool,
+    /// Where the line under the caret stops matching the active target line.
+    pub(super) typo: Option<Typo>,
     /// Character match ratio `[0.0, 1.0]` for the current target line.
     pub(super) line_progress: f32,
     pub(super) step_complete: bool,
@@ -367,6 +552,7 @@ impl GuidedController {
         &mut self,
         active_rel_path: Option<&str>,
         buffer_text: &str,
+        caret_line: Option<&str>,
         mode: MatchMode,
         workspace: Option<&Path>,
     ) {
@@ -384,6 +570,9 @@ impl GuidedController {
         };
         let prev = (session.step_index, session.line_index);
         self.sync = session.sync_with_buffer(active_rel_path, buffer_text, mode);
+        if self.sync.on_target_file && !self.sync.step_complete {
+            self.sync.typo = caret_line.and_then(|line| session.typo_at_caret(line, mode));
+        }
         if (session.step_index, session.line_index) != prev {
             self.save_to_disk(workspace);
         }
@@ -538,6 +727,7 @@ impl GuidedSession {
         if !on_target_file {
             return SyncSnapshot {
                 on_target_file: false,
+                typo: None,
                 line_progress: 0.0,
                 step_complete: self.line_index >= step.lines.len(),
                 all_complete: self.completed_steps.iter().all(|&c| c),
@@ -584,10 +774,22 @@ impl GuidedSession {
 
         SyncSnapshot {
             on_target_file: true,
+            typo: None,
             line_progress: if step_complete { 1.0 } else { best_progress },
             step_complete,
             all_complete,
         }
+    }
+
+    /// The typo in the line under the caret, measured against the active target line. A
+    /// line that matches some other line of the step is finished work, not a typo.
+    pub(super) fn typo_at_caret(&self, caret_line: &str, mode: MatchMode) -> Option<Typo> {
+        let step = self.plan.steps.get(self.step_index)?;
+        let target = step.lines.get(self.line_index)?;
+        if step.lines.iter().any(|l| lines_match(caret_line, l, mode)) {
+            return None;
+        }
+        mismatch(caret_line, target, mode)
     }
 }
 
@@ -999,27 +1201,62 @@ fn paths_equal(a: &str, b: &str) -> bool {
         .eq_ignore_ascii_case(&b.replace('\\', "/"))
 }
 
-fn normalize_line(line: &str, mode: MatchMode) -> String {
+/// The comparable form of a line, each char with its char index in the original line:
+/// trimmed, and in Flexible mode with `'` read as `"`, runs of spaces collapsed and trailing
+/// semicolons dropped.
+fn normalize_chars(line: &str, mode: MatchMode) -> Vec<(char, usize)> {
+    let lead = line.chars().take_while(|c| c.is_whitespace()).count();
+    let chars = line.trim().chars().enumerate().map(|(i, c)| (c, lead + i));
     match mode {
-        MatchMode::Strict => line.trim().to_owned(),
+        MatchMode::Strict => chars.collect(),
         MatchMode::Flexible => {
-            let mut out = String::with_capacity(line.len());
+            let mut out: Vec<(char, usize)> = Vec::with_capacity(line.len());
             let mut prev_space = false;
-            for ch in line.trim().chars() {
+            for (ch, at) in chars {
                 let mapped = if ch == '\'' { '"' } else { ch };
                 if mapped.is_whitespace() {
                     if !prev_space {
-                        out.push(' ');
+                        out.push((' ', at));
                         prev_space = true;
                     }
                 } else {
-                    out.push(mapped);
+                    out.push((mapped, at));
                     prev_space = false;
                 }
             }
-            out.trim_end_matches(';').trim().to_owned()
+            while out.last().is_some_and(|(c, _)| *c == ';') {
+                out.pop();
+            }
+            while out.last().is_some_and(|(c, _)| *c == ' ') {
+                out.pop();
+            }
+            out
         }
     }
+}
+
+fn normalize_line(line: &str, mode: MatchMode) -> String {
+    normalize_chars(line, mode)
+        .into_iter()
+        .map(|(c, _)| c)
+        .collect()
+}
+
+/// Where `actual` stops being a correct start of `target`; `None` while it still is one.
+/// A line that is wrong from its first characters is another line, not a typo of this one.
+fn mismatch(actual: &str, target: &str, mode: MatchMode) -> Option<Typo> {
+    let a = normalize_chars(actual, mode);
+    let t = normalize_chars(target, mode);
+    let matched = a.iter().zip(&t).take_while(|(x, y)| x.0 == y.0).count();
+    let &(found, _) = a.get(matched)?;
+    if matched == 0 && a.len() > 2 {
+        return None;
+    }
+    let at = t
+        .get(matched)
+        .map(|&(_, at)| at)
+        .or_else(|| t.last().map(|&(_, at)| at + 1))?;
+    Some(Typo { at, found })
 }
 
 fn lines_match(actual: &str, target: &str, mode: MatchMode) -> bool {
@@ -1110,16 +1347,24 @@ impl super::Editor {
         if self.guided.session.is_none() {
             return;
         }
-        let active_pair = self.active.and_then(|i| self.documents.get(i)).map(|doc| {
-            let rel = self
-                .root
-                .as_deref()
-                .and_then(|root| relative_workspace_path(root, &doc.path));
-            (rel, doc.text.clone())
-        });
-        let (rel, text) = active_pair.unwrap_or((None, String::new()));
         let mode = self.preferences.guided.match_mode;
         let root = self.root.clone();
+        // Borrowed, not cloned: this runs every frame while a session is active.
+        let doc = self.active.and_then(|i| self.documents.get(i));
+        let rel = doc.and_then(|doc| {
+            root.as_deref()
+                .and_then(|root| relative_workspace_path(root, &doc.path))
+        });
+        let text = doc.map_or("", |doc| doc.text.as_str());
+        let caret_line = doc.map(|_| {
+            let at = text
+                .char_indices()
+                .nth(self.cursor)
+                .map_or(text.len(), |(b, _)| b);
+            let start = text[..at].rfind('\n').map_or(0, |i| i + 1);
+            let end = text[at..].find('\n').map_or(text.len(), |i| at + i);
+            &text[start..end]
+        });
         let before = self.guided.session.as_ref().map(|s| {
             (
                 s.step_index,
@@ -1128,7 +1373,7 @@ impl super::Editor {
             )
         });
         self.guided
-            .sync_with_editor(rel.as_deref(), &text, mode, root.as_deref());
+            .sync_with_editor(rel.as_deref(), text, caret_line, mode, root.as_deref());
         let after = self.guided.session.as_ref().map(|s| {
             (
                 s.step_index,
@@ -1254,9 +1499,14 @@ impl super::Editor {
         } else {
             let (anchor, pivot) = self.guided_anchor(ctx);
             let screen = ctx.content_rect();
+            // Keep the window out of the agent dock so the chat stays readable.
+            let right = (screen.right() - self.agent_dock_width() - 8.0).max(screen.left() + 368.0);
             let safe_rect = egui::Rect::from_min_max(
-                egui::pos2(screen.left() + 8.0, screen.top() + super::theme::CHROME_HEIGHT + 8.0),
-                egui::pos2(screen.right() - 8.0, screen.bottom() - super::theme::STATUS_HEIGHT - 8.0),
+                egui::pos2(
+                    screen.left() + 8.0,
+                    screen.top() + super::theme::CHROME_HEIGHT + 8.0,
+                ),
+                egui::pos2(right, screen.bottom() - super::theme::STATUS_HEIGHT - 8.0),
             );
             let max_h = (safe_rect.height() - 48.0).max(220.0);
             egui::Window::new(tr("Guided Mode"))
@@ -1363,16 +1613,20 @@ impl super::Editor {
         }
     }
 
+    /// Width the agent dock takes on the right edge, gap included; zero when it is closed.
+    fn agent_dock_width(&self) -> f32 {
+        if self.preferences.assistant_open {
+            self.preferences.assistant_width + 8.0
+        } else {
+            0.0
+        }
+    }
+
     /// Default spot for the Guided window: the bottom-right corner of the editor area,
     /// clear of the title bar controls and of the agent dock on the right.
     fn guided_anchor(&self, ctx: &egui::Context) -> (egui::Pos2, egui::Align2) {
         let screen = ctx.content_rect();
-        let dock = if self.preferences.assistant_open {
-            self.preferences.assistant_width + 8.0
-        } else {
-            0.0
-        };
-        let right = (screen.right() - dock - 16.0).max(screen.left() + 360.0);
+        let right = (screen.right() - self.agent_dock_width() - 16.0).max(screen.left() + 360.0);
         let bottom = screen.bottom() - super::theme::STATUS_HEIGHT - 16.0;
         (egui::pos2(right, bottom), egui::Align2::RIGHT_BOTTOM)
     }
@@ -1611,30 +1865,27 @@ fn xp_badge(ui: &mut egui::Ui, xp: u32, streak: u32, recent_xp: Option<u32>) {
         .corner_radius(10)
         .inner_margin(Margin::symmetric(8, 3))
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 5.0;
-                ui.label(
-                    RichText::new(format!("★ {xp} XP"))
-                        .size(11.0)
-                        .strong()
-                        .color(colors().accent),
+            // One label, so the parts keep their order inside right-to-left headers.
+            let mut job = egui::text::LayoutJob::default();
+            let mut part = |text: String, color: Color32| {
+                job.append(
+                    &text,
+                    0.0,
+                    egui::text::TextFormat {
+                        font_id: egui::FontId::proportional(11.0),
+                        color,
+                        ..Default::default()
+                    },
                 );
-                if streak > 1 {
-                    ui.label(
-                        RichText::new(format!("· x{streak}"))
-                            .size(11.0)
-                            .color(colors().warning),
-                    );
-                }
-                if let Some(pts) = recent_xp {
-                    ui.label(
-                        RichText::new(format!("+{pts}"))
-                            .size(11.0)
-                            .strong()
-                            .color(colors().success),
-                    );
-                }
-            });
+            };
+            part(format!("★ {xp} XP"), colors().accent);
+            if streak > 1 {
+                part(format!("  · x{streak}"), colors().warning);
+            }
+            if let Some(pts) = recent_xp {
+                part(format!("  +{pts}"), colors().success);
+            }
+            ui.add(egui::Label::new(job).extend());
         });
 }
 
@@ -1655,98 +1906,23 @@ fn render_guided_body(
     let next_step_path = session.plan.steps.get(step_idx + 1).map(|s| s.path.clone());
     let wide = ui.available_width() >= 680.0;
 
-    // Header row: title + XP badge + zoom + pop-out / dock
+    // One compact header row: title, step, XP and a menu with the secondary toggles.
     ui.horizontal(|ui| {
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.spacing_mut().item_spacing.x = 5.0;
-            let detach_lbl = if view.detached {
-                tr("Dock ↙")
-            } else {
-                tr("Pop out ↗")
-            };
-            let detach_tip = if view.detached {
-                tr("Dock Guided Mode back inside the editor window")
-            } else {
-                tr("Open Guided Mode in its own window so you can move or maximize it on another screen")
-            };
-            if pill(ui, detach_lbl, view.detached)
-                .on_hover_text(detach_tip)
-                .clicked()
-            {
-                actions.toggle_detached = true;
-            }
-            if pill(ui, "A+", false)
-                .on_hover_text(tr("Increase Guided Mode text size"))
-                .clicked()
-            {
-                actions.font_delta = 15;
-            }
-            if pill(ui, "A-", false)
-                .on_hover_text(tr("Decrease Guided Mode text size"))
-                .clicked()
-            {
-                actions.font_delta = -15;
-            }
+            ui.spacing_mut().item_spacing.x = 6.0;
+            guided_options_menu(ui, view, actions);
             xp_badge(ui, view.xp, view.streak, view.recent_xp);
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
                 ui.add(
                     egui::Label::new(
                         RichText::new(&session.plan.title)
-                            .size(LEAD * view.font_scale.min(1.35))
+                            .size(BODY * view.font_scale.min(1.3))
                             .strong()
                             .color(colors().text),
                     )
                     .truncate(),
                 );
-            });
-        });
-    });
-
-    ui.add_space(6.0);
-    // Meta & mode toggles row: Learn vs Code-only + learning helpers
-    ui.horizontal(|ui| {
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            let mode_lbl = match view.match_mode {
-                MatchMode::Flexible => tr("Flexible"),
-                MatchMode::Strict => tr("Strict"),
-            };
-            if pill(ui, mode_lbl, false)
-                .on_hover_text(tr("Switch between flexible and strict line matching"))
-                .clicked()
-            {
-                actions.toggle_mode = true;
-            }
-            if view.style == GuidedStyle::Learn {
-                if pill(ui, tr("Learn hover"), view.learn_hover)
-                    .on_hover_text(tr(
-                        "Highlight code blocks on hover in the editor to explain what they do and what calls what",
-                    ))
-                    .clicked()
-                {
-                    actions.toggle_learn_hover = true;
-                }
-                if pill(ui, tr("Detail"), view.show_detail)
-                    .on_hover_text(tr("Explain what each line of the active block does"))
-                    .clicked()
-                {
-                    actions.toggle_detail = true;
-                }
-            }
-            let code_only = view.style == GuidedStyle::CodeOnly;
-            if pill(ui, tr("Code only"), code_only)
-                .on_hover_text(tr("Code-along without explanation cards"))
-                .clicked()
-            {
-                actions.set_style = Some(GuidedStyle::CodeOnly);
-            }
-            if pill(ui, tr("Learn mode"), !code_only)
-                .on_hover_text(tr("Explanations, call flow on hover and XP"))
-                .clicked()
-            {
-                actions.set_style = Some(GuidedStyle::Learn);
-            }
-            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                 ui.add(
                     egui::Label::new(
                         RichText::new(format!(
@@ -1757,7 +1933,7 @@ fn render_guided_body(
                             step.path
                         ))
                         .size(SMALL)
-                        .color(colors().secondary),
+                        .color(colors().muted),
                     )
                     .truncate(),
                 )
@@ -2039,7 +2215,10 @@ fn teleprompter_column(
             let start = line_idx.saturating_sub(context_before);
             let end = (line_idx + context_after).min(step.lines.len());
             for (idx, code_line) in step.lines.iter().enumerate().take(end).skip(start) {
-                if idx < line_idx {
+                if idx < line_idx && code_line.trim().is_empty() {
+                    // A finished blank line is just a gap, not a checkmark row.
+                    ui.add_space(code_small * 0.5);
+                } else if idx < line_idx {
                     ui.horizontal(|ui| {
                         ui.label(
                             RichText::new("✓")
@@ -2059,7 +2238,7 @@ fn teleprompter_column(
                     });
                 } else if idx == line_idx && !sync.step_complete {
                     ui.add_space(5.0);
-                    active_line_card(ui, code_line, sync.line_progress, code_active);
+                    active_line_card(ui, code_line, sync.line_progress, sync.typo, code_active);
                     ui.add_space(5.0);
                 } else {
                     let job = if !lang.is_empty() {
@@ -2172,64 +2351,181 @@ fn pill(ui: &mut egui::Ui, label: &str, active: bool) -> egui::Response {
     super::theme::pointer(response)
 }
 
+/// The gear button of the Guided header and its menu: lesson style, matching, learning
+/// helpers, text size and docking. Kept out of the header so the lesson gets the room.
+fn guided_options_menu(ui: &mut egui::Ui, view: &GuidedViewConfig, actions: &mut GuidedUiActions) {
+    let gear = super::theme::icon_button_sized(
+        ui,
+        super::theme::Icon::Settings,
+        tr("Guided Mode options"),
+        false,
+        24.0,
+    );
+    egui::Popup::menu(&gear).show(|ui| {
+        ui.set_min_width(210.0);
+        let section = |ui: &mut egui::Ui, title: &str| {
+            ui.label(
+                RichText::new(title)
+                    .size(11.0)
+                    .strong()
+                    .color(colors().muted),
+            );
+        };
+        section(ui, tr("Lesson"));
+        let learn = view.style == GuidedStyle::Learn;
+        if ui
+            .selectable_label(learn, tr("Learn mode"))
+            .on_hover_text(tr("Explanations, call flow on hover and XP"))
+            .clicked()
+        {
+            actions.set_style = Some(GuidedStyle::Learn);
+        }
+        if ui
+            .selectable_label(!learn, tr("Code only"))
+            .on_hover_text(tr("Code-along without explanation cards"))
+            .clicked()
+        {
+            actions.set_style = Some(GuidedStyle::CodeOnly);
+        }
+        ui.separator();
+        section(ui, tr("Matching"));
+        let strict = view.match_mode == MatchMode::Strict;
+        if ui
+            .selectable_label(!strict, tr("Flexible"))
+            .on_hover_text(tr("Ignores quote style, extra spaces and trailing semicolons"))
+            .clicked()
+            && strict
+        {
+            actions.toggle_mode = true;
+        }
+        if ui
+            .selectable_label(strict, tr("Strict"))
+            .on_hover_text(tr("The line must match character by character"))
+            .clicked()
+            && !strict
+        {
+            actions.toggle_mode = true;
+        }
+        if learn {
+            ui.separator();
+            section(ui, tr("Learning helpers"));
+            if ui
+                .selectable_label(view.show_why, tr("Step summary"))
+                .on_hover_text(tr("Show why this step exists above the code"))
+                .clicked()
+            {
+                actions.toggle_why = true;
+            }
+            if ui
+                .selectable_label(view.show_detail, tr("Line explanation"))
+                .on_hover_text(tr("Explain what each part of the current line does"))
+                .clicked()
+            {
+                actions.toggle_detail = true;
+            }
+            if ui
+                .selectable_label(view.learn_hover, tr("Learn hover"))
+                .on_hover_text(tr(
+                    "Highlight code blocks on hover in the editor to explain what they do and what calls what",
+                ))
+                .clicked()
+            {
+                actions.toggle_learn_hover = true;
+            }
+        }
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(tr("Text size")).size(SMALL).color(colors().secondary));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if pill(ui, "A+", false)
+                    .on_hover_text(tr("Increase Guided Mode text size"))
+                    .clicked()
+                {
+                    actions.font_delta = 15;
+                }
+                if pill(ui, "A-", false)
+                    .on_hover_text(tr("Decrease Guided Mode text size"))
+                    .clicked()
+                {
+                    actions.font_delta = -15;
+                }
+            });
+        });
+        let (label, tip) = if view.detached {
+            (
+                tr("Dock ↙"),
+                tr("Dock Guided Mode back inside the editor window"),
+            )
+        } else {
+            (
+                tr("Pop out ↗"),
+                tr("Open Guided Mode in its own window so you can move or maximize it on another screen"),
+            )
+        };
+        if ui.button(label).on_hover_text(tip).clicked() {
+            actions.toggle_detached = true;
+            ui.close();
+        }
+    });
+}
+
 /// The line being typed now, large, with karaoke character-by-character lighting,
 /// a subtle copy button, and its live match progress underneath.
-fn active_line_card(ui: &mut egui::Ui, code_line: &str, progress: f32, font_size: f32) {
+fn active_line_card(
+    ui: &mut egui::Ui,
+    code_line: &str,
+    progress: f32,
+    typo: Option<Typo>,
+    font_size: f32,
+) {
     let clamped = progress.clamp(0.0, 1.0);
     let chars: Vec<char> = code_line.chars().collect();
-    let trimmed_start = code_line.len() - code_line.trim_start().len();
-    let leading_chars = code_line[..trimmed_start].chars().count();
+    let leading_chars = chars.iter().take_while(|c| c.is_whitespace()).count();
     let content_chars = chars.len().saturating_sub(leading_chars);
     let matched_content = ((content_chars as f32) * clamped).round() as usize;
-    let split_char = (leading_chars + matched_content).min(chars.len());
-    let split_byte = code_line
-        .char_indices()
-        .nth(split_char)
-        .map_or(code_line.len(), |(b, _)| b);
-    let typed_part = &code_line[..split_byte];
-    let rest_part = &code_line[split_byte..];
+    // With a typo, everything before it is right and the char at it is the one to fix.
+    let split_char = typo
+        .map_or(leading_chars + matched_content, |t| t.at)
+        .min(chars.len());
+    let typed_part: String = chars[..split_char].iter().collect();
+    let wrong_part: String = typo
+        .and_then(|_| chars.get(split_char))
+        .map(char::to_string)
+        .unwrap_or_default();
+    let rest_start = (split_char + wrong_part.chars().count()).min(chars.len());
+    let rest_part: String = chars[rest_start..].iter().collect();
 
-    let mut job = egui::text::LayoutJob::default();
     let font = egui::FontId::monospace(font_size);
-    if !typed_part.is_empty() && clamped > 0.01 {
+    let format = |color: Color32, background: Color32| egui::text::TextFormat {
+        font_id: font.clone(),
+        color,
+        background,
+        ..Default::default()
+    };
+    let mut job = egui::text::LayoutJob::default();
+    let typed_color = if typo.is_some() || clamped > 0.01 {
+        colors().success
+    } else {
+        colors().text
+    };
+    job.append(&typed_part, 0.0, format(typed_color, Color32::TRANSPARENT));
+    if !wrong_part.is_empty() {
         job.append(
-            typed_part,
+            &wrong_part,
             0.0,
-            egui::text::TextFormat {
-                font_id: font.clone(),
-                color: colors().success,
-                ..Default::default()
-            },
-        );
-    } else if !typed_part.is_empty() {
-        job.append(
-            typed_part,
-            0.0,
-            egui::text::TextFormat {
-                font_id: font.clone(),
-                color: colors().text,
-                ..Default::default()
-            },
-        );
-    }
-    if !rest_part.is_empty() {
-        job.append(
-            rest_part,
-            0.0,
-            egui::text::TextFormat {
-                font_id: font,
-                color: colors().text,
-                ..Default::default()
-            },
+            format(colors().error, colors().error.gamma_multiply(0.22)),
         );
     }
+    job.append(&rest_part, 0.0, format(colors().text, Color32::TRANSPARENT));
 
+    let accent = if typo.is_some() {
+        colors().error
+    } else {
+        colors().accent
+    };
     Frame::new()
         .fill(colors().accent_bg)
-        .stroke(egui::Stroke::new(
-            1.0_f32,
-            colors().accent.gamma_multiply(0.55),
-        ))
+        .stroke(egui::Stroke::new(1.0_f32, accent.gamma_multiply(0.55)))
         .corner_radius(9)
         .inner_margin(Margin::symmetric(10, 8))
         .show(ui, |ui| {
@@ -2239,7 +2535,7 @@ fn active_line_card(ui: &mut egui::Ui, code_line: &str, progress: f32, font_size
                     if super::theme::icon_button_sized(
                         ui,
                         super::theme::Icon::Copy,
-                        "Copy line",
+                        tr("Copy line"),
                         false,
                         22.0,
                     )
@@ -2252,6 +2548,28 @@ fn active_line_card(ui: &mut egui::Ui, code_line: &str, progress: f32, font_size
                     });
                 });
             });
+            if let Some(typo) = typo {
+                ui.add_space(4.0);
+                let found = shown_char(typo.found);
+                let message = match chars.get(typo.at) {
+                    Some(&expected) => trf(
+                        "Column {col}: you typed {found}, the line has {expected}.",
+                        &[
+                            ("col", (typo.at + 1).to_string()),
+                            ("found", found),
+                            ("expected", shown_char(expected)),
+                        ],
+                    ),
+                    None => trf(
+                        "The line ends here; remove the extra {found}.",
+                        &[("found", found)],
+                    ),
+                };
+                ui.add(
+                    egui::Label::new(RichText::new(message).size(SMALL).color(colors().error))
+                        .wrap(),
+                );
+            }
             ui.add_space(6.0);
             let (bar, _) =
                 ui.allocate_exact_size(egui::vec2(ui.available_width(), 3.5), egui::Sense::hover());
@@ -2261,9 +2579,18 @@ fn active_line_card(ui: &mut egui::Ui, code_line: &str, progress: f32, font_size
                     bar.min,
                     egui::vec2(bar.width() * clamped, bar.height()),
                 );
-                ui.painter().rect_filled(filled, 2, colors().accent);
+                ui.painter().rect_filled(filled, 2, accent);
             }
         });
+}
+
+/// A char as the typo message shows it: quoted, with spaces and tabs named.
+fn shown_char(c: char) -> String {
+    match c {
+        ' ' => tr("a space").to_owned(),
+        '\t' => tr("a tab").to_owned(),
+        c => format!("`{c}`"),
+    }
 }
 
 /// On-demand learning explanation: what the active line does, why the block exists,
@@ -2314,6 +2641,29 @@ fn detail_card(ui: &mut egui::Ui, step: &GuidedStep, line_idx: usize, complete: 
                     )
                     .wrap(),
                 );
+                // Part by part: what each keyword, call and operator on the line does.
+                let pieces = line_pieces(&step.lines[line_idx]);
+                if !pieces.is_empty() {
+                    ui.add_space(5.0);
+                    for (token, note) in &pieces {
+                        let token: String = if token.chars().count() > 32 {
+                            token.chars().take(30).chain(['…']).collect()
+                        } else {
+                            token.clone()
+                        };
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing.x = 8.0;
+                            ui.label(
+                                RichText::new(token)
+                                    .monospace()
+                                    .size(SMALL)
+                                    .color(colors().accent)
+                                    .background_color(colors().inset),
+                            );
+                            ui.label(RichText::new(note).size(SMALL).color(colors().secondary));
+                        });
+                    }
+                }
             }
             if let Some(detail) = step.detail.as_deref().filter(|d| !d.trim().is_empty()) {
                 ui.add_space(7.0);
@@ -2873,6 +3223,52 @@ mod tests {
         );
         assert!(snap2.step_complete);
         assert!(snap2.all_complete);
+    }
+
+    #[test]
+    fn typos_point_at_the_target_column() {
+        let target = "    const supabaseKey = process.env.KEY;";
+        assert_eq!(mismatch("const supa", target, MatchMode::Flexible), None);
+        assert_eq!(
+            mismatch("const supaba5eKey", target, MatchMode::Flexible),
+            Some(Typo { at: 16, found: '5' })
+        );
+        assert_eq!(
+            mismatch(
+                "const supabaseKey = process.env.KEY;;x",
+                target,
+                MatchMode::Strict
+            ),
+            Some(Typo { at: 40, found: ';' })
+        );
+        assert_eq!(
+            mismatch("return value", target, MatchMode::Flexible),
+            None,
+            "another line, not a typo"
+        );
+        assert_eq!(
+            mismatch("const x = 'a'", "const x = \"a\"", MatchMode::Flexible),
+            None,
+            "flexible quotes"
+        );
+    }
+
+    #[test]
+    fn line_pieces_explain_calls_members_and_operators() {
+        let pieces = line_pieces("const client = createClient(url, key) ?? fallback;");
+        let tokens: Vec<&str> = pieces.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(tokens, ["const", "client", "=", "createClient()", "??"]);
+        let pieces = line_pieces("import { AppState } from 'react-native';");
+        let tokens: Vec<&str> = pieces.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(tokens, ["import", "{", "from", "'react-native'"]);
+        assert!(pieces[3].1.contains("module"));
+        let pieces = line_pieces("let url = process.env.EXPO_PUBLIC_URL;");
+        assert!(pieces.iter().any(|(t, _)| t == ".EXPO_PUBLIC_URL"));
+        let pieces = line_pieces("let n = ok ? 1 : 2;");
+        assert!(
+            pieces.iter().all(|(t, _)| t != "?"),
+            "a ternary is not Rust's ?"
+        );
     }
 
     #[test]
