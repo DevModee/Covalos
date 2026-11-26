@@ -12,7 +12,7 @@ use super::runner::{self, RunOutput};
 use super::voice::{self, MicLevel, VoiceBand};
 use crate::editor::dot_loader::{LoaderPattern, dot_glyph, dot_loader};
 use crate::editor::i18n::tr;
-use crate::editor::theme::{BODY, HEADING, Icon, SMALL, colors, draw_icon};
+use crate::editor::theme::{BODY, HEADING, Icon, SMALL, colors, draw_icon, text_field};
 use eframe::egui::{self, RichText, Ui};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
@@ -740,16 +740,14 @@ impl StudentMode {
         let width = (main.width() - 48.0).clamp(280.0, COLUMN);
         let column = egui::Rect::from_min_max(
             egui::pos2(main.center().x - width * 0.5, main.top() + 12.0),
-            egui::pos2(main.center().x + width * 0.5, main.bottom() - 16.0),
+            egui::pos2(main.center().x + width * 0.5, main.bottom() - 10.0),
         );
         let composer = egui::Rect::from_min_max(
-            egui::pos2(column.left(), column.bottom() - 112.0),
+            egui::pos2(column.left(), column.bottom() - 96.0),
             column.max,
         );
-        let body = egui::Rect::from_min_max(
-            column.min,
-            egui::pos2(column.right(), composer.top() - 10.0),
-        );
+        let body =
+            egui::Rect::from_min_max(column.min, egui::pos2(column.right(), composer.top() - 8.0));
 
         ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
             self.header(ui, host);
@@ -771,7 +769,7 @@ impl StudentMode {
         if wide {
             let panel = egui::Rect::from_min_max(
                 egui::pos2(full.right() - side + 8.0, full.top() + 12.0),
-                egui::pos2(full.right() - 16.0, full.bottom() - 16.0),
+                egui::pos2(full.right() - 16.0, full.bottom() - 10.0),
             );
             ui.scope_builder(egui::UiBuilder::new().max_rect(panel), |ui| {
                 card_frame().show(ui, |ui| {
@@ -1076,10 +1074,12 @@ impl StudentMode {
             let check = practice::check_branch(&self.branch_draft);
             let mut create = false;
             ui.horizontal(|ui| {
-                ui.add(
+                text_field(
+                    ui,
+                    "student-branch",
                     egui::TextEdit::singleline(&mut self.branch_draft)
                         .hint_text(hint)
-                        .desired_width(200.0),
+                        .desired_width(190.0),
                 );
                 create = ui
                     .add_enabled(check.score >= 70, egui::Button::new(tr("Create branch")))
@@ -1093,10 +1093,12 @@ impl StudentMode {
         let check = practice::check_commit_message(&self.commit_draft);
         let mut commit = false;
         ui.horizontal(|ui| {
-            ui.add(
+            text_field(
+                ui,
+                "student-commit",
                 egui::TextEdit::singleline(&mut self.commit_draft)
                     .hint_text("Add input validation for user age")
-                    .desired_width(220.0),
+                    .desired_width(210.0),
             );
             commit = ui
                 .add_enabled(
@@ -1341,7 +1343,9 @@ impl StudentMode {
                                     );
                                 }
                             });
-                        let edit = ui.add(
+                        let edit = text_field(
+                            ui,
+                            "student-tip-input",
                             egui::TextEdit::singleline(&mut self.tip.draft)
                                 .hint_text(tr("Ask a quick question"))
                                 .desired_width(f32::INFINITY),
