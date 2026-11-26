@@ -4,5 +4,7 @@ pub(super) mod chart;
 pub(super) mod curriculum;
 pub(super) mod pedagogy;
 pub(super) mod practice;
+pub(super) mod progress;
 pub(super) mod rubric;
+pub(super) mod sync;
 pub(super) mod voice;
