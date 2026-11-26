@@ -1,10 +1,12 @@
 //! Inline ghost-text completion for the code editor.
 //!
 //! After a short typing pause the editor proposes the rest of the current line, taken from
-//! the nearest line in the file that starts the same way, or the rest of the current word.
-//! The proposal is drawn dimmed after the caret: `Tab` accepts all of it, `Ctrl+Right` or
-//! `Alt+]` accepts the next word, and `Esc` or typing something different dismisses it.
-//! It stays out of the way while the LSP completion popup is open.
+//! the nearest line in the file that starts the same way (with the block it opens when it
+//! ends in a bracket), or the rest of the current word. It shows at the end of a line or
+//! before closing punctuation such as an auto-closed `)`. The proposal is drawn dimmed after
+//! the caret: `Tab` accepts all of it, `Ctrl+Right` or `Alt+]` accepts the next word, and
+//! `Esc` or typing something different dismisses it. It stays out of the way while the
+//! completion popup is open.
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -13,7 +15,7 @@ use eframe::egui::{self, Key, Modifiers, Ui, text::CCursor, text::CCursorRange};
 use super::theme::colors;
 
 /// Typing pause before a suggestion is computed.
-const DEBOUNCE: Duration = Duration::from_millis(280);
+const DEBOUNCE: Duration = Duration::from_millis(160);
 /// Lines scanned around the caret when looking for a matching line.
 const SCAN_LINES: usize = 4000;
 
@@ -63,11 +65,15 @@ impl Ghost {
             self.pressed = GhostKey::None;
             return;
         }
+        // `consume_key` ignores extra Shift: check it so Shift+Tab still outdents and
+        // Ctrl+Shift+Right still selects a word.
         self.pressed = ui.input_mut(|i| {
-            if i.consume_key(Modifiers::NONE, Key::Tab) {
+            let shift = i.modifiers.shift;
+            if !shift && i.consume_key(Modifiers::NONE, Key::Tab) {
                 GhostKey::AcceptAll
-            } else if i.consume_key(Modifiers::COMMAND, Key::ArrowRight)
-                || i.consume_key(Modifiers::ALT, Key::CloseBracket)
+            } else if !shift
+                && (i.consume_key(Modifiers::COMMAND, Key::ArrowRight)
+                    || i.consume_key(Modifiers::ALT, Key::CloseBracket))
             {
                 GhostKey::AcceptWord
             } else if i.consume_key(Modifiers::NONE, Key::Escape) {
@@ -120,12 +126,15 @@ impl Ghost {
             GhostKey::None => {}
         }
         let focused = output.response.has_focus();
-        if !focused || popup_open || has_selection || !at_line_end(text, cursor) {
+        let Some(tail) =
+            closing_tail(text, cursor).filter(|_| focused && !popup_open && !has_selection)
+        else {
             self.clear();
             return false;
-        }
+        };
+        let tail = tail.to_owned();
         if self.visible_for(path, cursor) {
-            paint(ui, output, cursor, &self.text);
+            paint(ui, output, cursor, &self.text, &tail);
             return false;
         }
         if self.at != cursor || self.path.as_deref() != Some(path) {
@@ -140,11 +149,13 @@ impl Ghost {
             return false;
         }
         self.edited = None;
-        if let Some(suggestion) = suggest(text, cursor) {
+        // With auto-closed pairs after the caret only the current word is completed, so a
+        // proposed line never duplicates the closers already there.
+        if let Some(suggestion) = suggest(text, cursor, tail.is_empty()) {
             self.path = Some(path.to_path_buf());
             self.at = cursor;
             self.text = suggestion;
-            paint(ui, output, cursor, &self.text);
+            paint(ui, output, cursor, &self.text, &tail);
         }
         false
     }
@@ -166,19 +177,70 @@ impl Ghost {
     }
 }
 
-fn paint(ui: &Ui, output: &egui::text_edit::TextEditOutput, cursor: usize, ghost: &str) {
+/// Draws the suggestion dimmed at the caret. The rest of the line (closing punctuation)
+/// is redrawn after it so the ghost reads as inserted text, and further lines of a block
+/// are shown on a panel over the lines below.
+fn paint(
+    ui: &Ui,
+    output: &egui::text_edit::TextEditOutput,
+    cursor: usize,
+    ghost: &str,
+    tail: &str,
+) {
     let caret = output
         .galley
         .pos_from_cursor(CCursor::new(cursor))
         .translate(output.galley_pos.to_vec2());
     let font = egui::TextStyle::Monospace.resolve(ui.style());
-    ui.painter().text(
-        caret.left_top(),
-        egui::Align2::LEFT_TOP,
-        ghost,
-        font,
-        colors().muted.gamma_multiply(0.85),
+    let painter = ui.painter();
+    let dim = colors().muted.gamma_multiply(0.9);
+    let mut lines = ghost.split('\n');
+    let first = lines.next().unwrap_or_default();
+    let first = painter.layout_no_wrap(first.to_owned(), font.clone(), dim);
+    if !tail.is_empty() {
+        let tail = painter.layout_no_wrap(tail.to_owned(), font.clone(), colors().secondary);
+        painter.rect_filled(
+            egui::Rect::from_min_size(
+                caret.left_top(),
+                egui::vec2(first.size().x + tail.size().x + 2.0, caret.height()),
+            ),
+            0,
+            colors().inset,
+        );
+        painter.galley(
+            egui::pos2(caret.left() + first.size().x, caret.top()),
+            tail,
+            colors().secondary,
+        );
+    }
+    painter.galley(caret.left_top(), first, dim);
+    let rest: Vec<&str> = lines.collect();
+    if rest.is_empty() {
+        return;
+    }
+    let line_height = caret.height();
+    let left = output.galley_pos.x;
+    let block = egui::Rect::from_min_max(
+        egui::pos2(left - 4.0, caret.bottom()),
+        egui::pos2(
+            ui.clip_rect().right() - 8.0,
+            caret.bottom() + rest.len() as f32 * line_height + 2.0,
+        ),
     );
+    painter.rect_filled(block, 4, colors().inset);
+    painter.rect_filled(
+        egui::Rect::from_min_size(block.left_top(), egui::vec2(2.0, block.height())),
+        1,
+        colors().accent.gamma_multiply(0.5),
+    );
+    for (i, line) in rest.iter().enumerate() {
+        let galley = painter.layout_no_wrap((*line).to_owned(), font.clone(), dim);
+        painter.galley(
+            egui::pos2(left, caret.bottom() + i as f32 * line_height),
+            galley,
+            dim,
+        );
+    }
 }
 
 fn move_caret(ui: &Ui, id: egui::Id, caret: usize) {
@@ -201,12 +263,14 @@ fn insert_at(text: &mut String, cursor: usize, inserted: &str) {
     text.insert_str(at, inserted);
 }
 
-/// Ghost text only appears where nothing follows the caret on its line.
-fn at_line_end(text: &str, cursor: usize) -> bool {
+/// What follows the caret on its line when it is only closing punctuation (often pairs
+/// the editor closed itself), trimmed; `None` when real code follows.
+fn closing_tail(text: &str, cursor: usize) -> Option<&str> {
     let rest = &text[byte_at(text, cursor)..];
-    rest.split('\n')
-        .next()
-        .is_none_or(|tail| tail.trim().is_empty())
+    let line = rest.split('\n').next().unwrap_or_default();
+    line.chars()
+        .all(|c| c.is_whitespace() || matches!(c, ')' | ']' | '}' | '"' | '\'' | '`' | ';' | ','))
+        .then(|| line.trim_end())
 }
 
 fn is_word(c: char) -> bool {
@@ -240,30 +304,58 @@ pub(super) fn next_word_len(text: &str) -> usize {
     n.max(1)
 }
 
-/// The rest of the current line from the nearest line that starts the same way, or else
-/// the rest of the current word from an identifier used elsewhere in the file.
-pub(super) fn suggest(text: &str, cursor: usize) -> Option<String> {
+/// The rest of the current line from the nearest line that starts the same way (with the
+/// block it opens, when it ends in a bracket), or else the rest of the current word from an
+/// identifier used elsewhere in the file. `whole_lines` false limits it to the word.
+pub(super) fn suggest(text: &str, cursor: usize, whole_lines: bool) -> Option<String> {
     let before = &text[..byte_at(text, cursor)];
     let line_start = before.rfind('\n').map_or(0, |i| i + 1);
     let typed = &before[line_start..];
     let prefix = typed.trim_start();
-    if prefix.chars().count() >= 3
-        && let Some(rest) = line_completion(text, line_start, prefix)
+    let indent = &typed[..typed.len() - prefix.len()];
+    if whole_lines
+        && prefix.chars().count() >= 3
+        && let Some(rest) = line_completion(text, line_start, prefix, indent)
     {
         return Some(rest);
     }
     word_completion(text, typed)
 }
 
-fn line_completion(text: &str, line_start: usize, prefix: &str) -> Option<String> {
-    let above = text[..line_start].lines().rev().take(SCAN_LINES);
-    let below = text[line_start..].lines().skip(1).take(SCAN_LINES);
-    above
-        .chain(below)
-        .map(str::trim_start)
-        .find(|line| line.len() > prefix.len() && line.starts_with(prefix))
-        .map(|line| line[prefix.len()..].trim_end().to_owned())
-        .filter(|rest| !rest.is_empty())
+/// Lines a multi-line suggestion may add after the completed one.
+const BLOCK_LINES: usize = 12;
+
+fn line_completion(text: &str, line_start: usize, prefix: &str, indent: &str) -> Option<String> {
+    let lines: Vec<&str> = text.split('\n').map(|l| l.trim_end_matches('\r')).collect();
+    let current = text[..line_start].matches('\n').count();
+    let above = (0..current).rev().take(SCAN_LINES);
+    let below = (current + 1..lines.len()).take(SCAN_LINES);
+    let (i, rest) = above.chain(below).find_map(|i| {
+        let trimmed = lines[i].trim_start();
+        let rest = trimmed.strip_prefix(prefix)?.trim_end();
+        (!rest.is_empty()).then_some((i, rest))
+    })?;
+    let mut out = rest.to_owned();
+    if rest.ends_with(['{', '(', '[']) {
+        // Bring the block this line opens, re-indented to the caret's line, when it closes
+        // within a few lines.
+        let base = lines[i].len() - lines[i].trim_start().len();
+        let mut block = String::new();
+        for line in lines.iter().skip(i + 1).take(BLOCK_LINES) {
+            block.push('\n');
+            if line.trim().is_empty() {
+                continue;
+            }
+            let own = line.len() - line.trim_start().len();
+            block.push_str(indent);
+            block.push_str(line[own.min(base)..].trim_end());
+            if own <= base {
+                out.push_str(&block);
+                break;
+            }
+        }
+    }
+    Some(out)
 }
 
 fn word_completion(text: &str, typed: &str) -> Option<String> {
@@ -292,17 +384,17 @@ mod tests {
     fn suggests_the_rest_of_a_similar_line_then_a_word() {
         let text = "let total = items.iter().sum();\nlet tot";
         assert_eq!(
-            suggest(text, text.chars().count()),
+            suggest(text, text.chars().count(), true),
             Some("al = items.iter().sum();".into())
         );
         let text = "fn render_frame() {}\nren";
         assert_eq!(
-            suggest(text, text.chars().count()),
+            suggest(text, text.chars().count(), true),
             Some("der_frame".into())
         );
         let text = "configuration\nconf";
         assert_eq!(
-            suggest(text, text.chars().count()),
+            suggest(text, text.chars().count(), true),
             Some("iguration".into())
         );
     }
@@ -325,9 +417,21 @@ mod tests {
     }
 
     #[test]
-    fn only_shows_at_the_end_of_a_line() {
-        assert!(at_line_end("abc\ndef", 3));
-        assert!(at_line_end("abc  ", 3));
-        assert!(!at_line_end("abc)", 3));
+    fn shows_before_closers_but_not_before_code() {
+        assert_eq!(closing_tail("abc\ndef", 3), Some(""));
+        assert_eq!(closing_tail("f(ab)", 4), Some(")"));
+        assert_eq!(closing_tail("f(ab);  ", 4), Some(");"));
+        assert_eq!(closing_tail("abc + d", 3), None);
+        let text = "call(conf)\nconfiguration";
+        assert_eq!(suggest(text, 9, false), Some("iguration".into()));
+    }
+
+    #[test]
+    fn suggests_the_block_a_matching_line_opens() {
+        let text = "fn a() {\n    if ready {\n        go();\n    }\n}\nfn b() {\n  if re";
+        assert_eq!(
+            suggest(text, text.chars().count(), true),
+            Some("ady {\n      go();\n  }".into())
+        );
     }
 }

@@ -1366,6 +1366,46 @@ mod tests {
     }
 
     #[test]
+    fn ghost_text_completes_a_line_with_tab() {
+        let folder = tempfile::tempdir().expect("temp dir");
+        let ctx = egui::Context::default();
+        let mut editor = Editor::new(&ctx, Some(folder.path().to_owned()), Preferences::default());
+        assert!(editor.create_file("main.rs"));
+        editor.documents[0].text = "let total = items.len();\nlet tota".into();
+        editor.focus_editor = true;
+        let screen = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1390.0, 860.0),
+        ));
+        let mut frame = |events: Vec<egui::Event>| {
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: screen,
+                    events,
+                    ..Default::default()
+                },
+                |ctx| editor.render(ctx),
+            );
+        };
+        frame(vec![]);
+        frame(vec![egui::Event::Text("l".into())]);
+        std::thread::sleep(std::time::Duration::from_millis(220));
+        frame(vec![]);
+        frame(vec![egui::Event::Key {
+            key: egui::Key::Tab,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        frame(vec![]);
+        assert_eq!(
+            editor.documents[0].text,
+            "let total = items.len();\nlet total = items.len();"
+        );
+    }
+
+    #[test]
     #[ignore = "opens a native Windows test window and captures its own rendered frames"]
     #[cfg(windows)]
     fn capture_native_smoke_frames() -> Result<(), Box<dyn std::error::Error>> {
