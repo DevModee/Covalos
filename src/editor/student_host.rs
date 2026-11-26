@@ -3,7 +3,9 @@
 //! the backdrop is the identity field (cobalt dither over black in OLED Dark).
 use super::Editor;
 use super::i18n::{Language, tr};
-use super::student::host::{CloudCredentials, StudentWorkspaceHost, TutorPoll, TutorTicket};
+use super::student::host::{
+    CloudCredentials, StudentWorkspaceHost, TutorAccount, TutorAccounts, TutorPoll, TutorTicket,
+};
 use crate::agents_runtime::{ClaudeModes, NewSession};
 use covalos_agents::permission::Preset;
 use eframe::egui;
@@ -19,8 +21,40 @@ fn same_file(a: &Path, b: &Path) -> bool {
 }
 
 impl StudentWorkspaceHost for EditorHost<'_> {
+    fn tutor_accounts(&mut self) -> TutorAccounts {
+        // Opening the runtime starts CLI detection and sign-in checks in the background.
+        if !self.editor.ensure_runtime(&self.ctx) {
+            return TutorAccounts::Missing;
+        }
+        let agents = &self.editor.hub.agents;
+        let Some(runtime) = agents.runtime.as_ref() else {
+            return TutorAccounts::Missing;
+        };
+        let mut ready: Vec<TutorAccount> = super::agent_chat::chat_accounts(runtime)
+            .into_iter()
+            .map(|a| TutorAccount {
+                id: a.id.as_str().to_owned(),
+                label: a.label,
+            })
+            .collect();
+        // The account picked in Agents goes first, so the tutor matches it by default.
+        if let super::agent_chat::Target::Account(chosen) = &agents.chat.target
+            && let Some(at) = ready.iter().position(|a| a.id == chosen.as_str())
+        {
+            ready[..=at].rotate_right(1);
+        }
+        if !ready.is_empty() {
+            TutorAccounts::Ready(ready)
+        } else if runtime.connections_settling() {
+            TutorAccounts::Checking
+        } else {
+            TutorAccounts::Missing
+        }
+    }
+
     fn ask_tutor(
         &mut self,
+        account: &str,
         conversation: Option<&str>,
         prompt: &str,
         root: &Path,
@@ -46,7 +80,8 @@ impl StudentWorkspaceHost for EditorHost<'_> {
             None => {
                 let accounts = super::agent_chat::chat_accounts(runtime);
                 let account = accounts
-                    .first()
+                    .iter()
+                    .find(|a| a.id.as_str() == account)
                     .ok_or_else(|| tr("Connect an AI in Agents to use the tutor.").to_owned())?;
                 // Read only: the tutor can look at the student's files but never write
                 // the exercise for them.
@@ -114,6 +149,11 @@ impl StudentWorkspaceHost for EditorHost<'_> {
         TutorPoll::Failed(error.unwrap_or_else(|| {
             tr("The tutor did not answer. Check the session in Agents.").to_owned()
         }))
+    }
+
+    fn open_agents(&mut self) {
+        self.editor.switch_mode(super::modes::Mode::Agents);
+        self.editor.open_providers();
     }
 
     fn open_exercise(&mut self, path: &Path) {
@@ -193,6 +233,10 @@ impl Editor {
         let mut student = std::mem::take(&mut self.student);
         let ctx = ui.ctx().clone();
         student.ui(ui, &mut EditorHost { editor: self, ctx });
+        // Agents may have been opened from the view (Connect an AI); they replace it.
+        if self.hub_open {
+            student.open = false;
+        }
         self.student = student;
     }
 }

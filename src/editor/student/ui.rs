@@ -3,7 +3,7 @@
 //! Everything outside this module goes through [`StudentWorkspaceHost`].
 use super::chart::{self, ChartAxis};
 use super::curriculum::{Lang, TrackId};
-use super::host::{StudentWorkspaceHost, TutorPoll, TutorTicket};
+use super::host::{StudentWorkspaceHost, TutorAccount, TutorAccounts, TutorPoll, TutorTicket};
 use super::pedagogy::{self, Coaching, Directive, Outcome, Phase, TurnContext, Tutor};
 use super::practice::{self, Check};
 use super::progress::{self, GradeRecord, Progress, SessionScore};
@@ -89,6 +89,16 @@ pub(crate) struct StudentMode {
     sync: Option<Receiver<Result<Progress, String>>>,
     synced_once: bool,
     status: Option<(bool, String)>,
+    /// Tutor account picked by the student, by account id.
+    tutor_account: Option<String>,
+    /// Prompts held while the AI accounts finish their sign-in check.
+    queued: Vec<Queued>,
+}
+
+struct Queued {
+    prompt: String,
+    root: PathBuf,
+    tip: bool,
 }
 
 impl StudentMode {
@@ -194,13 +204,90 @@ impl StudentMode {
         let Some(root) = self.workspace(track) else {
             return;
         };
-        match host.ask_tutor(self.conversation.as_deref(), &prompt, &root) {
+        self.dispatch(
+            host,
+            Queued {
+                prompt,
+                root,
+                tip: false,
+            },
+        );
+    }
+
+    /// The account the tutor runs on: the student's pick while it stays ready, else
+    /// the first ready one (the account chosen in Agents comes first).
+    fn pick_account(&mut self, ready: &[TutorAccount]) -> Option<String> {
+        let keep = self
+            .tutor_account
+            .as_ref()
+            .filter(|id| ready.iter().any(|a| &a.id == *id));
+        let id = keep
+            .cloned()
+            .or_else(|| ready.first().map(|a| a.id.clone()))?;
+        self.tutor_account = Some(id.clone());
+        Some(id)
+    }
+
+    /// Sends a prompt now, or keeps it until the AI accounts finish their sign-in check.
+    fn dispatch(&mut self, host: &mut dyn StudentWorkspaceHost, queued: Queued) {
+        let ready = match host.tutor_accounts() {
+            TutorAccounts::Ready(ready) => ready,
+            TutorAccounts::Checking => {
+                self.queued.push(queued);
+                return;
+            }
+            TutorAccounts::Missing => {
+                let text = tr("Connect an AI in Agents to use the tutor.").to_owned();
+                if queued.tip {
+                    self.tip.messages.push(Message {
+                        who: Who::Note,
+                        text,
+                    });
+                } else {
+                    self.note(text);
+                }
+                return;
+            }
+        };
+        let Some(account) = self.pick_account(&ready) else {
+            return;
+        };
+        let conversation = if queued.tip {
+            self.tip.conversation.clone()
+        } else {
+            self.conversation.clone()
+        };
+        match host.ask_tutor(
+            &account,
+            conversation.as_deref(),
+            &queued.prompt,
+            &queued.root,
+        ) {
+            Ok(ticket) if queued.tip => {
+                self.tip.conversation = Some(ticket.conversation.clone());
+                self.tip.pending = Some(ticket);
+            }
             Ok(ticket) => {
                 self.conversation = Some(ticket.conversation.clone());
                 self.pending = Some(ticket);
             }
+            Err(e) if queued.tip => self.tip.messages.push(Message {
+                who: Who::Note,
+                text: e,
+            }),
             Err(e) => self.note(format!("{} {e}", tr("The tutor is unavailable."))),
         }
+    }
+
+    /// Switches the tutor to another account; the next message starts a new session.
+    fn choose_account(&mut self, id: String, label: &str) {
+        if self.tutor_account.as_deref() == Some(id.as_str()) {
+            return;
+        }
+        self.tutor_account = Some(id);
+        self.conversation = None;
+        self.tip.conversation = None;
+        self.note(format!("{} {label}.", tr("The tutor now runs on")));
     }
 
     fn workspace(&mut self, track: TrackId) -> Option<PathBuf> {
@@ -452,16 +539,14 @@ impl StudentMode {
         if self.tip.conversation.is_none() {
             prompt = format!("{}\n{prompt}", pedagogy::system_prompt(self.coaching(host)));
         }
-        match host.ask_tutor(self.tip.conversation.as_deref(), &prompt, &root) {
-            Ok(ticket) => {
-                self.tip.conversation = Some(ticket.conversation.clone());
-                self.tip.pending = Some(ticket);
-            }
-            Err(e) => self.tip.messages.push(Message {
-                who: Who::Note,
-                text: e,
-            }),
-        }
+        self.dispatch(
+            host,
+            Queued {
+                prompt,
+                root,
+                tip: true,
+            },
+        );
     }
 
     /// Hides solution code before a reply reaches the screen.
@@ -473,6 +558,12 @@ impl StudentMode {
     }
 
     fn poll(&mut self, host: &mut dyn StudentWorkspaceHost) {
+        // Prompts waiting for a sign-in check go out as soon as an account is ready.
+        if !self.queued.is_empty() && host.tutor_accounts() != TutorAccounts::Checking {
+            for queued in std::mem::take(&mut self.queued) {
+                self.dispatch(host, queued);
+            }
+        }
         if let Some(ticket) = &self.pending {
             match host.tutor_reply(ticket) {
                 TutorPoll::Pending => {}
@@ -625,6 +716,7 @@ impl StudentMode {
         self.poll(host);
         self.maybe_sync(host, &ctx);
         let busy = self.pending.is_some()
+            || !self.queued.is_empty()
             || self.tip.pending.is_some()
             || self.run.is_some()
             || self.sync.is_some();
@@ -868,6 +960,13 @@ impl StudentMode {
                 }
                 if self.pending.is_some() {
                     dot_loader(ui, tr("Thinking"), LoaderPattern::Ring, colors().accent);
+                } else if self.queued.iter().any(|q| !q.tip) {
+                    dot_loader(
+                        ui,
+                        tr("Connecting to your AI"),
+                        LoaderPattern::Orbit,
+                        colors().accent,
+                    );
                 }
             });
     }
@@ -1066,6 +1165,9 @@ impl StudentMode {
             let mut switch = None;
             let mut send = false;
             let mut mic = false;
+            let mut account_choice = None;
+            let mut open_agents = false;
+            let accounts = host.tutor_accounts();
             ui.horizontal(|ui| {
                 let label = self.track().map_or(tr("Choose a track"), |t| tr(t.title()));
                 ui.menu_button(RichText::new(label).size(SMALL), |ui| {
@@ -1076,6 +1178,43 @@ impl StudentMode {
                         }
                     }
                 });
+                let muted = |text: String| RichText::new(text).size(SMALL).color(colors().muted);
+                match &accounts {
+                    TutorAccounts::Ready(ready) => {
+                        let current = self
+                            .tutor_account
+                            .as_ref()
+                            .and_then(|id| ready.iter().find(|a| &a.id == id))
+                            .or(ready.first());
+                        let name = current.map_or("", |a| a.label.as_str());
+                        let title = format!("{}: {name}", tr("Tutor"));
+                        if ready.len() > 1 {
+                            ui.menu_button(RichText::new(title).size(SMALL), |ui| {
+                                for account in ready {
+                                    let on = current.is_some_and(|c| c.id == account.id);
+                                    if ui.selectable_label(on, &account.label).clicked() {
+                                        account_choice =
+                                            Some((account.id.clone(), account.label.clone()));
+                                        ui.close();
+                                    }
+                                }
+                            });
+                        } else {
+                            ui.label(muted(title));
+                        }
+                    }
+                    TutorAccounts::Checking => {
+                        ui.label(muted(tr("Checking AI accounts").to_owned()));
+                    }
+                    TutorAccounts::Missing => {
+                        open_agents = ui
+                            .small_button(tr("Connect an AI"))
+                            .on_hover_text(tr(
+                                "Open Agents to sign in to Claude Code, Codex or Antigravity.",
+                            ))
+                            .clicked();
+                    }
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let can_send =
                         enabled && self.pending.is_none() && !self.draft.trim().is_empty();
@@ -1109,6 +1248,12 @@ impl StudentMode {
                     }
                 });
             });
+            if let Some((id, label)) = account_choice {
+                self.choose_account(id, &label);
+            }
+            if open_agents {
+                host.open_agents();
+            }
             if let Some(track) = switch {
                 self.start_track(track, host);
             }
@@ -1508,15 +1653,36 @@ mod tests {
         asked: RefCell<Vec<String>>,
         replies: Vec<String>,
         opened: Vec<PathBuf>,
+        /// `None` means two ready accounts, Claude Code first.
+        accounts: Option<TutorAccounts>,
+        /// Account id used for each prompt.
+        used: Vec<String>,
+        agents_opened: bool,
     }
 
     impl StudentWorkspaceHost for FakeHost {
+        fn tutor_accounts(&mut self) -> TutorAccounts {
+            self.accounts.clone().unwrap_or_else(|| {
+                TutorAccounts::Ready(vec![
+                    TutorAccount {
+                        id: "claude".into(),
+                        label: "Claude Code".into(),
+                    },
+                    TutorAccount {
+                        id: "codex".into(),
+                        label: "Codex".into(),
+                    },
+                ])
+            })
+        }
         fn ask_tutor(
             &mut self,
+            account: &str,
             conversation: Option<&str>,
             prompt: &str,
             _root: &Path,
         ) -> Result<TutorTicket, String> {
+            self.used.push(account.to_owned());
             self.asked.borrow_mut().push(prompt.to_owned());
             Ok(TutorTicket {
                 conversation: conversation.unwrap_or("c1").to_owned(),
@@ -1527,6 +1693,9 @@ mod tests {
             self.replies
                 .get(ticket.seen)
                 .map_or(TutorPoll::Pending, |r| TutorPoll::Reply(r.clone()))
+        }
+        fn open_agents(&mut self) {
+            self.agents_opened = true;
         }
         fn open_exercise(&mut self, path: &Path) {
             self.opened.push(path.to_owned());
@@ -1658,6 +1827,72 @@ mod tests {
                 .last()
                 .unwrap()
                 .contains("Decline kindly")
+        );
+    }
+
+    #[test]
+    fn prompts_wait_for_sign_in_checks_and_then_go_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut student = mode(dir.path());
+        let mut host = FakeHost {
+            accounts: Some(TutorAccounts::Checking),
+            replies: vec!["Hello".into()],
+            ..Default::default()
+        };
+        student.start_track(TrackId::Python, &mut host);
+        assert!(
+            host.asked.borrow().is_empty(),
+            "nothing is sent while checking"
+        );
+        assert_eq!(student.queued.len(), 1);
+        assert!(
+            student.messages.is_empty(),
+            "no error while accounts are checked"
+        );
+        host.accounts = None;
+        student.poll(&mut host);
+        assert!(student.queued.is_empty());
+        assert_eq!(host.used, vec!["claude"]);
+        // The same poll sends the prompt and reads the reply.
+        assert!(student.messages.iter().any(|m| m.text == "Hello"));
+    }
+
+    #[test]
+    fn no_connected_ai_explains_how_to_connect() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut student = mode(dir.path());
+        let mut host = FakeHost {
+            accounts: Some(TutorAccounts::Missing),
+            ..Default::default()
+        };
+        student.start_track(TrackId::Python, &mut host);
+        assert!(host.asked.borrow().is_empty());
+        assert!(student.messages[0].text.contains("Connect an AI"));
+    }
+
+    #[test]
+    fn switching_the_tutor_account_starts_a_new_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut student = mode(dir.path());
+        let mut host = FakeHost {
+            replies: vec!["q1".into(), "q2".into()],
+            ..Default::default()
+        };
+        student.start_track(TrackId::Python, &mut host);
+        student.poll(&mut host);
+        assert_eq!(student.conversation.as_deref(), Some("c1"));
+        student.choose_account("codex".into(), "Codex");
+        assert!(student.conversation.is_none());
+        student.draft = "why?".into();
+        student.send_student_message(&mut host);
+        assert_eq!(host.used, vec!["claude", "codex"]);
+        // A new session repeats the rules for the new model.
+        assert!(
+            host.asked
+                .borrow()
+                .last()
+                .unwrap()
+                .contains("Never write the solution")
         );
     }
 

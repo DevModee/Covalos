@@ -18,6 +18,22 @@ pub(crate) enum TutorPoll {
     Failed(String),
 }
 
+/// An AI account the tutor can run on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TutorAccount {
+    pub(crate) id: String,
+    pub(crate) label: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum TutorAccounts {
+    Ready(Vec<TutorAccount>),
+    /// Sign-in checks are still running; accounts may turn ready in a moment.
+    Checking,
+    /// Nothing connected.
+    Missing,
+}
+
 pub(crate) struct CloudCredentials {
     pub(crate) endpoint: Endpoint,
     pub(crate) access: String,
@@ -25,15 +41,20 @@ pub(crate) struct CloudCredentials {
 }
 
 pub(crate) trait StudentWorkspaceHost {
-    /// Sends `prompt` to the tutor, continuing `conversation` when given. `root` is the
-    /// student's workspace, which the tutor may read but never edit.
+    /// Accounts that can run the tutor now. Calling it early starts the sign-in checks.
+    fn tutor_accounts(&mut self) -> TutorAccounts;
+    /// Sends `prompt` to the tutor on `account`, continuing `conversation` when given.
+    /// `root` is the student's workspace, which the tutor may read but never edit.
     fn ask_tutor(
         &mut self,
+        account: &str,
         conversation: Option<&str>,
         prompt: &str,
         root: &Path,
     ) -> Result<TutorTicket, String>;
     fn tutor_reply(&self, ticket: &TutorTicket) -> TutorPoll;
+    /// Shows where the student signs in to an AI provider.
+    fn open_agents(&mut self);
     /// Opens the file in the host's code editor.
     fn open_exercise(&mut self, path: &Path);
     /// The editor's current text for the file, including unsaved edits.

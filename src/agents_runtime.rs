@@ -891,6 +891,20 @@ impl Runtime {
         self.connection.insert(id.clone(), state);
     }
 
+    /// Whether more accounts may still turn ready: CLI detection is running or an
+    /// installed, enabled account has not finished its sign-in check.
+    pub(crate) fn connections_settling(&self) -> bool {
+        self.detect_rx.is_some()
+            || self.profiles.accounts().iter().any(|a| {
+                a.enabled
+                    && self.program(&a.provider).is_some()
+                    && matches!(
+                        self.connection.get(&a.id),
+                        None | Some(Connection::Checking)
+                    )
+            })
+    }
+
     pub(crate) fn connection_ready(&self, id: &AccountId) -> bool {
         matches!(
             self.connection.get(id),
