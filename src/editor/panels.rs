@@ -61,6 +61,11 @@ impl Editor {
             self.hub_open = false;
             self.preferences.assistant_open = !self.preferences.assistant_open;
         }
+        for mode in super::modes::Mode::ALL {
+            if shortcut(super::modes::Mode::modifiers(), mode.key()) {
+                self.switch_mode(mode);
+            }
+        }
         if let Some((modifiers, key)) = parse_shortcut(&self.preferences.library_shortcut)
             && shortcut(modifiers, key)
         {
@@ -164,7 +169,7 @@ impl Editor {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
                 }
                 let left_width = if rect.width() > 1100.0 { 400.0 } else { 290.0 };
-                let right_width = if rect.width() > 1000.0 { 260.0 } else { 210.0 };
+                let right_width = if rect.width() > 1000.0 { 380.0 } else { 230.0 };
                 let left =
                     egui::Rect::from_min_size(rect.min, egui::vec2(left_width, rect.height()));
                 ui.scope_builder(
@@ -415,30 +420,10 @@ impl Editor {
                         ui.add_space(8.0);
                         // One destination for every provider: Agents. Codex, Claude and
                         // Gemini are providers inside it, not separate places.
-                        let agents = if rect.width() > 900.0 {
-                            ui.selectable_label(self.hub_open, tr("Agents"))
-                        } else {
-                            icon_button(ui, Icon::Hub, "Agents", self.hub_open)
-                        };
-                        #[cfg(test)]
-                        super::motion::record(ui, "Agents", agents.rect);
-                        if agents
-                            .on_hover_text(tr(
-                                "Agents — sessions, providers and the side chat (Ctrl+Shift+A)",
-                            ))
-                            .clicked()
+                        let compact = rect.width() <= 1000.0;
+                        if let Some(mode) = super::modes::segmented(ui, self.mode_state(), compact)
                         {
-                            self.hub_open = !self.hub_open;
-                            if self.hub_open {
-                                self.studio_open = false;
-                            }
-                        }
-                        if ui
-                            .selectable_label(self.guided.open, tr("Guided Mode"))
-                            .on_hover_text(tr("Open Guided Mode"))
-                            .clicked()
-                        {
-                            self.guided.open = !self.guided.open;
+                            self.switch_mode(mode);
                         }
                     },
                 );
