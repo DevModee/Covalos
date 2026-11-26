@@ -1587,6 +1587,14 @@ const SPANISH: &[(&str, &str)] = &[
     ),
     ("Guided Mode", "Modo Guiado"),
     ("Open in Guided Mode", "Abrir en Modo Guiado"),
+    ("Error", "Error"),
+    ("Warning", "Advertencia"),
+    ("Info", "Info"),
+    ("Hint", "Sugerencia"),
+    (
+        "Not installed in node_modules. Install it with:",
+        "No está instalado en node_modules. Instalalo con:",
+    ),
     (
         "Could not read a valid guided plan from that reply.",
         "No se pudo leer un plan guiado válido en esa respuesta.",

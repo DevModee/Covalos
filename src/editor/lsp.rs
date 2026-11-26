@@ -250,8 +250,21 @@ fn parse_diagnostics(list: &Value) -> Vec<Diagnostic> {
             severity: d["severity"].as_u64().unwrap_or(1) as u8,
             message: d["message"].as_str().unwrap_or_default().to_owned(),
             source: d["source"].as_str().unwrap_or_default().to_owned(),
+            code: match &d["code"] {
+                Value::String(code) => code.clone(),
+                Value::Number(code) => code.to_string(),
+                _ => String::new(),
+            },
+            unnecessary: tagged(d, 1),
+            deprecated: tagged(d, 2),
         })
         .collect()
+}
+
+fn tagged(diagnostic: &Value, tag: u64) -> bool {
+    diagnostic["tags"]
+        .as_array()
+        .is_some_and(|tags| tags.iter().any(|t| t.as_u64() == Some(tag)))
 }
 
 fn pos(v: &Value) -> (u32, u32) {
@@ -272,6 +285,78 @@ pub(super) struct Diagnostic {
     pub(super) severity: u8,
     pub(super) message: String,
     pub(super) source: String,
+    pub(super) code: String,
+    /// Unused code (diagnostic tag 1): faded instead of underlined.
+    pub(super) unnecessary: bool,
+    /// Deprecated API (diagnostic tag 2): struck through.
+    pub(super) deprecated: bool,
+}
+
+impl Diagnostic {
+    /// Hints are not problems: VS Code shows them as faded code, not in the Problems list.
+    pub(super) fn is_hint(&self) -> bool {
+        self.severity >= 4
+    }
+
+    /// The package a "Cannot find module" error names, when it is a bare import (not a
+    /// relative path) that `npm install` can add.
+    pub(super) fn missing_package(&self) -> Option<&str> {
+        let wanted = matches!(self.code.as_str(), "2307" | "2792" | "2882")
+            || self.message.starts_with("Cannot find module");
+        if !wanted {
+            return None;
+        }
+        let quoted = self.message.split('\'').nth(1)?;
+        if quoted.is_empty() || quoted.starts_with(['.', '/']) {
+            return None;
+        }
+        let mut parts = quoted.splitn(3, '/');
+        let first = parts.next()?;
+        let end = if first.starts_with('@') {
+            first.len() + 1 + parts.next()?.len()
+        } else {
+            first.len()
+        };
+        Some(&quoted[..end])
+    }
+}
+
+/// Char offsets of line starts, so LSP positions convert without rescanning the file.
+struct Lines<'a> {
+    text: &'a str,
+    /// (byte, char) offset of each line start.
+    starts: Vec<(usize, usize)>,
+}
+
+impl<'a> Lines<'a> {
+    fn new(text: &'a str) -> Self {
+        let mut starts = vec![(0, 0)];
+        let mut chars = 0;
+        for (byte, c) in text.char_indices() {
+            chars += 1;
+            if c == '\n' {
+                starts.push((byte + 1, chars));
+            }
+        }
+        Self { text, starts }
+    }
+
+    /// Char index of an LSP (line, UTF-16 column) position, clamped to the line.
+    fn index(&self, (line, col): (u32, u32)) -> usize {
+        let Some(&(byte, chars)) = self.starts.get(line as usize) else {
+            return self.text.chars().count();
+        };
+        let mut units = 0;
+        let mut n = 0;
+        for c in self.text[byte..].chars() {
+            if c == '\n' || units >= col {
+                break;
+            }
+            units += c.len_utf16() as u32;
+            n += 1;
+        }
+        chars + n
+    }
 }
 
 /// What a completion item is, shown as a short colored tag in the popup.
@@ -1628,25 +1713,31 @@ fn paint_diagnostics(
     else {
         return false;
     };
+    let lines = Lines::new(&doc.text);
     let origin = output.galley_pos.to_vec2();
+    let clip = ui.clip_rect();
     let pointer = ui.ctx().pointer_hover_pos();
-    for (n, diag) in list.iter().take(300).enumerate() {
-        let start = char_index(&doc.text, diag.start);
-        let mut end = char_index(&doc.text, diag.end).max(start + 1);
+    for (n, diag) in list.iter().take(500).enumerate() {
+        let start = lines.index(diag.start);
+        let mut end = lines.index(diag.end).max(start + 1);
         let a = output
             .galley
             .pos_from_cursor(CCursor::new(start))
             .translate(origin);
+        if a.bottom() < clip.top() || a.top() > clip.bottom() {
+            continue;
+        }
         let mut b = output
             .galley
             .pos_from_cursor(CCursor::new(end))
             .translate(origin);
         if (b.top() - a.top()).abs() > 1.0 {
-            // Multi-line range: underline the first line only.
+            // Multi-line range: mark the first line only.
             end = doc
                 .text
                 .chars()
                 .skip(start)
+                .take(4000)
                 .position(|c| c == '\n')
                 .map_or(end, |p| start + p);
             b = output
@@ -1654,24 +1745,44 @@ fn paint_diagnostics(
                 .pos_from_cursor(CCursor::new(end.max(start + 1)))
                 .translate(origin);
         }
-        let color = match diag.severity {
-            1 => colors().error,
-            2 => colors().warning,
-            _ => colors().accent,
-        };
-        let y = a.bottom() - 1.0;
         let (x0, x1) = (a.left(), b.left().max(a.left() + 6.0));
-        let mut points = Vec::new();
-        let mut x = x0;
-        let mut up = true;
-        while x <= x1 {
-            points.push(egui::pos2(x, if up { y - 1.5 } else { y + 0.5 }));
-            x += 2.5;
-            up = !up;
-        }
-        ui.painter()
-            .add(egui::Shape::line(points, egui::Stroke::new(1.2_f32, color)));
         let rect = egui::Rect::from_min_max(egui::pos2(x0, a.top()), egui::pos2(x1, a.bottom()));
+        let painter = ui.painter();
+        if diag.is_hint() && diag.unnecessary {
+            // Unused code reads dimmed, like VS Code, rather than underlined.
+            painter.rect_filled(rect, 0, colors().inset.gamma_multiply(0.55));
+        } else if diag.is_hint() {
+            for i in 0..3 {
+                painter.circle_filled(
+                    egui::pos2(x0 + 1.5 + i as f32 * 3.0, a.bottom() - 0.5),
+                    0.9,
+                    colors().muted,
+                );
+            }
+        } else {
+            let (color, width) = match diag.severity {
+                1 => (colors().error, 1.2_f32),
+                2 => (colors().warning, 1.2),
+                _ => (colors().accent.gamma_multiply(0.8), 1.0),
+            };
+            let y = a.bottom() - 1.0;
+            let mut points = Vec::new();
+            let mut x = x0;
+            let mut up = true;
+            while x <= x1 {
+                points.push(egui::pos2(x, if up { y - 1.5 } else { y + 0.5 }));
+                x += 2.5;
+                up = !up;
+            }
+            painter.add(egui::Shape::line(points, egui::Stroke::new(width, color)));
+        }
+        if diag.deprecated {
+            painter.hline(
+                x0..=x1,
+                rect.center().y,
+                egui::Stroke::new(1.0_f32, colors().muted),
+            );
+        }
         if pointer.is_some_and(|p| rect.contains(p)) {
             shown = true;
             egui::Tooltip::always_open(
@@ -1680,20 +1791,70 @@ fn paint_diagnostics(
                 id_for(n),
                 egui::PopupAnchor::Pointer,
             )
-            .show(|ui| {
-                ui.set_max_width(420.0);
-                ui.label(RichText::new(&diag.message).color(colors().text));
-                if !diag.source.is_empty() {
+            .show(|ui| diagnostic_card(ui, diag));
+        }
+    }
+    shown
+}
+
+/// Tooltip body for one diagnostic: severity and code, the message, and for a missing
+/// package the command that installs it.
+fn diagnostic_card(ui: &mut Ui, diag: &Diagnostic) {
+    let (label, color) = match diag.severity {
+        1 => ("Error", colors().error),
+        2 => ("Warning", colors().warning),
+        3 => ("Info", colors().accent),
+        _ => ("Hint", colors().muted),
+    };
+    egui::Frame::new()
+        .inner_margin(egui::Margin::symmetric(4, 3))
+        .show(ui, |ui| {
+            ui.set_max_width(440.0);
+            ui.spacing_mut().item_spacing.y = 6.0;
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                let (dot, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
+                ui.painter().circle_filled(dot.center(), 3.5, color);
+                ui.label(RichText::new(tr(label)).size(SMALL).strong().color(color));
+                let origin = match (diag.source.is_empty(), diag.code.is_empty()) {
+                    (false, false) => format!("{} {}", diag.source, diag.code),
+                    (false, true) => diag.source.clone(),
+                    (true, false) => diag.code.clone(),
+                    (true, true) => String::new(),
+                };
+                if !origin.is_empty() {
                     ui.label(
-                        RichText::new(&diag.source)
+                        RichText::new(origin)
+                            .monospace()
                             .size(SMALL)
                             .color(colors().muted),
                     );
                 }
             });
-        }
-    }
-    shown
+            ui.add(
+                egui::Label::new(RichText::new(&diag.message).size(BODY).color(colors().text))
+                    .wrap(),
+            );
+            if let Some(package) = diag.missing_package() {
+                ui.label(
+                    RichText::new(tr("Not installed in node_modules. Install it with:"))
+                        .size(SMALL)
+                        .color(colors().secondary),
+                );
+                egui::Frame::new()
+                    .fill(colors().inset)
+                    .corner_radius(4)
+                    .inner_margin(egui::Margin::symmetric(8, 4))
+                    .show(ui, |ui| {
+                        ui.label(
+                            RichText::new(format!("npm install {package}"))
+                                .monospace()
+                                .size(SMALL)
+                                .color(colors().text),
+                        );
+                    });
+            }
+        });
 }
 
 /// Type information under a resting pointer, from `textDocument/hover`.
@@ -1737,18 +1898,27 @@ fn hover(
         egui::PopupAnchor::Pointer,
     )
     .show(|ui| {
-        ui.set_max_width(520.0);
-        for (i, part) in text.split("\n---\n").enumerate() {
-            if i > 0 {
-                ui.separator();
-            }
-            ui.label(
-                RichText::new(part.trim())
-                    .monospace()
-                    .size(12.0)
-                    .color(colors().text),
-            );
-        }
+        egui::Frame::new()
+            .inner_margin(egui::Margin::symmetric(4, 3))
+            .show(ui, |ui| {
+                ui.set_max_width(520.0);
+                ui.spacing_mut().item_spacing.y = 6.0;
+                // The first part is the signature; the rest is documentation prose.
+                for (i, part) in text.split("\n---\n").enumerate() {
+                    if i > 0 {
+                        ui.separator();
+                    }
+                    let part = RichText::new(part.trim());
+                    ui.add(
+                        egui::Label::new(if i == 0 {
+                            part.monospace().size(12.5).color(colors().text)
+                        } else {
+                            part.size(BODY).color(colors().secondary)
+                        })
+                        .wrap(),
+                    );
+                }
+            });
     });
 }
 
@@ -1851,7 +2021,10 @@ impl super::Editor {
                 paths.sort();
                 let mut any = false;
                 for path in paths {
-                    let list = &self.lsp.diagnostics[path];
+                    let list: Vec<&Diagnostic> = self.lsp.diagnostics[path]
+                        .iter()
+                        .filter(|d| !d.is_hint())
+                        .collect();
                     if list.is_empty() {
                         continue;
                     }
@@ -1949,6 +2122,37 @@ mod tests {
         if cfg!(windows) {
             assert_eq!(path_from_uri(&u).unwrap(), path);
         }
+    }
+
+    #[test]
+    fn diagnostics_name_missing_packages_and_hints() {
+        let list = parse_diagnostics(&json!([
+            {"range": {"start": {"line": 2, "character": 27}, "end": {"line": 2, "character": 50}},
+             "severity": 1, "code": 2307, "source": "typescript",
+             "message": "Cannot find module '@supabase/supabase-js/dist' or its corresponding type declarations."},
+            {"range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 1}},
+             "severity": 1, "code": 2882,
+             "message": "Cannot find module or type declarations for side-effect import of 'expo-sqlite/localStorage/install'."},
+            {"range": {"start": {"line": 3, "character": 9}, "end": {"line": 3, "character": 17}},
+             "severity": 4, "code": 6133, "tags": [1],
+             "message": "'AppState' is declared but its value is never read."},
+            {"range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 1}},
+             "severity": 1, "code": 2307, "message": "Cannot find module './local' or its corresponding type declarations."}
+        ]));
+        assert_eq!(list[0].missing_package(), Some("@supabase/supabase-js"));
+        assert_eq!(list[1].missing_package(), Some("expo-sqlite"));
+        assert!(list[2].is_hint() && list[2].unnecessary);
+        assert_eq!(list[2].missing_package(), None);
+        assert_eq!(
+            list[3].missing_package(),
+            None,
+            "relative imports are not packages"
+        );
+        let text = "ab\nc😀d\n";
+        let lines = Lines::new(text);
+        assert_eq!(lines.index((1, 3)), char_index(text, (1, 3)));
+        assert_eq!(lines.index((1, 99)), 6, "clamped to the line end");
+        assert_eq!(lines.index((9, 0)), text.chars().count());
     }
 
     #[test]
