@@ -97,6 +97,7 @@ impl Drop for SearchJob {
 pub struct Editor {
     root: Option<PathBuf>,
     directories: HashMap<PathBuf, DirectoryLoad>,
+    directory_mtimes: HashMap<PathBuf, Option<std::time::SystemTime>>,
     documents: Vec<Document>,
     active: Option<usize>,
     focus_editor: bool,
@@ -205,6 +206,7 @@ impl Editor {
         let mut editor = Self {
             root: None,
             directories: HashMap::new(),
+            directory_mtimes: HashMap::new(),
             documents: Vec::new(),
             active: None,
             focus_editor: false,
@@ -837,6 +839,31 @@ impl Editor {
         }
         let open: Vec<PathBuf> = self.documents.iter().map(|d| d.path.clone()).collect();
         self.disk_conflicts.retain(|p| open.contains(p));
+        self.refresh_changed_directories();
+    }
+
+    /// Invalidates cached explorer folders whose directory mtime changed on disk.
+    fn refresh_changed_directories(&mut self) {
+        self.directory_mtimes
+            .retain(|path, _| self.directories.contains_key(path));
+        let mut stale = Vec::new();
+        for (path, load) in &self.directories {
+            if !matches!(load, DirectoryLoad::Ready(_)) {
+                continue;
+            }
+            let current = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+            if let Some(prev) = self.directory_mtimes.get(path) {
+                if *prev != current {
+                    stale.push(path.clone());
+                }
+            } else {
+                self.directory_mtimes.insert(path.clone(), current);
+            }
+        }
+        for path in stale {
+            self.directories.remove(&path);
+            self.directory_mtimes.remove(&path);
+        }
     }
 
     fn poll(&mut self) {

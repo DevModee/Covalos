@@ -81,7 +81,7 @@ impl Default for GuidedPreferences {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum StepAction {
     #[default]
@@ -89,6 +89,18 @@ pub(super) enum StepAction {
     WriteBlock,
     InsertImport,
     AppendBlock,
+}
+
+impl<'de> Deserialize<'de> for StepAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        Ok(match raw.trim().to_ascii_lowercase().as_str() {
+            "create_file" | "create" | "new_file" => Self::CreateFile,
+            "insert_import" | "import" => Self::InsertImport,
+            "append_block" | "append" => Self::AppendBlock,
+            _ => Self::WriteBlock,
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -294,6 +306,7 @@ impl GuidedController {
         };
         session.skip_blank_lines();
         self.session = Some(session);
+        self.watching_session = None;
         self.open = true;
         self.hint = None;
         self.save_to_disk(workspace);
@@ -1060,6 +1073,7 @@ impl super::Editor {
     /// active document buffer with the current lyric line.
     pub(super) fn tick_guided(&mut self) {
         if let Some(watch_id) = self.guided.watching_session.clone() {
+            let mut finished_without_plan = false;
             let found = self.hub.agents.runtime.as_ref().and_then(|rt| {
                 let session = rt
                     .sessions
@@ -1069,13 +1083,17 @@ impl super::Editor {
                     return None;
                 }
                 let flow = self.preferences.guided.flow_order;
-                session
+                let plan = session
                     .meta
                     .log
                     .iter()
                     .rev()
                     .filter(|l| l.kind == "agent")
-                    .find_map(|l| extract_plan_from_text(&l.text, flow))
+                    .find_map(|l| extract_plan_from_text(&l.text, flow));
+                if plan.is_none() {
+                    finished_without_plan = true;
+                }
+                plan
             });
             if let Some(plan) = found {
                 let first_path = plan.steps.first().map(|s| s.path.clone());
@@ -1084,6 +1102,8 @@ impl super::Editor {
                 if let Some(path) = first_path {
                     self.open_guided_file(&path);
                 }
+            } else if finished_without_plan {
+                self.guided.watching_session = None;
             }
         }
 
@@ -1233,14 +1253,22 @@ impl super::Editor {
             });
         } else {
             let (anchor, pivot) = self.guided_anchor(ctx);
+            let screen = ctx.content_rect();
+            let safe_rect = egui::Rect::from_min_max(
+                egui::pos2(screen.left() + 8.0, screen.top() + super::theme::CHROME_HEIGHT + 8.0),
+                egui::pos2(screen.right() - 8.0, screen.bottom() - super::theme::STATUS_HEIGHT - 8.0),
+            );
+            let max_h = (safe_rect.height() - 48.0).max(220.0);
             egui::Window::new(tr("Guided Mode"))
                 .id(Id::new("covalos-guided-lyrics"))
                 .open(&mut open)
                 .resizable(true)
                 .collapsible(true)
                 .constrain(true)
+                .constrain_to(safe_rect)
                 .default_width(500.0)
                 .min_width(360.0)
+                .max_height(max_h)
                 .pivot(pivot)
                 .default_pos(anchor)
                 .frame(
@@ -1252,7 +1280,12 @@ impl super::Editor {
                         .shadow(super::theme::floating_shadow(super::theme::active(), 28)),
                 )
                 .show(ctx, |ui| {
-                    show_contents(ui, &mut draft, &mut actions, &mut launch_prompt);
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, true])
+                        .max_height(max_h)
+                        .show(ui, |ui| {
+                            show_contents(ui, &mut draft, &mut actions, &mut launch_prompt);
+                        });
                 });
         }
         self.guided.prompt_draft = draft;

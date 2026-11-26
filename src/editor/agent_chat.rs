@@ -1287,12 +1287,19 @@ impl Editor {
                 }
                 Action::OpenGuided(reply_text) => {
                     let flow = self.preferences.guided.flow_order;
+                    self.guided.watching_session = None;
                     if let Some(plan) = super::guided::extract_plan_from_text(&reply_text, flow) {
                         let first = plan.steps.first().map(|s| s.path.clone());
                         self.guided.load_plan(plan, self.root.as_deref());
                         if let Some(path) = first {
                             self.open_guided_file(&path);
                         }
+                    } else {
+                        self.guided.open = true;
+                        self.notice = Some((
+                            true,
+                            tr("Could not read a valid guided plan from that reply.").to_owned(),
+                        ));
                     }
                 }
                 Action::Objective(order) => {
