@@ -4,6 +4,39 @@ Notable changes per published build. Versions follow the internal build number i
 `Cargo.toml` (see [`docs/RELEASE.md`](docs/RELEASE.md)); the public name is "Beta" plus that
 number. Builds before 0.8.4 are described only in the git history.
 
+## [0.8.9] - 2026-11-26
+
+### Added
+
+- Student Mode: lessons for Python (seven days), TypeScript and SQL with a tutor that never
+  writes the solution, a three-step hint ladder, a smaller bridge exercise after two scores
+  under 70, and a short review of earlier topics when a session starts.
+- Run & Grade runs real tests on the student's code and scores it from 0 to 100
+  (correctness, autonomy, clarity). Branch names, commit messages, project layout and
+  English names are checked too, and those checks can be turned off.
+- Student progress (streak, lessons, review queue) is saved locally first and synced to the
+  COVALOS account when signed in. Exercise code and chat are never uploaded.
+- Guided, Agents and Student share one switcher in the top bar (Ctrl+Shift+G, H, L).
+- Automatic updates: COVALOS checks GitHub Releases at startup, downloads the installer for
+  this system, verifies its SHA-256 and restarts into the new version on Windows.
+- Optional "Keep running in the tray" setting, so closing the window keeps the phone bridge
+  connected.
+
+### Changed
+
+- Busy indicators use a dot-matrix loader instead of the generic spinner.
+- OLED Dark is true black with a cobalt dither at the top.
+- COVALOS account settings were redesigned and use the hosted endpoint by default.
+- The Guided Mode header, line notes and typo feedback were redesigned.
+- Completions show kinds and signatures; ghost text appears before closing brackets.
+
+### Fixed
+
+- Agent chat labels showed double-encoded separators.
+- Ctrl+X reached the editor instead of the terminal.
+- Closing a terminal tab switched away from the active terminal.
+- Realtime join replies without `join_ref` were rejected.
+
 ## [0.8.8] - 2026-11-25
 
 ### Added
