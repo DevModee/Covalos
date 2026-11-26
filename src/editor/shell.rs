@@ -1808,11 +1808,13 @@ impl Editor {
                                                 &self.preferences.library_shortcut,
                                             )
                                             .is_some();
-                                            ui.add(
+                                            text_field(
+                                                ui,
+                                                "library-shortcut",
                                                 egui::TextEdit::singleline(
                                                     &mut self.preferences.library_shortcut,
                                                 )
-                                                .desired_width(120.0)
+                                                .desired_width(110.0)
                                                 .text_color(if valid {
                                                     colors().text
                                                 } else {
@@ -2390,13 +2392,15 @@ impl Editor {
                                                 == Some(&acc.id)
                                             {
                                                 ui.horizontal(|ui| {
-                                                    ui.add(
+                                                    text_field(
+                                                        ui,
+                                                        ("api-key", &acc.id),
                                                         TextEdit::singleline(
                                                             &mut self.hub.agents.secret,
                                                         )
                                                         .password(true)
                                                         .hint_text(tr("Paste API key"))
-                                                        .desired_width(260.0),
+                                                        .desired_width(240.0),
                                                     );
                                                     if ui.add(primary(tr("Save"))).clicked() {
                                                         let k = std::mem::take(
@@ -2444,10 +2448,12 @@ impl Editor {
                                         .wrap(),
                                     );
                                     ui.add_space(6.0);
-                                    ui.add(
+                                    text_field(
+                                        ui,
+                                        "agent-rules",
                                         TextEdit::multiline(&mut rules_draft)
                                             .hint_text(tr("Write strict rules for all AI models, Agent Hub, and Luma…"))
-                                            .desired_rows(5)
+                                            .desired_rows(6)
                                             .desired_width(f32::INFINITY)
                                             .char_limit(24_000),
                                     );

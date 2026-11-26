@@ -602,6 +602,33 @@ pub(super) fn primary(text: &str) -> egui::Button<'_> {
         .corner_radius(CONTROL_RADIUS)
 }
 
+/// A text input with room to breathe: inset fill, 10x8 padding, a quiet 1px border that
+/// eases to the accent while focused. The caller configures `edit` (hint, rows, width,
+/// limits); the field draws the frame, so `edit` should not draw its own.
+pub(super) fn text_field(
+    ui: &mut egui::Ui,
+    salt: impl std::hash::Hash,
+    edit: egui::TextEdit<'_>,
+) -> egui::Response {
+    let id = ui.make_persistent_id(salt);
+    let focused = ui.memory(|m| m.has_focus(id));
+    let progress = super::motion::state(ui, id.with("focus-ring"), focused, super::motion::CONTROL);
+    let stroke = super::motion::blend(
+        colors().border,
+        colors().accent.gamma_multiply(0.75),
+        progress,
+    );
+    Frame::new()
+        .fill(colors().inset)
+        .stroke(Stroke::new(1.0_f32, stroke))
+        .corner_radius(CONTROL_RADIUS)
+        .inner_margin(Margin::symmetric(10, 8))
+        .show(ui, |ui| {
+            ui.add(edit.id(id).frame(false).margin(Margin::ZERO))
+        })
+        .inner
+}
+
 pub(super) fn search_field(
     ui: &mut egui::Ui,
     salt: &str,
