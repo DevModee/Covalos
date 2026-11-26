@@ -24,6 +24,8 @@ use std::{
 
 pub(crate) const URL_ENV: &str = "COVALOS_SUPABASE_URL";
 pub(crate) const ANON_KEY_ENV: &str = "COVALOS_SUPABASE_ANON_KEY";
+const DEFAULT_SUPABASE_URL: &str = "https://zyyajmnvbvqnvetnqyrk.supabase.co";
+const DEFAULT_SUPABASE_ANON_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp5eWFqbW52YnZxbnZldG5xeXJrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTU0NzY4MzQsImV4cCI6MjExMTA1MjgzNH0.D9oIoB42VanZeL1R--nliZluasrSDHVcQkhhKMfTRSg";
 const MAX_RESPONSE: usize = 1024 * 1024;
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -33,24 +35,22 @@ const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(300);
 pub(crate) struct Endpoint {
     pub url: String,
     pub anon_key: String,
-    /// "settings" or "environment", shown in Settings.
+    /// "settings", "environment", or "covalos", shown in Settings.
     pub source: &'static str,
 }
 
 impl Endpoint {
-    /// Settings win when filled in; otherwise the environment variables.
+    /// Settings win when filled in, then environment variables, then the hosted Covalos project.
     pub(crate) fn resolve(url: &str, anon_key: &str) -> Result<Self, String> {
         if !url.trim().is_empty() {
             return Self::from_parts(url, anon_key, "settings");
         }
-        let url = std::env::var(URL_ENV).unwrap_or_default();
-        let key = std::env::var(ANON_KEY_ENV).unwrap_or_default();
-        if url.trim().is_empty() {
-            return Err(format!(
-                "Set {URL_ENV} and {ANON_KEY_ENV}, or enter a server in Settings."
-            ));
+        let env_url = std::env::var(URL_ENV).unwrap_or_default();
+        let env_key = std::env::var(ANON_KEY_ENV).unwrap_or_default();
+        if !env_url.trim().is_empty() {
+            return Self::from_parts(&env_url, &env_key, "environment");
         }
-        Self::from_parts(&url, &key, "environment")
+        Self::from_parts(DEFAULT_SUPABASE_URL, DEFAULT_SUPABASE_ANON_KEY, "covalos")
     }
 
     fn from_parts(url: &str, anon_key: &str, source: &'static str) -> Result<Self, String> {

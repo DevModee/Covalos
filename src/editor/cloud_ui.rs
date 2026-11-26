@@ -5,7 +5,7 @@ use covalos_agents::{
     credentials::{CredentialStore, Secret},
     permission::Action,
 };
-use eframe::egui::{self, RichText, TextEdit, Ui};
+use eframe::egui::{self, Frame, Margin, RichText, Ui};
 use serde_json::{Value, json};
 use std::{
     sync::mpsc::{self, Receiver, Sender},
@@ -640,60 +640,58 @@ impl Editor {
             ))
             .wrap(),
         );
-        ui.add_space(10.0);
-        self.cloud_account_row(ui, &ctx, endpoint.is_ok());
-        if let Some((error, message)) = &self.cloud.status {
-            let color = if *error {
-                colors().error
-            } else {
-                colors().muted
-            };
-            ui.add(egui::Label::new(RichText::new(message).size(SMALL).color(color)).wrap());
-            ui.add_space(8.0);
-        }
+        ui.add_space(12.0);
+        Frame::new()
+            .fill(colors().elevated)
+            .stroke(egui::Stroke::new(1.0_f32, colors().border))
+            .corner_radius(10)
+            .inner_margin(Margin::same(12))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                self.cloud_account_row(ui, &ctx, endpoint.is_ok());
+                if let Some((error, message)) = &self.cloud.status {
+                    ui.add_space(6.0);
+                    let color = if *error {
+                        colors().error
+                    } else {
+                        colors().muted
+                    };
+                    ui.add(egui::Label::new(RichText::new(message).size(SMALL).color(color)).wrap());
+                }
+            });
         if !cloud::store_is_persistent() {
+            ui.add_space(8.0);
             ui.add(
                 egui::Label::new(muted(
                     "This system has no supported credential store, so you stay signed in only until COVALOS closes.",
                 ))
                 .wrap(),
             );
-            ui.add_space(8.0);
         }
-        self.cloud_sync_settings(ui, &ctx, signed_in);
-        self.cloud_remote_settings(ui, signed_in);
-        ui.collapsing(tr("Server"), |ui| {
-            match &endpoint {
-                Ok(endpoint) => ui.label(muted(trf(
-                    "Using {host} from {source}.",
-                    &[
-                        ("host", endpoint.host().to_owned()),
-                        ("source", tr(endpoint.source).to_owned()),
-                    ],
-                ))),
-                Err(error) => ui.label(muted(error.clone())),
-            };
-            ui.add_space(4.0);
-            let locked = signed_in || self.cloud.sign_in.is_some();
-            let cloud = &mut self.preferences.cloud;
-            ui.add_enabled_ui(!locked, |ui| {
-                ui.add(
-                    TextEdit::singleline(&mut cloud.server_url)
-                        .hint_text(tr("Server address, empty for COVALOS_SUPABASE_URL"))
-                        .desired_width(f32::INFINITY)
-                        .char_limit(200),
-                );
-                ui.add(
-                    TextEdit::singleline(&mut cloud.anon_key)
-                        .hint_text(tr("Public anon key"))
-                        .desired_width(f32::INFINITY)
-                        .char_limit(400),
-                );
+        ui.add_space(12.0);
+        Frame::new()
+            .fill(colors().elevated)
+            .stroke(egui::Stroke::new(1.0_f32, colors().border))
+            .corner_radius(10)
+            .inner_margin(Margin::same(12))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                self.cloud_sync_settings(ui, &ctx, signed_in);
             });
-            if locked {
-                ui.label(muted("Sign out to change the server."));
-            }
-        });
+        ui.add_space(12.0);
+        Frame::new()
+            .fill(colors().elevated)
+            .stroke(egui::Stroke::new(1.0_f32, colors().border))
+            .corner_radius(10)
+            .inner_margin(Margin::same(12))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                self.cloud_remote_settings(ui, signed_in);
+                ui.add_space(4.0);
+                if ui.link(tr("Download the phone app")).clicked() {
+                    ctx.open_url(egui::OpenUrl::new_tab("https://www.covalos.com/#download"));
+                }
+            });
     }
 
     fn cloud_account_row(&mut self, ui: &mut Ui, ctx: &egui::Context, configured: bool) {

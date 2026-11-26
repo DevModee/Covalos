@@ -1969,6 +1969,7 @@ const SPANISH: &[(&str, &str)] = &[
     ),
     ("Sign in to connect.", "Iniciá sesión para conectar."),
     ("Connecting…", "Conectando…"),
+    ("Download the phone app", "Descargar la app móvil"),
     ("Server", "Servidor"),
     (
         "Using {host} from {source}.",
