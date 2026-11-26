@@ -1242,7 +1242,8 @@ impl Editor {
                             .marks(ui.ctx(), self.root.as_deref(), &doc.path, &doc.text);
                     let mut shapes = decorate(ui, &output, gutter, &doc.text, self.cursor, marks);
                     // Guided Learning Mode: translucent bracket-colored block hover + explanation card
-                    if self.guided.session.is_some()
+                    if self.guided.open
+                        && self.guided.session.is_some()
                         && self.preferences.guided.learn_hover
                         && let Some(hover_pos) = output.response.hover_pos()
                     {

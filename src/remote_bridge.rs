@@ -366,12 +366,9 @@ fn parse_inbound(text: &str, topic: &str) -> Option<Inbound> {
         return None;
     }
     match value["event"].as_str()? {
-        "phx_reply" if value["payload"]["status"] == "ok" => {
-            // Replies to pushes other than the join carry no join_ref.
-            (value["ref"] == value["join_ref"]).then(|| Inbound::Joined {
-                reference: value["ref"].as_str().unwrap_or_default().to_owned(),
-            })
-        }
+        "phx_reply" if value["payload"]["status"] == "ok" => Some(Inbound::Joined {
+            reference: value["ref"].as_str().unwrap_or_default().to_owned(),
+        }),
         "phx_reply" => Some(Inbound::Refused {
             reason: refusal(&value["payload"]["response"]),
         }),
@@ -501,6 +498,15 @@ mod tests {
         .to_string();
         assert_eq!(
             parse_inbound(&ok, &topic),
+            Some(Inbound::Joined {
+                reference: "1".into()
+            })
+        );
+        let ok_v1 = json!({"topic": topic, "event": "phx_reply",
+            "payload": {"status": "ok", "response": {}}, "ref": "1", "join_ref": null})
+        .to_string();
+        assert_eq!(
+            parse_inbound(&ok_v1, &topic),
             Some(Inbound::Joined {
                 reference: "1".into()
             })
