@@ -34,6 +34,54 @@ create policy "own config" on public.editor_configs
 
 `payload` holds theme, syntax colors, language, fonts, density, zoom, motion, pinned and favorite chats, `agent-rules.md` and skills. COVALOS never uploads workspace paths, recent folders, notes, tasks, open tabs, provider accounts or API keys. If agent rules or a skill look like they contain a secret, COVALOS leaves them out of the upload.
 
+## Student Mode progress
+
+Student Mode saves progress to `student/progress.json` in the COVALOS config folder first, and merges it with these tables when an account is signed in: lessons keep the best score, the most attempts and the most advanced status; profile fields come from the newer copy. Only metrics, lesson state and review cards are uploaded. Exercise code, file paths, chat and the per-session score history stay on the computer.
+
+```sql
+create table public.student_profiles (
+  user_id uuid primary key references auth.users on delete cascade,
+  active_track text,
+  streak_days int not null default 0,
+  longest_streak int not null default 0,
+  last_study_date date,
+  daily_goal_minutes int not null default 20,
+  xp_total int not null default 0,
+  updated_at timestamptz not null default now()
+);
+create table public.student_lesson_progress (
+  user_id uuid not null references auth.users on delete cascade,
+  track_id text not null,
+  lesson_id text not null,
+  status text not null check (status in ('locked', 'in_progress', 'completed')),
+  best_score smallint not null default 0 check (best_score between 0 and 100),
+  attempts int not null default 0,
+  hints_used int not null default 0,
+  completed_at date,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, track_id, lesson_id)
+);
+create table public.student_review_queue (
+  user_id uuid not null references auth.users on delete cascade,
+  track_id text not null,
+  lesson_id text not null,
+  concept text not null,
+  next_review_at date not null,
+  interval_days int not null default 1,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, track_id, lesson_id)
+);
+alter table public.student_profiles enable row level security;
+alter table public.student_lesson_progress enable row level security;
+alter table public.student_review_queue enable row level security;
+create policy "own profile" on public.student_profiles
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "own lessons" on public.student_lesson_progress
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "own reviews" on public.student_review_queue
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+```
+
 ## Phone bridge
 
 COVALOS joins the private Realtime channel `covalos-remote:<user id>`. Limit it to its owner:
