@@ -3645,9 +3645,7 @@ input.on('line',line=>{
 
     #[test]
     fn signed_out_status_is_recognized() {
-        assert!(signed_out(
-            "Login: Expired — log in again · Not logged in."
-        ));
+        assert!(signed_out("Login: Expired — log in again · Not logged in."));
         assert!(!signed_out("Logged in using ChatGPT"));
     }
 
