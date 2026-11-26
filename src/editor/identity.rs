@@ -425,8 +425,14 @@ impl Identity {
                     let i0 = mesh.vertices.len() as u32;
                     mesh.colored_vertex(rect.left_top(), clear);
                     mesh.colored_vertex(rect.right_top(), clear);
-                    mesh.colored_vertex(egui::pos2(rect.left(), mid_y), Color32::from_rgba_unmultiplied(0, 0, 0, 170));
-                    mesh.colored_vertex(egui::pos2(rect.right(), mid_y), Color32::from_rgba_unmultiplied(0, 0, 0, 170));
+                    mesh.colored_vertex(
+                        egui::pos2(rect.left(), mid_y),
+                        Color32::from_rgba_unmultiplied(0, 0, 0, 170),
+                    );
+                    mesh.colored_vertex(
+                        egui::pos2(rect.right(), mid_y),
+                        Color32::from_rgba_unmultiplied(0, 0, 0, 170),
+                    );
                     mesh.colored_vertex(rect.left_bottom(), solid);
                     mesh.colored_vertex(rect.right_bottom(), solid);
                     mesh.add_triangle(i0, i0 + 1, i0 + 2);
