@@ -71,12 +71,24 @@ fn server_command(lang: Lang, root: &Path) -> Option<Command> {
         c.arg(script);
         return Some(c);
     }
-    if lang == Lang::Ts
-        && let Some(tsc) = native_typescript(root)
-    {
-        let mut c = Command::new(tsc);
-        c.args(["--lsp", "--stdio"]);
-        return Some(c);
+    let mut path_dirs: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).collect())
+        .unwrap_or_default();
+    if lang == Lang::Ts {
+        // The project's TypeScript 7+, or with no TypeScript in the project a global one.
+        let local = root.join("node_modules");
+        let tsc = if local.join("typescript").is_dir() {
+            native_typescript(&local, &local.join(".bin"))
+        } else {
+            path_dirs.iter().find_map(|bin| {
+                global_modules(bin).and_then(|modules| native_typescript(&modules, bin))
+            })
+        };
+        if let Some(tsc) = tsc {
+            let mut c = Command::new(tsc);
+            c.args(["--lsp", "--stdio"]);
+            return Some(c);
+        }
     }
     let name = lang.server();
     let names: Vec<String> = if cfg!(windows) {
@@ -85,9 +97,7 @@ fn server_command(lang: Lang, root: &Path) -> Option<Command> {
         vec![name.to_owned()]
     };
     let mut dirs = vec![root.join("node_modules").join(".bin")];
-    if let Some(path) = std::env::var_os("PATH") {
-        dirs.extend(std::env::split_paths(&path));
-    }
+    dirs.append(&mut path_dirs);
     let program = dirs
         .iter()
         .flat_map(|d| names.iter().map(move |n| d.join(n)))
@@ -97,19 +107,47 @@ fn server_command(lang: Lang, root: &Path) -> Option<Command> {
     Some(c)
 }
 
-/// The project's `tsc` when its TypeScript is 7 or newer (the native
-/// compiler, which has no tsserver.js but serves LSP itself).
-fn native_typescript(root: &Path) -> Option<PathBuf> {
-    let manifest = root
-        .join("node_modules")
-        .join("typescript")
-        .join("package.json");
+/// The global `node_modules` that belongs to an npm bin folder (`%APPDATA%/npm` on
+/// Windows, `<prefix>/bin` elsewhere).
+fn global_modules(bin: &Path) -> Option<PathBuf> {
+    [
+        bin.join("node_modules"),
+        bin.join("..").join("lib").join("node_modules"),
+    ]
+    .into_iter()
+    .find(|m| m.join("typescript").join("package.json").is_file())
+}
+
+fn typescript_major(modules: &Path) -> Option<u32> {
+    let manifest = modules.join("typescript").join("package.json");
     let json: Value = serde_json::from_slice(&std::fs::read(manifest).ok()?).ok()?;
-    let major: u32 = json["version"].as_str()?.split('.').next()?.parse().ok()?;
-    if major < 7 {
+    json["version"].as_str()?.split('.').next()?.parse().ok()
+}
+
+/// Options for `initialize`. typescript-language-server refuses to start without a
+/// TypeScript in the workspace; outside an npm project it gets the one installed globally
+/// next to it (`npm i -g typescript-language-server typescript`).
+fn init_options(lang: Lang, root: &Path, command: &Command) -> Value {
+    if lang != Lang::Ts || root.join("node_modules").join("typescript").is_dir() {
+        return json!({});
+    }
+    Path::new(command.get_program())
+        .parent()
+        .and_then(global_modules)
+        .map(|modules| modules.join("typescript").join("lib").join("tsserver.js"))
+        .filter(|tsserver| tsserver.is_file())
+        .map_or_else(
+            || json!({}),
+            |tsserver| json!({"tsserver": {"path": tsserver.to_string_lossy()}}),
+        )
+}
+
+/// `tsc` from `bin` when the TypeScript in `modules` is 7 or newer (the native compiler,
+/// which has no tsserver.js but serves LSP itself).
+fn native_typescript(modules: &Path, bin: &Path) -> Option<PathBuf> {
+    if typescript_major(modules)? < 7 {
         return None;
     }
-    let bin = root.join("node_modules").join(".bin");
     [bin.join("tsc.cmd"), bin.join("tsc.exe"), bin.join("tsc")]
         .into_iter()
         .find(|p| p.is_file())
@@ -236,12 +274,71 @@ pub(super) struct Diagnostic {
     pub(super) source: String,
 }
 
+/// What a completion item is, shown as a short colored tag in the popup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Kind {
+    Function,
+    Variable,
+    Field,
+    Type,
+    Module,
+    Constant,
+    Keyword,
+    Snippet,
+    Text,
+}
+
+impl Kind {
+    fn from_lsp(kind: u64) -> Self {
+        match kind {
+            2..=4 => Self::Function,
+            5 | 10 => Self::Field,
+            6 => Self::Variable,
+            7 | 8 | 13 | 22 | 25 => Self::Type,
+            9 => Self::Module,
+            12 | 20 | 21 => Self::Constant,
+            14 => Self::Keyword,
+            15 => Self::Snippet,
+            _ => Self::Text,
+        }
+    }
+
+    fn tag(self) -> &'static str {
+        match self {
+            Self::Function => "fn",
+            Self::Variable => "var",
+            Self::Field => "prop",
+            Self::Type => "type",
+            Self::Module => "mod",
+            Self::Constant => "const",
+            Self::Keyword => "kw",
+            Self::Snippet => "snip",
+            Self::Text => "abc",
+        }
+    }
+
+    fn color(self) -> egui::Color32 {
+        match self {
+            Self::Function => colors().warning,
+            Self::Variable | Self::Field => colors().accent,
+            Self::Type | Self::Module => colors().syntax_string,
+            Self::Constant => colors().syntax_number,
+            Self::Keyword | Self::Snippet | Self::Text => colors().muted,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct Item {
     label: String,
     detail: String,
     insert: String,
     sort: String,
+    kind: Kind,
+    /// Start of the server's replace range, when it gave one.
+    edit_start: Option<(u32, u32)>,
+    /// The server's item, sent back to `completionItem/resolve` for its signature and docs.
+    raw: Option<Value>,
 }
 
 enum Incoming {
@@ -261,8 +358,12 @@ struct Server {
     completion: Option<(i64, PathBuf)>,
     hover: Option<(i64, PathBuf, usize)>,
     format: Option<(i64, PathBuf)>,
+    /// Pending `completionItem/resolve`: request id and the item's label.
+    resolve: Option<(i64, String)>,
     /// The server answers `textDocument/diagnostic` (pull) requests.
     pull: bool,
+    /// TypeScript 7's own `tsc --lsp` rather than typescript-language-server.
+    native: bool,
     diagnostic_requests: HashMap<i64, PathBuf>,
 }
 
@@ -292,7 +393,15 @@ fn frame(message: &Value) -> Vec<u8> {
 }
 
 impl Server {
-    fn start(mut command: Command, root: &Path, wake: egui::Context) -> Result<Self, String> {
+    fn start(
+        mut command: Command,
+        root: &Path,
+        options: Value,
+        wake: egui::Context,
+    ) -> Result<Self, String> {
+        let native = Path::new(command.get_program())
+            .file_stem()
+            .is_some_and(|stem| stem == "tsc");
         crate::process::configure(&mut command);
         let mut child = command
             .current_dir(root)
@@ -365,7 +474,9 @@ impl Server {
             completion: None,
             hover: None,
             format: None,
+            resolve: None,
             pull: false,
+            native,
             diagnostic_requests: HashMap::new(),
         };
         let root_uri = uri(root);
@@ -380,13 +491,13 @@ impl Server {
                         "synchronization": {"didSave": false},
                         "publishDiagnostics": {"relatedInformation": false},
                         "diagnostic": {"dynamicRegistration": false, "relatedDocumentSupport": false},
-                        "completion": {"completionItem": {"snippetSupport": false}},
+                        "completion": {"completionItem": {"snippetSupport": false, "labelDetailsSupport": true, "documentationFormat": ["plaintext", "markdown"], "resolveSupport": {"properties": ["detail", "documentation"]}}},
                         "hover": {"contentFormat": ["plaintext", "markdown"]},
                         "formatting": {"dynamicRegistration": false}
                     },
                     "workspace": {"configuration": true, "workspaceFolders": true}
                 },
-                "initializationOptions": {}
+                "initializationOptions": options
             }
         });
         let _ = server.out.send(frame(&init));
@@ -431,7 +542,9 @@ pub(super) struct Popup {
     /// Char index where the word being completed starts.
     anchor: usize,
     items: Vec<Item>,
+    /// Index into the filtered list, and the first filtered row shown.
     selected: usize,
+    scroll: usize,
     server: bool,
 }
 
@@ -447,6 +560,10 @@ pub(super) struct Lsp {
     hover_asked: Option<(PathBuf, usize)>,
     /// Formatting edits waiting to be applied: file, (start, end, text).
     formatted: Option<(PathBuf, TextEdits)>,
+    /// Signature and documentation of a resolved completion item: label, detail, docs.
+    resolved: Option<(String, String, String)>,
+    /// Where the completion popup was drawn last frame, so a click on it keeps it open.
+    popup_rect: Option<egui::Rect>,
     pub(super) format_note: Option<String>,
 }
 
@@ -456,46 +573,197 @@ fn digest(text: &str) -> u64 {
     h.finish()
 }
 
-fn word_start(text: &str, cursor: usize) -> usize {
+/// Whether `-` belongs to words in this file (CSS properties, HTML attributes).
+fn dashed(path: &Path) -> bool {
+    matches!(
+        language(path),
+        Some((Lang::Css | Lang::Html | Lang::Json, _))
+    )
+}
+
+fn is_ident(c: char, dash: bool) -> bool {
+    c.is_alphanumeric() || c == '_' || c == '$' || (dash && c == '-')
+}
+
+fn word_start(text: &str, cursor: usize, dash: bool) -> usize {
     let chars: Vec<char> = text.chars().take(cursor).collect();
     let mut start = chars.len();
-    while start > 0 {
-        let c = chars[start - 1];
-        if c.is_alphanumeric() || c == '_' || c == '$' || c == '-' {
-            start -= 1;
-        } else {
-            break;
-        }
+    while start > 0 && is_ident(chars[start - 1], dash) {
+        start -= 1;
     }
     start
 }
 
-/// Identifiers from the file that start with `prefix` (no server needed).
-fn words(text: &str, prefix: &str) -> Vec<Item> {
-    let lower = prefix.to_lowercase();
-    let mut seen: Vec<&str> = Vec::new();
-    for word in text.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '$' || c == '-')) {
-        if word.len() > prefix.len()
-            && word.len() >= 3
-            && !word.starts_with(|c: char| c.is_ascii_digit())
-            && word.to_lowercase().starts_with(&lower)
-            && !seen.contains(&word)
-        {
-            seen.push(word);
-            if seen.len() >= 40 {
-                break;
+/// Keywords offered alongside the file's own symbols.
+fn keywords(path: &Path) -> &'static [&'static str] {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "rs" => &[
+            "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum",
+            "false", "for", "impl", "loop", "match", "move", "mut", "pub", "return", "self",
+            "Self", "static", "struct", "super", "trait", "true", "type", "unsafe", "where",
+            "while", "Option", "Result", "Some", "None", "Ok", "Err", "String", "Vec", "Box",
+        ],
+        "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "mts" | "cts" => &[
+            "async",
+            "await",
+            "break",
+            "case",
+            "catch",
+            "class",
+            "const",
+            "continue",
+            "default",
+            "export",
+            "extends",
+            "false",
+            "finally",
+            "function",
+            "import",
+            "interface",
+            "let",
+            "null",
+            "return",
+            "switch",
+            "this",
+            "throw",
+            "true",
+            "type",
+            "typeof",
+            "undefined",
+            "while",
+        ],
+        "py" | "pyw" => &[
+            "async", "await", "break", "class", "continue", "def", "elif", "else", "except",
+            "False", "finally", "import", "lambda", "None", "pass", "raise", "return", "self",
+            "True", "while", "with", "yield",
+        ],
+        "go" => &[
+            "break",
+            "chan",
+            "const",
+            "continue",
+            "defer",
+            "func",
+            "import",
+            "interface",
+            "map",
+            "package",
+            "range",
+            "return",
+            "select",
+            "struct",
+            "switch",
+            "type",
+            "var",
+        ],
+        _ => &[],
+    }
+}
+
+/// The kind a buffer identifier most likely has, from the word before it and the character
+/// after it.
+fn infer_kind(word: &str, before: &str, member: bool, called: bool) -> Kind {
+    match before {
+        "fn" | "function" | "def" | "func" | "fun" => return Kind::Function,
+        "struct" | "enum" | "class" | "interface" | "type" | "trait" | "union" => {
+            return Kind::Type;
+        }
+        "mod" | "namespace" | "package" => return Kind::Module,
+        _ => {}
+    }
+    let upper = word.chars().any(char::is_alphabetic)
+        && word.chars().all(|c| !c.is_alphabetic() || c.is_uppercase());
+    if called {
+        Kind::Function
+    } else if member {
+        Kind::Field
+    } else if upper && word.chars().count() > 1 {
+        Kind::Constant
+    } else if word.starts_with(char::is_uppercase) {
+        Kind::Type
+    } else if matches!(before, "let" | "const" | "var" | "mut" | "static") {
+        Kind::Variable
+    } else {
+        Kind::Text
+    }
+}
+
+/// Symbols from the open file with an inferred kind, most used first. After `.` or `::`
+/// (`member`) only names that followed one of those in the file are offered; otherwise the
+/// language's keywords join them.
+fn words(text: &str, path: &Path, member: bool) -> Vec<Item> {
+    let dash = dashed(path);
+    let mut found: HashMap<&str, (Kind, usize, bool)> = HashMap::new();
+    let mut previous_word = "";
+    let mut start = None;
+
+    for (i, c) in text
+        .char_indices()
+        .chain(std::iter::once((text.len(), ' ')))
+    {
+        if is_ident(c, dash) && i < text.len() {
+            start.get_or_insert(i);
+            continue;
+        }
+        let Some(s) = start.take() else { continue };
+        let word = &text[s..i];
+        let lead = text[..s].trim_end_matches([' ', '\t']).as_bytes();
+        let after_member = lead.ends_with(b".") || lead.ends_with(b"::");
+        let called = text[i..].trim_start_matches([' ', '\t']).starts_with('(');
+        if word.chars().count() >= 2 && !word.starts_with(|c: char| c.is_ascii_digit()) {
+            let kind = infer_kind(word, previous_word, after_member, called);
+            let entry = found.entry(word).or_insert((kind, 0, false));
+            entry.1 += 1;
+            entry.2 |= after_member;
+            if entry.0 == Kind::Text || kind != Kind::Text && entry.0 == Kind::Field {
+                entry.0 = kind;
+            }
+        }
+        previous_word = word;
+    }
+    let mut items: Vec<(usize, Item)> = found
+        .into_iter()
+        .filter(|(_, (_, _, after_member))| !member || *after_member)
+        .map(|(word, (kind, uses, _))| {
+            (
+                uses,
+                Item {
+                    label: word.to_owned(),
+                    detail: String::new(),
+                    insert: word.to_owned(),
+                    sort: word.to_lowercase(),
+                    kind,
+                    edit_start: None,
+                    raw: None,
+                },
+            )
+        })
+        .collect();
+    if !member {
+        for keyword in keywords(path) {
+            if !items.iter().any(|(_, item)| item.label == *keyword) {
+                items.push((
+                    0,
+                    Item {
+                        label: (*keyword).to_owned(),
+                        detail: String::new(),
+                        insert: (*keyword).to_owned(),
+                        sort: keyword.to_lowercase(),
+                        kind: Kind::Keyword,
+                        edit_start: None,
+                        raw: None,
+                    },
+                ));
             }
         }
     }
-    seen.sort_unstable();
-    seen.into_iter()
-        .map(|w| Item {
-            label: w.to_owned(),
-            detail: "word".into(),
-            insert: w.to_owned(),
-            sort: w.to_owned(),
-        })
-        .collect()
+    items.sort_by(|(a, x), (b, y)| b.cmp(a).then_with(|| x.sort.cmp(&y.sort)));
+    items.into_iter().take(400).map(|(_, item)| item).collect()
 }
 
 fn completion_items(result: &Value) -> Vec<Item> {
@@ -514,9 +782,27 @@ fn completion_items(result: &Value) -> Vec<Item> {
                 .or_else(|| item["insertText"].as_str())
                 .unwrap_or(&label)
                 .to_owned();
+            let range = if item["textEdit"]["range"].is_object() {
+                &item["textEdit"]["range"]
+            } else {
+                &item["textEdit"]["replace"]
+            };
+            let detail = [
+                &item["detail"],
+                &item["labelDetails"]["detail"],
+                &item["labelDetails"]["description"],
+            ]
+            .into_iter()
+            .find_map(|v| v.as_str().filter(|s| !s.trim().is_empty()))
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
             Item {
-                detail: item["detail"].as_str().unwrap_or_default().to_owned(),
+                detail,
                 sort: item["sortText"].as_str().unwrap_or(&label).to_owned(),
+                kind: Kind::from_lsp(item["kind"].as_u64().unwrap_or(1)),
+                edit_start: range.is_object().then(|| pos(&range["start"])),
+                raw: Some(item.clone()),
                 insert,
                 label,
             }
@@ -524,6 +810,22 @@ fn completion_items(result: &Value) -> Vec<Item> {
         .collect();
     items.sort_by(|a, b| a.sort.cmp(&b.sort));
     items
+}
+
+/// How well `label` matches the typed `prefix`: 0 exact-case prefix, 1 any-case prefix,
+/// 2 the prefix's letters in order (`gtUsr` for `getUser`), `None` no match.
+fn rank(label: &str, prefix: &str) -> Option<u8> {
+    if prefix.is_empty() || label.starts_with(prefix) {
+        return Some(0);
+    }
+    let lower = label.to_lowercase();
+    let wanted = prefix.to_lowercase();
+    if lower.starts_with(&wanted) {
+        return Some(1);
+    }
+    let mut chars = lower.chars();
+    let first = wanted.chars().next()?;
+    (lower.starts_with(first) && wanted.chars().all(|w| chars.any(|c| c == w))).then_some(2)
 }
 
 impl Lsp {
@@ -559,10 +861,13 @@ impl Lsp {
                     .entry(lang)
                     .or_insert_with(|| match server_command(lang, &root) {
                         None => Slot::Missing,
-                        Some(command) => match Server::start(command, &root, ctx.clone()) {
-                            Ok(server) => Slot::Running(Box::new(server)),
-                            Err(e) => Slot::Failed(e),
-                        },
+                        Some(command) => {
+                            let options = init_options(lang, &root, &command);
+                            match Server::start(command, &root, options, ctx.clone()) {
+                                Ok(server) => Slot::Running(Box::new(server)),
+                                Err(e) => Slot::Failed(e),
+                            }
+                        }
                     });
             let Slot::Running(server) = slot else {
                 continue;
@@ -615,6 +920,7 @@ impl Lsp {
         let mut completions = Vec::new();
         let mut hovers = Vec::new();
         let mut formats = Vec::new();
+        let mut resolved = Vec::new();
         for (lang, slot) in &mut self.servers {
             let Slot::Running(server) = slot else {
                 continue;
@@ -691,6 +997,25 @@ impl Lsp {
                 {
                     completions.push((path.clone(), completion_items(&msg["result"])));
                     server.completion = None;
+                } else if let Some((id, label)) = &server.resolve
+                    && msg["id"].as_i64() == Some(*id)
+                {
+                    let result = &msg["result"];
+                    let docs = &result["documentation"];
+                    let docs = docs
+                        .as_str()
+                        .or_else(|| docs["value"].as_str())
+                        .unwrap_or_default();
+                    resolved.push((
+                        label.clone(),
+                        result["detail"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .trim()
+                            .to_owned(),
+                        hover_text(&Value::String(docs.to_owned())),
+                    ));
+                    server.resolve = None;
                 } else if let Some((id, path, index)) = &server.hover
                     && msg["id"].as_i64() == Some(*id)
                 {
@@ -745,7 +1070,11 @@ impl Lsp {
             {
                 popup.items = items;
                 popup.selected = 0;
+                popup.scroll = 0;
             }
+        }
+        if let Some(last) = resolved.pop() {
+            self.resolved = Some(last);
         }
     }
 
@@ -764,6 +1093,11 @@ impl Lsp {
         ))
     }
 
+    /// Whether TypeScript files are served by TypeScript 7's native `tsc --lsp`.
+    pub(super) fn native_typescript(&self) -> bool {
+        matches!(self.servers.get(&Lang::Ts), Some(Slot::Running(s)) if s.native)
+    }
+
     fn failure(&self, lang: Lang) -> Option<&str> {
         match self.servers.get(&lang) {
             Some(Slot::Failed(reason)) => Some(reason),
@@ -777,15 +1111,10 @@ impl Lsp {
         (errors, all.filter(|d| d.severity == 2).count())
     }
 
-    /// Opens the popup and asks the server; words fill in meanwhile.
-    fn trigger(&mut self, doc: &Document, cursor: usize) {
-        let anchor = word_start(&doc.text, cursor);
-        let prefix: String = doc
-            .text
-            .chars()
-            .skip(anchor)
-            .take(cursor - anchor)
-            .collect();
+    /// Opens the popup and asks the server; without one, the file's symbols fill it. After
+    /// `.` or `::` (`member`) the buffer offers only names used after those.
+    fn trigger(&mut self, doc: &Document, cursor: usize, member: bool) {
+        let anchor = word_start(&doc.text, cursor, dashed(&doc.path));
         let mut server_asked = false;
         if let Some((lang, _)) = language(&doc.path)
             && let Some(Slot::Running(server)) = self.servers.get_mut(&lang)
@@ -812,17 +1141,51 @@ impl Lsp {
             server.completion = Some((id, doc.path.clone()));
             server_asked = true;
         }
+        self.resolved = None;
         self.popup = Some(Popup {
             path: doc.path.clone(),
             anchor,
             items: if server_asked {
                 Vec::new()
             } else {
-                words(&doc.text, &prefix)
+                words(&doc.text, &doc.path, member)
             },
             selected: 0,
+            scroll: 0,
             server: server_asked,
         });
+    }
+
+    /// Asks the server for the signature and docs of the highlighted item, once per item.
+    fn request_resolve(&mut self, path: &Path, item: &Item) {
+        let Some(raw) = item.raw.clone() else { return };
+        if self
+            .resolved
+            .as_ref()
+            .is_some_and(|(label, _, _)| label == &item.label)
+        {
+            return;
+        }
+        let label = item.label.clone();
+        let Some(server) = self.server_for(path) else {
+            return;
+        };
+        if server.resolve.as_ref().is_some_and(|(_, l)| l == &label) {
+            return;
+        }
+        let id = server.next;
+        server.next += 1;
+        server.send(
+            json!({"jsonrpc": "2.0", "id": id, "method": "completionItem/resolve", "params": raw}),
+        );
+        server.resolve = Some((id, label));
+    }
+
+    /// Whether a ready language server answers completion for `path`.
+    fn has_server(&self, path: &Path) -> bool {
+        language(path).is_some_and(|(lang, _)| {
+            matches!(self.servers.get(&lang), Some(Slot::Running(s)) if s.ready && s.opened.contains_key(path))
+        })
     }
 
     /// Whether the completion popup is showing items for `path`.
@@ -894,6 +1257,8 @@ pub(super) enum PopupKey {
     Down,
     Accept,
     Close,
+    PageUp,
+    PageDown,
     Trigger,
     Format,
 }
@@ -920,6 +1285,10 @@ pub(super) fn popup_keys(ui: &mut Ui, lsp: &Lsp, id: egui::Id, path: &Path) -> P
             PopupKey::Down
         } else if i.consume_key(Modifiers::NONE, Key::ArrowUp) {
             PopupKey::Up
+        } else if i.consume_key(Modifiers::NONE, Key::PageDown) {
+            PopupKey::PageDown
+        } else if i.consume_key(Modifiers::NONE, Key::PageUp) {
+            PopupKey::PageUp
         } else if i.consume_key(Modifiers::NONE, Key::Enter)
             || i.consume_key(Modifiers::NONE, Key::Tab)
         {
@@ -931,6 +1300,11 @@ pub(super) fn popup_keys(ui: &mut Ui, lsp: &Lsp, id: egui::Id, path: &Path) -> P
         }
     })
 }
+
+/// Rows the completion popup shows at once.
+const POPUP_ROWS: usize = 10;
+const POPUP_ROW: f32 = 22.0;
+const POPUP_WIDTH: f32 = 380.0;
 
 /// Completion, triggers and diagnostics for the code editor, after the text
 /// edit was laid out this frame.
@@ -944,16 +1318,26 @@ pub(super) fn after_edit(
 ) {
     let cursor = output.cursor_range.map_or(0, |range| range.primary.index);
     if key == PopupKey::Trigger {
-        lsp.trigger(doc, cursor);
+        let member = matches!(
+            doc.text.chars().nth(cursor.saturating_sub(1)),
+            Some('.' | ':')
+        );
+        lsp.trigger(doc, cursor, member);
     }
     if output.response.changed() {
-        let typed = doc.text.chars().nth(cursor.saturating_sub(1));
-        let anchor = word_start(&doc.text, cursor);
+        let before: Vec<char> = doc.text.chars().take(cursor).collect();
+        let typed = before.last().copied();
+        let member = typed == Some('.')
+            || (typed == Some(':') && before.len() >= 2 && before[before.len() - 2] == ':');
+        let dash = dashed(&doc.path);
+        let server = lsp.has_server(&doc.path);
+        let word = cursor - word_start(&doc.text, cursor, dash);
         if let Some(c) = typed
-            && (lsp.triggers(&doc.path).contains(&c)
-                || (cursor - anchor >= 2 && lsp.popup.is_none()))
+            && (member
+                || lsp.triggers(&doc.path).contains(&c)
+                || (is_ident(c, dash) && lsp.popup.is_none() && word >= if server { 1 } else { 2 }))
         {
-            lsp.trigger(doc, cursor);
+            lsp.trigger(doc, cursor, member);
         }
     }
     if key == PopupKey::Format {
@@ -969,6 +1353,12 @@ pub(super) fn after_edit(
     }
     let on_diagnostic = paint_diagnostics(ui, lsp, doc, output);
     hover(ui, lsp, doc, output, on_diagnostic);
+    let pointer_on_popup = ui
+        .ctx()
+        .pointer_interact_pos()
+        .zip(lsp.popup_rect)
+        .is_some_and(|(p, r)| r.contains(p));
+    lsp.popup_rect = None;
     let Some(popup) = &mut lsp.popup else { return };
     if popup.path != doc.path {
         return;
@@ -982,98 +1372,247 @@ pub(super) fn after_edit(
     } else {
         String::new()
     };
+    let dash = dashed(&doc.path);
     if cursor < popup.anchor
         || key == PopupKey::Close
-        || !output.response.has_focus()
-        || prefix.contains(|c: char| c.is_whitespace())
+        || (!output.response.has_focus() && !pointer_on_popup)
+        || prefix.chars().any(|c| !is_ident(c, dash))
     {
         lsp.popup = None;
         return;
     }
-    let lower = prefix.to_lowercase();
-    let visible: Vec<usize> = popup
+    let mut visible: Vec<(u8, usize)> = popup
         .items
         .iter()
         .enumerate()
-        .filter(|(_, item)| item.label.to_lowercase().starts_with(&lower) || lower.is_empty())
-        .map(|(i, _)| i)
-        .take(12)
+        .filter_map(|(i, item)| rank(&item.label, &prefix).map(|r| (r, i)))
         .collect();
-    if visible.is_empty() {
+    visible.sort_by_key(|&(r, i)| (r, i));
+    visible.truncate(300);
+    // Nothing to offer once the word is typed out in full.
+    let done = visible.len() == 1 && popup.items[visible[0].1].label == prefix;
+    if visible.is_empty() || done {
         if !popup.server || !popup.items.is_empty() {
             lsp.popup = None;
         }
         return;
     }
-    match key {
-        PopupKey::Down => popup.selected = (popup.selected + 1).min(visible.len() - 1),
-        PopupKey::Up => popup.selected = popup.selected.saturating_sub(1),
-        _ => {}
+    let last = visible.len() - 1;
+    popup.selected = match key {
+        PopupKey::Down if popup.selected >= last => 0,
+        PopupKey::Down => popup.selected + 1,
+        PopupKey::Up if popup.selected == 0 => last,
+        PopupKey::Up => popup.selected - 1,
+        PopupKey::PageDown => (popup.selected + POPUP_ROWS).min(last),
+        PopupKey::PageUp => popup.selected.saturating_sub(POPUP_ROWS),
+        _ => popup.selected.min(last),
+    };
+    if popup.selected < popup.scroll {
+        popup.scroll = popup.selected;
+    } else if popup.selected >= popup.scroll + POPUP_ROWS {
+        popup.scroll = popup.selected + 1 - POPUP_ROWS;
     }
-    popup.selected = popup.selected.min(visible.len() - 1);
-    let mut accept = (key == PopupKey::Accept).then_some(visible[popup.selected]);
+    popup.scroll = popup.scroll.min(visible.len().saturating_sub(POPUP_ROWS));
+    let chosen = popup.items[visible[popup.selected].1].clone();
+    let mut accept = (key == PopupKey::Accept).then_some(visible[popup.selected].1);
+    let rows = visible.len().min(POPUP_ROWS);
+    let (detail, docs) = match &lsp.resolved {
+        Some((label, detail, docs)) if label == &chosen.label => (
+            if detail.is_empty() {
+                chosen.detail.clone()
+            } else {
+                detail.clone()
+            },
+            docs.clone(),
+        ),
+        _ => (chosen.detail.clone(), String::new()),
+    };
+    let footer = !detail.is_empty() || !docs.is_empty();
+    let height = rows as f32 * POPUP_ROW + 10.0 + if footer { 76.0 } else { 0.0 };
     let caret = output
         .galley
         .pos_from_cursor(CCursor::new(cursor))
         .translate(output.galley_pos.to_vec2());
-    egui::Area::new(id.with("completion"))
+    let screen = ui.ctx().content_rect();
+    let x = caret
+        .left()
+        .min(screen.right() - POPUP_WIDTH - 8.0)
+        .max(screen.left() + 4.0);
+    // Below the caret line, or above it when the popup would run off the window.
+    let y = if caret.bottom() + 2.0 + height > screen.bottom() - 8.0 {
+        caret.top() - 2.0 - height
+    } else {
+        caret.bottom() + 2.0
+    };
+    let font = egui::FontId::monospace(12.5);
+    let tag_font = egui::FontId::monospace(10.0);
+    let small = egui::FontId::proportional(SMALL);
+    let area = egui::Area::new(id.with("completion"))
         .order(egui::Order::Foreground)
-        .fixed_pos(caret.left_bottom() + egui::vec2(0.0, 2.0))
+        .fixed_pos(egui::pos2(x, y))
         .show(ui.ctx(), |ui| {
             egui::Frame::new()
                 .fill(colors().elevated)
                 .stroke(egui::Stroke::new(1.0_f32, colors().control_border))
                 .corner_radius(8)
+                .shadow(floating_shadow(active(), 18))
                 .inner_margin(egui::Margin::same(4))
                 .show(ui, |ui| {
-                    ui.set_min_width(240.0);
-                    for (row, &i) in visible.iter().enumerate() {
+                    ui.set_width(POPUP_WIDTH - 8.0);
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    for (row, &(_, i)) in visible.iter().enumerate().skip(popup.scroll).take(rows) {
                         let item = &popup.items[i];
-                        let selected = row == popup.selected;
-                        let response = ui.horizontal(|ui| {
-                            let label = ui.selectable_label(
-                                selected,
-                                RichText::new(&item.label).monospace().size(12.5),
+                        let (rect, response) = ui.allocate_exact_size(
+                            egui::vec2(ui.available_width(), POPUP_ROW),
+                            egui::Sense::click(),
+                        );
+                        let painter = ui.painter_at(rect);
+                        if row == popup.selected {
+                            painter.rect_filled(rect, 5, colors().accent_bg);
+                        } else if response.hovered() {
+                            painter.rect_filled(rect, 5, colors().hover);
+                        }
+                        let tag = egui::Rect::from_min_size(
+                            rect.left_center() + egui::vec2(4.0, -8.0),
+                            egui::vec2(36.0, 16.0),
+                        );
+                        let color = item.kind.color();
+                        painter.rect_filled(tag, 4, color.gamma_multiply(0.16));
+                        painter.text(
+                            tag.center(),
+                            egui::Align2::CENTER_CENTER,
+                            item.kind.tag(),
+                            tag_font.clone(),
+                            color,
+                        );
+                        // The typed part of the name in the accent color.
+                        let matched = if rank(&item.label, &prefix).is_some_and(|r| r < 2) {
+                            prefix.chars().count()
+                        } else {
+                            0
+                        };
+                        let head: String = item.label.chars().take(matched).collect();
+                        let tail: String = item.label.chars().skip(matched).collect();
+                        let label_x = tag.right() + 8.0;
+                        let mut job = egui::text::LayoutJob::default();
+                        job.append(
+                            &head,
+                            0.0,
+                            egui::TextFormat::simple(font.clone(), colors().accent),
+                        );
+                        job.append(
+                            &tail,
+                            0.0,
+                            egui::TextFormat::simple(font.clone(), colors().text),
+                        );
+                        job.wrap = egui::text::TextWrapping::truncate_at_width(
+                            rect.right() - 8.0 - label_x,
+                        );
+                        let galley = ui.fonts_mut(|f| f.layout_job(job));
+                        let label_w = galley.size().x;
+                        painter.galley(
+                            egui::pos2(label_x, rect.center().y - galley.size().y / 2.0),
+                            galley,
+                            colors().text,
+                        );
+                        let room = rect.right() - 8.0 - (label_x + label_w + 16.0);
+                        if !item.detail.is_empty() && room > 40.0 {
+                            let mut job = egui::text::LayoutJob::simple_singleline(
+                                item.detail.replace('\n', " "),
+                                small.clone(),
+                                colors().muted,
                             );
-                            if !item.detail.is_empty() {
-                                ui.label(
-                                    RichText::new(item.detail.chars().take(48).collect::<String>())
-                                        .size(SMALL)
-                                        .color(colors().muted),
-                                );
-                            }
-                            label
-                        });
-                        if response.inner.clicked() {
+                            job.wrap = egui::text::TextWrapping::truncate_at_width(room);
+                            let detail = ui.fonts_mut(|f| f.layout_job(job));
+                            painter.galley(
+                                egui::pos2(
+                                    rect.right() - 8.0 - detail.size().x,
+                                    rect.center().y - detail.size().y / 2.0,
+                                ),
+                                detail,
+                                colors().muted,
+                            );
+                        }
+                        if response.clicked() {
                             accept = Some(i);
                         }
                     }
+                    if footer {
+                        ui.add_space(4.0);
+                        let (line, _) = ui.allocate_exact_size(
+                            egui::vec2(ui.available_width(), 1.0),
+                            egui::Sense::hover(),
+                        );
+                        ui.painter().rect_filled(line, 0, colors().border);
+                        ui.add_space(6.0);
+                        egui::ScrollArea::vertical()
+                            .id_salt("completion-docs")
+                            .max_height(62.0)
+                            .show(ui, |ui| {
+                                ui.spacing_mut().item_spacing.y = 3.0;
+                                if !detail.is_empty() {
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(&detail)
+                                                .monospace()
+                                                .size(12.0)
+                                                .color(colors().text),
+                                        )
+                                        .wrap(),
+                                    );
+                                }
+                                if !docs.is_empty() {
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(&docs)
+                                                .size(SMALL)
+                                                .color(colors().secondary),
+                                        )
+                                        .wrap(),
+                                    );
+                                }
+                            });
+                    }
                 });
         });
-    if let Some(i) = accept {
-        let insert = popup.items[i].insert.clone();
-        let anchor = popup.anchor;
-        let start = doc
-            .text
-            .char_indices()
-            .nth(anchor)
-            .map_or(doc.text.len(), |(b, _)| b);
-        let end = doc
-            .text
-            .char_indices()
-            .nth(cursor)
-            .map_or(doc.text.len(), |(b, _)| b);
-        doc.text.replace_range(start..end, &insert);
-        doc.update_dirty();
-        let caret = anchor + insert.chars().count();
-        let mut state = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
-        state
-            .cursor
-            .set_char_range(Some(CCursorRange::one(CCursor::new(caret))));
-        state.store(ui.ctx(), id);
-        lsp.popup = None;
-        ui.ctx().request_repaint();
+    lsp.popup_rect = Some(area.response.rect);
+    if lsp.popup.as_ref().is_some_and(|p| p.server) && accept.is_none() {
+        let path = doc.path.clone();
+        lsp.request_resolve(&path, &chosen);
     }
+    let Some(i) = accept else { return };
+    let Some(popup) = lsp.popup.take() else {
+        return;
+    };
+    let item = &popup.items[i];
+    // The server's range start when it has one (it can begin before the typed word).
+    let anchor = item
+        .edit_start
+        .map(|start| char_index(&doc.text, start))
+        .filter(|start| *start <= cursor)
+        .unwrap_or(popup.anchor);
+    let start = doc
+        .text
+        .char_indices()
+        .nth(anchor)
+        .map_or(doc.text.len(), |(b, _)| b);
+    let end = doc
+        .text
+        .char_indices()
+        .nth(cursor)
+        .map_or(doc.text.len(), |(b, _)| b);
+    doc.text.replace_range(start..end, &item.insert);
+    doc.update_dirty();
+    let caret = anchor + item.insert.chars().count();
+    let mut state = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
+    state
+        .cursor
+        .set_char_range(Some(CCursorRange::one(CCursor::new(caret))));
+    state.store(ui.ctx(), id);
+    lsp.resolved = None;
+    // A click on the popup took focus from the editor: give it back.
+    ui.memory_mut(|m| m.request_focus(id));
+    ui.ctx().request_repaint();
 }
 
 fn paint_diagnostics(
@@ -1174,7 +1713,7 @@ fn hover(
     let resting = ui.input(|i| i.pointer.time_since_last_movement()) > 0.45;
     let local = pointer - output.galley_pos;
     let index = output.galley.cursor_from_pos(local).index;
-    let start = word_start(&doc.text, index);
+    let start = word_start(&doc.text, index, dashed(&doc.path));
     let over_word = doc
         .text
         .chars()
@@ -1276,8 +1815,7 @@ impl super::Editor {
         if let Some(path) = &active
             && let Some((lang, state)) = self.lsp.state(path)
         {
-            let native =
-                lang == Lang::Ts && self.root.as_deref().and_then(native_typescript).is_some();
+            let native = lang == Lang::Ts && self.lsp.native_typescript();
             let name = if native {
                 "TypeScript 7 (tsc --lsp)"
             } else {
@@ -1411,11 +1949,38 @@ mod tests {
         if cfg!(windows) {
             assert_eq!(path_from_uri(&u).unwrap(), path);
         }
-        let w: Vec<String> = words("useState useEffect user use", "use")
+    }
+
+    #[test]
+    fn buffer_symbols_carry_kinds_and_rank_by_match() {
+        let text = "struct Config { port: u16 }\nfn load_config() -> Config {}\nconst MAX_PORT: u16 = 1;\nlet total = cfg.port + cfg.port;\n";
+        let path = Path::new("main.rs");
+        let all = words(text, path, false);
+        let kind = |label: &str| all.iter().find(|i| i.label == label).map(|i| i.kind);
+        assert_eq!(kind("Config"), Some(Kind::Type));
+        assert_eq!(kind("load_config"), Some(Kind::Function));
+        assert_eq!(kind("MAX_PORT"), Some(Kind::Constant));
+        assert_eq!(kind("total"), Some(Kind::Variable));
+        assert_eq!(
+            kind("match"),
+            Some(Kind::Keyword),
+            "language keywords join in"
+        );
+        let members: Vec<String> = words(text, path, true)
             .into_iter()
             .map(|i| i.label)
             .collect();
-        assert_eq!(w, ["useEffect", "useState", "user"]);
+        assert_eq!(members, ["port"], "after `.` only names used as members");
+        assert_eq!(rank("useState", "use"), Some(0));
+        assert_eq!(rank("UseState", "use"), Some(1));
+        assert_eq!(rank("getUser", "gtus"), Some(2));
+        assert_eq!(
+            rank("getUser", "usr"),
+            None,
+            "subsequences start at the first letter"
+        );
+        assert_eq!(word_start("a-b", 3, false), 2);
+        assert_eq!(word_start("margin-top", 10, true), 0);
     }
 
     /// Talks to a minimal Node LSP server: initialize, didOpen, diagnostics
@@ -1442,7 +2007,7 @@ mod tests {
         lsp.servers.insert(
             Lang::Ts,
             Slot::Running(Box::new(
-                Server::start(command, &root, ctx.clone()).unwrap(),
+                Server::start(command, &root, json!({}), ctx.clone()).unwrap(),
             )),
         );
         let docs = vec![doc];
@@ -1455,7 +2020,7 @@ mod tests {
         let diags = &lsp.diagnostics[&doc_path];
         assert_eq!(diags[0].message, "Cannot find name 'tot'.");
         assert_eq!(diags[0].start, (1, 0));
-        lsp.trigger(&docs[0], docs[0].text.chars().count());
+        lsp.trigger(&docs[0], docs[0].text.chars().count(), false);
         let until = Instant::now() + Duration::from_secs(10);
         while lsp.popup.as_ref().is_none_or(|p| p.items.is_empty()) && Instant::now() < until {
             lsp.poll();
@@ -1465,6 +2030,48 @@ mod tests {
         assert!(popup.server);
         assert_eq!(popup.items[0].label, "total");
         assert_eq!(popup.anchor, 17);
+    }
+
+    /// The real TypeScript server on a throwaway project: member completion has kinds and
+    /// the highlighted item resolves to its signature.
+    #[test]
+    #[ignore = "needs typescript-language-server on PATH"]
+    fn real_typescript_completion_resolves_signatures() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("probe.ts");
+        std::fs::write(&file, "const s = \"x\";\ns.toUp").unwrap();
+        let ctx = egui::Context::default();
+        let docs = vec![Document::open(file).unwrap()];
+        let mut lsp = Lsp::default();
+        let until = Instant::now() + Duration::from_secs(60);
+        while !lsp.has_server(&docs[0].path) && Instant::now() < until {
+            lsp.synced = None;
+            lsp.sync(Some(dir.path()), &docs, &ctx);
+            thread::sleep(Duration::from_millis(50));
+        }
+        lsp.trigger(&docs[0], docs[0].text.chars().count(), true);
+        while lsp.popup.as_ref().is_none_or(|p| p.items.is_empty()) && Instant::now() < until {
+            lsp.poll();
+            thread::sleep(Duration::from_millis(20));
+        }
+        let item = lsp
+            .popup
+            .as_ref()
+            .expect("popup")
+            .items
+            .iter()
+            .find(|i| i.label == "toUpperCase")
+            .cloned()
+            .expect("toUpperCase offered");
+        assert_eq!(item.kind, Kind::Function);
+        lsp.request_resolve(&docs[0].path, &item);
+        while lsp.resolved.is_none() && Instant::now() < until {
+            lsp.poll();
+            thread::sleep(Duration::from_millis(20));
+        }
+        let (label, detail, _) = lsp.resolved.expect("resolved");
+        assert_eq!(label, "toUpperCase");
+        assert!(detail.contains("toUpperCase(): string"), "{detail}");
     }
 
     /// Real servers on a Vite React-TS project (COVALOS_LSP_PROJECT): the
@@ -1511,7 +2118,7 @@ mod tests {
         );
         assert!(has(&lsp, &docs[1].path, "colr"), "no CSS diagnostic");
         let cursor = docs[0].text.chars().count();
-        lsp.trigger(&docs[0], cursor);
+        lsp.trigger(&docs[0], cursor, false);
         let until = Instant::now() + Duration::from_secs(30);
         while lsp.popup.as_ref().is_none_or(|p| p.items.is_empty()) && Instant::now() < until {
             lsp.poll();
