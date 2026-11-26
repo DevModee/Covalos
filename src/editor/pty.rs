@@ -477,7 +477,7 @@ impl Shell {
                 Event::Text(text) => bytes.extend_from_slice(text.as_bytes()),
                 Event::Paste(text) => bytes
                     .extend_from_slice(text.replace("\r\n", "\r").replace('\n', "\r").as_bytes()),
-                Event::Copy => bytes.push(0x03),
+                Event::Copy | Event::Cut => bytes.extend(shortcut_byte(&event)),
                 Event::Key {
                     key,
                     pressed: true,
@@ -517,6 +517,16 @@ fn oauth_urls(text: &str) -> Vec<String> {
                 .then(|| candidate.trim_end_matches(['.', ')', ']']).to_owned())
         })
         .collect()
+}
+
+/// egui turns Ctrl+C and Ctrl+X into Copy and Cut events instead of key presses; the
+/// terminal still owes the program the control byte (interrupt, and nano's exit).
+fn shortcut_byte(event: &Event) -> Option<u8> {
+    match event {
+        Event::Copy => Some(0x03),
+        Event::Cut => Some(0x18),
+        _ => None,
+    }
 }
 
 /// Bytes a VT terminal sends for a key; `None` for keys handled elsewhere.
@@ -607,6 +617,16 @@ mod tests {
     use super::*;
     #[cfg(windows)]
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn ctrl_c_and_ctrl_x_reach_the_program() {
+        assert_eq!(shortcut_byte(&Event::Copy), Some(0x03));
+        assert_eq!(shortcut_byte(&Event::Cut), Some(0x18));
+        assert_eq!(shortcut_byte(&Event::Text("x".into())), None);
+        // The key path leaves both to those events, so nothing is sent twice.
+        assert_eq!(key_bytes(Key::C, egui::Modifiers::CTRL), None);
+        assert_eq!(key_bytes(Key::X, egui::Modifiers::CTRL), None);
+    }
 
     #[cfg(windows)]
     fn wait_for(shell: &Shell, needle: &str, secs: u64) -> bool {
