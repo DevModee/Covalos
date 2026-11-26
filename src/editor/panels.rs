@@ -149,7 +149,7 @@ impl Editor {
     }
 
     pub(super) fn top_bar(&mut self, ctx: &Context) {
-        TopBottomPanel::top("menu")
+        let bar = TopBottomPanel::top("menu")
             .exact_height(CHROME_HEIGHT)
             .show_separator_line(false)
             .frame(panel_frame(Margin::symmetric(12, 6)))
@@ -443,6 +443,7 @@ impl Editor {
                     },
                 );
             });
+        self.chrome_bottom = Some(bar.response.rect.bottom());
     }
 
     pub(super) fn status_bar(&mut self, ctx: &Context) {

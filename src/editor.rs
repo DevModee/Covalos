@@ -167,6 +167,8 @@ pub struct Editor {
     session_started: u64,
     splash_started: Option<std::time::Instant>,
     explorer_rect: Option<egui::Rect>,
+    /// Bottom edge of the top bar as laid out this frame; the Notch fillets join it.
+    chrome_bottom: Option<f32>,
     disk_checked: Option<std::time::Instant>,
     /// Open files changed on disk while they had unsaved edits.
     disk_conflicts: Vec<PathBuf>,
@@ -275,6 +277,7 @@ impl Editor {
                 Some(std::time::Instant::now())
             },
             explorer_rect: None,
+            chrome_bottom: None,
             disk_checked: None,
             disk_conflicts: Vec::new(),
             #[cfg(test)]

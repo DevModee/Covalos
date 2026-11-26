@@ -65,6 +65,21 @@ fn paint_concave_fillet(
     for i in 1..=steps as u32 {
         mesh.add_triangle(0, i, i + 1);
     }
+    // Raw meshes are not anti-aliased: fade the curved edge out over one physical pixel
+    // toward the arc centre so the fillet matches the feathered Notch rectangle.
+    let feather = 1.0 / painter.pixels_per_point();
+    let solid = 1_u32;
+    let soft = mesh.vertices.len() as u32;
+    for &p in &arc_pts {
+        let inward = (arc_center - p).normalized() * feather;
+        mesh.colored_vertex(p + inward, egui::Color32::TRANSPARENT);
+    }
+    for i in 0..steps as u32 {
+        let (a, b) = (solid + i, solid + i + 1);
+        let (c, d) = (soft + i, soft + i + 1);
+        mesh.add_triangle(a, b, c);
+        mesh.add_triangle(b, d, c);
+    }
     painter.add(egui::Shape::mesh(mesh));
     arc_pts
 }
@@ -799,7 +814,24 @@ impl Editor {
                 let (outer, response) = ui.allocate_exact_size(rect.size(), egui::Sense::click());
                 #[cfg(test)]
                 super::super::motion::record(ui, "Companion island", outer);
-                let bottom_r = egui::lerp((ISLAND_COMPACT.y / 2.0)..=20.0, eased) as u8;
+                // Same fill as the top bar and no shadow, so the Notch reads as part of it; concave
+                // fillets join the two shapes.
+                let notch_fill = colors().canvas;
+                let bg_painter = ctx.layer_painter(ui.layer_id());
+                // Join the real bottom edge of the top bar (where the islands' hairline
+                // starts), not the nominal chrome height, so the curve meets it tangentially.
+                let top_bar_bottom = self.chrome_bottom.unwrap_or(screen.top() + CHROME_HEIGHT);
+                // The visible side below the top bar holds the fillet and the bottom corner;
+                // both shrink together so the two arcs never overlap into a kink.
+                let below = (outer.bottom() - top_bar_bottom).max(0.0);
+                let mut bottom_r = egui::lerp((ISLAND_COMPACT.y / 2.0)..=20.0, eased);
+                let mut fillet_r = 16.0 * eased;
+                if below > 0.0 && bottom_r + fillet_r > below {
+                    let k = below / (bottom_r + fillet_r);
+                    bottom_r = (bottom_r * k).max(ISLAND_COMPACT.y / 2.0).min(below);
+                    fillet_r = (below - bottom_r).max(0.0);
+                }
+                let bottom_r = bottom_r.round() as u8;
                 let top_r = egui::lerp((ISLAND_COMPACT.y / 2.0)..=0.0, eased) as u8;
                 let corner = egui::CornerRadius {
                     nw: top_r,
@@ -807,14 +839,22 @@ impl Editor {
                     sw: bottom_r,
                     se: bottom_r,
                 };
-                // Same fill as the top bar and no shadow, so the Notch reads as part of it; concave
-                // fillets join the two shapes.
-                let notch_fill = colors().canvas;
-                let bg_painter = ctx.layer_painter(ui.layer_id());
-                let top_bar_bottom = screen.top() + CHROME_HEIGHT;
-                let fillet_r = (16.0 * eased).min((outer.bottom() - top_bar_bottom).max(0.0));
                 bg_painter.rect_filled(outer, corner, notch_fill);
-                if eased > 0.15 && fillet_r >= 2.0 {
+                // 0 while the pill sits inside the top bar, 1 once it hangs a full row below it:
+                // the closed outline fades into the open contour instead of switching.
+                let hang = (below / 24.0).clamp(0.0, 1.0);
+                if hang < 1.0 {
+                    bg_painter.rect_stroke(
+                        outer,
+                        corner,
+                        egui::Stroke::new(
+                            1.0_f32,
+                            colors().border.gamma_multiply(0.45 * (1.0 - hang)),
+                        ),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+                if hang > 0.0 {
                     let left_arc = paint_concave_fillet(
                         &bg_painter,
                         outer.left(),
@@ -833,10 +873,17 @@ impl Editor {
                     );
                     // Subtle hairline only along the protruding curve below the top bar so
                     // there is zero seam against the top bar itself.
-                    let rim =
-                        egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.55 * eased));
+                    let rim = egui::Stroke::new(
+                        1.0_f32,
+                        colors()
+                            .border
+                            .gamma_multiply(0.55 * eased.max(0.45) * hang),
+                    );
                     let br = f32::from(bottom_r);
                     let mut contour = Vec::with_capacity(64);
+                    if left_arc.is_empty() {
+                        contour.push(egui::pos2(outer.left(), top_bar_bottom));
+                    }
                     contour.extend_from_slice(&left_arc);
                     // Bottom-left corner arc
                     let bl_c = egui::pos2(outer.left() + br, outer.bottom() - br);
@@ -852,14 +899,14 @@ impl Editor {
                         contour.push(br_c + egui::vec2(a.cos() * br, a.sin() * br));
                     }
                     contour.extend_from_slice(&right_arc);
+                    if right_arc.is_empty() {
+                        contour.push(egui::pos2(outer.right(), top_bar_bottom));
+                    }
+                    // The islands draw their hairline inside their rect: sit the centred rim
+                    // half a pixel lower so both lines share the same pixel row.
+                    let half = egui::vec2(0.0, 0.5 / ctx.pixels_per_point());
+                    contour.iter_mut().for_each(|p| *p += half);
                     bg_painter.add(egui::Shape::line(contour, rim));
-                } else {
-                    bg_painter.rect_stroke(
-                        outer,
-                        corner,
-                        egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.45)),
-                        egui::StrokeKind::Inside,
-                    );
                 }
                 if eased < 0.999 {
                     let (text, state) = self.island_summary();
