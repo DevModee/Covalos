@@ -652,7 +652,7 @@ const SQL: &[Lesson] = &[
             tests: r#"print("TOTAL 1")
 check("older than 30", lambda: assert_eq(run_query("src/day01/older.sql"), [("Ana",), ("Bea",)]))
 "#,
-            guarded: &[],
+            guarded: &["from users", "from orders", "join orders", "join users"],
         },
         bridge: Exercise {
             file: "src/day01/all.sql",
@@ -662,7 +662,7 @@ check("older than 30", lambda: assert_eq(run_query("src/day01/older.sql"), [("An
             tests: r#"print("TOTAL 1")
 check("all names", lambda: assert_eq(run_query("src/day01/all.sql"), [("Ana",), ("Bea",), ("Leo",), ("Tom",)]))
 "#,
-            guarded: &[],
+            guarded: &["from users", "from orders", "join orders", "join users"],
         },
     },
     Lesson {
@@ -679,7 +679,7 @@ check("all names", lambda: assert_eq(run_query("src/day01/all.sql"), [("Ana",), 
             tests: r#"print("TOTAL 1")
 check("totals", lambda: assert_eq(run_query("src/day02/totals.sql"), [(1, 50), (2, 5), (3, 15)]))
 "#,
-            guarded: &[],
+            guarded: &["from users", "from orders", "join orders", "join users"],
         },
         bridge: Exercise {
             file: "src/day02/count.sql",
@@ -689,7 +689,7 @@ check("totals", lambda: assert_eq(run_query("src/day02/totals.sql"), [(1, 50), (
             tests: r#"print("TOTAL 1")
 check("count", lambda: assert_eq(run_query("src/day02/count.sql"), [(4,)]))
 "#,
-            guarded: &[],
+            guarded: &["from users", "from orders", "join orders", "join users"],
         },
     },
     Lesson {
@@ -706,7 +706,7 @@ check("count", lambda: assert_eq(run_query("src/day02/count.sql"), [(4,)]))
             tests: r#"print("TOTAL 1")
 check("buyers", lambda: assert_eq(run_query("src/day03/buyers.sql"), [("Ana",), ("Bea",), ("Leo",)]))
 "#,
-            guarded: &[],
+            guarded: &["from users", "from orders", "join orders", "join users"],
         },
         bridge: Exercise {
             file: "src/day03/big.sql",
@@ -716,7 +716,7 @@ check("buyers", lambda: assert_eq(run_query("src/day03/buyers.sql"), [("Ana",), 
             tests: r#"print("TOTAL 1")
 check("big orders", lambda: assert_eq(run_query("src/day03/big.sql"), [(1,), (2,)]))
 "#,
-            guarded: &[],
+            guarded: &["from users", "from orders", "join orders", "join users"],
         },
     },
 ];
