@@ -149,11 +149,11 @@ pub(super) fn score_donut(
     if hover.is_some() {
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
     }
-    if donut_resp.clicked() {
-        if let Some(i) = donut_hover {
-            toggle(selected, i);
-            response.mark_changed();
-        }
+    if donut_resp.clicked()
+        && let Some(i) = donut_hover
+    {
+        toggle(selected, i);
+        response.mark_changed();
     }
     for (i, r) in row_resps.iter().enumerate() {
         if r.clicked() {
@@ -278,7 +278,7 @@ fn draw_donut(
             continue;
         }
         let color = axis.color.gamma_multiply(t);
-        let stroke = Stroke::new(1.2, color);
+        let stroke = Stroke::new(1.2_f32, color);
         let (a0, a1) = (k as f32 * step + 0.03, (k + 1) as f32 * step - 0.03);
         let arc_r = outer + 6.0;
         let segments = ((a1 - a0) / 0.04).ceil().max(2.0) as usize;
@@ -307,7 +307,7 @@ fn draw_markers(painter: &Painter, center: Pos2, outer: f32, colors: &theme::Pal
                 polar(center, outer + 11.0, a),
                 polar(center, outer + 15.0, a),
             ],
-            Stroke::new(1.0, colors.muted.gamma_multiply(0.7)),
+            Stroke::new(1.0_f32, colors.muted.gamma_multiply(0.7)),
         );
         painter.text(
             polar(center, outer + 22.0, a),

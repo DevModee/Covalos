@@ -9,4 +9,7 @@ pub(super) mod progress;
 pub(super) mod rubric;
 pub(super) mod runner;
 pub(super) mod sync;
+mod ui;
 pub(super) mod voice;
+
+pub(super) use ui::StudentMode;
