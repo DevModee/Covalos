@@ -186,12 +186,9 @@ impl Editor {
                         let (_, mark) = ui.allocate_space(egui::vec2(22.0, 28.0));
                         draw_icon(ui.painter(), mark.center(), Icon::Brand, colors().accent);
                         ui.label(RichText::new(BRAND).size(LEAD).strong());
-                        ui.label(
-                            RichText::new(crate::brand::RELEASE)
-                                .size(SMALL)
-                                .color(colors().muted),
-                        );
-                        ui.add_space(8.0);
+                        ui.add_space(2.0);
+                        version_badge(ui);
+                        ui.add_space(10.0);
                         ui.menu_button(tr("File"), |ui| {
                             if ui.button(tr("Library Studio")).clicked() {
                                 ui.close();
@@ -2942,6 +2939,31 @@ fn tree(
 }
 
 /// Parse a shortcut such as "Ctrl+Shift+L" (Ctrl/Cmd map to the platform command key).
+/// The release name next to the logo as a quiet pill, so it reads as a tag and not as
+/// part of the product name. The tooltip carries the exact build.
+fn version_badge(ui: &mut Ui) -> egui::Response {
+    let text = crate::brand::RELEASE;
+    let font = egui::FontId::proportional(SMALL - 1.5);
+    let galley = ui.fonts_mut(|f| f.layout_no_wrap(text.to_owned(), font, colors().secondary));
+    let size = galley.size() + egui::vec2(14.0, 6.0);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::hover());
+    let painter = ui.painter();
+    painter.rect(
+        rect,
+        rect.height() * 0.5,
+        colors().elevated.gamma_multiply(0.7),
+        egui::Stroke::new(1.0_f32, colors().border.gamma_multiply(0.8)),
+        egui::StrokeKind::Inside,
+    );
+    painter.galley(
+        rect.center() - galley.size() * 0.5,
+        galley,
+        colors().secondary,
+    );
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, text));
+    response.on_hover_text(format!("{} {}", tr("Build"), crate::brand::VERSION))
+}
+
 pub(super) fn parse_shortcut(text: &str) -> Option<(Modifiers, Key)> {
     let mut modifiers = Modifiers::NONE;
     let mut key = None;
