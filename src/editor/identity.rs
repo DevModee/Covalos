@@ -340,9 +340,9 @@ impl Identity {
         p
     }
     pub(super) fn paint(&mut self, ui: &Ui, rect: Rect, prefs: &IdentityPreferences, _mood: Mood) {
-        if theme::active() == theme::Theme::OledDark {
+        let oled = theme::active() == theme::Theme::OledDark;
+        if oled {
             ui.painter_at(rect).rect_filled(rect, 0, Color32::BLACK);
-            return;
         }
         if prefs.background == Background::Off || rect.width() < 80.0 {
             return;
@@ -389,15 +389,19 @@ impl Identity {
                         super::dither::Variant::Field
                     },
                     time: t * 4.0,
-                    ink: gamma(if background == Background::Bloom {
+                    ink: gamma(if oled && !prefs.custom_tint {
+                        Color32::from_rgb(56, 108, 224)
+                    } else if background == Background::Bloom {
                         tint
                     } else {
                         palette.text
                     }),
-                    // The brush and ripples use a saturated violet like the reference; a
-                    // custom tint replaces it.
+                    // The brush and ripples use a saturated violet like the reference; OLED uses
+                    // deep cobalt blue and a custom tint replaces both.
                     accent: gamma(if prefs.custom_tint {
                         tint
+                    } else if oled {
+                        Color32::from_rgb(38, 84, 198)
                     } else if theme::active().is_dark() {
                         Color32::from_rgb(128, 92, 246)
                     } else {
@@ -412,6 +416,25 @@ impl Identity {
                 };
                 self.dither.fill(&mut frame, rect, self.now);
                 super::dither::paint(&p, rect, frame);
+                if oled {
+                    // Fade the lower half into pure black so the cobalt dither sits at the top.
+                    let mut mesh = egui::Mesh::default();
+                    let mid_y = rect.top() + rect.height() * 0.42;
+                    let clear = Color32::from_rgba_unmultiplied(0, 0, 0, 20);
+                    let solid = Color32::BLACK;
+                    let i0 = mesh.vertices.len() as u32;
+                    mesh.colored_vertex(rect.left_top(), clear);
+                    mesh.colored_vertex(rect.right_top(), clear);
+                    mesh.colored_vertex(egui::pos2(rect.left(), mid_y), Color32::from_rgba_unmultiplied(0, 0, 0, 170));
+                    mesh.colored_vertex(egui::pos2(rect.right(), mid_y), Color32::from_rgba_unmultiplied(0, 0, 0, 170));
+                    mesh.colored_vertex(rect.left_bottom(), solid);
+                    mesh.colored_vertex(rect.right_bottom(), solid);
+                    mesh.add_triangle(i0, i0 + 1, i0 + 2);
+                    mesh.add_triangle(i0 + 1, i0 + 3, i0 + 2);
+                    mesh.add_triangle(i0 + 2, i0 + 3, i0 + 4);
+                    mesh.add_triangle(i0 + 3, i0 + 5, i0 + 4);
+                    p.add(egui::Shape::mesh(mesh));
+                }
             }
             Background::Orbital => {
                 halo(

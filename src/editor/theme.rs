@@ -123,31 +123,30 @@ impl Theme {
                 caret: Color32::from_rgb(102, 174, 255),
                 selection: Color32::from_rgba_unmultiplied(59, 130, 246, 76),
             },
-            // True black canvas with pure neutral grays stepping up by value. Borders and text
-            // carry no hue; the lilac accent is kept for focus, the active selection and the
-            // primary action only.
+            // True black canvas with pure neutral grays stepping up by value and a deep
+            // cobalt-blue accent matching the OLED dither backdrop.
             Self::OledDark => Palette {
                 canvas: Color32::from_rgb(0, 0, 0),
-                inset: Color32::from_rgb(4, 4, 6),
-                surface: Color32::from_rgb(10, 10, 12),
-                elevated: Color32::from_rgb(17, 17, 20),
-                hover: Color32::from_rgb(28, 28, 32),
-                border: Color32::from_rgb(30, 30, 35),
-                control_border: Color32::from_rgb(52, 52, 58),
-                text: Color32::from_rgb(236, 236, 240),
-                secondary: Color32::from_rgb(178, 178, 186),
-                muted: Color32::from_rgb(140, 140, 150),
-                disabled: Color32::from_rgb(92, 92, 100),
-                accent: Color32::from_rgb(196, 176, 255),
-                accent_hover: Color32::from_rgb(220, 206, 255),
-                accent_bg: Color32::from_rgb(30, 28, 40),
+                inset: Color32::from_rgb(3, 3, 4),
+                surface: Color32::from_rgb(6, 6, 8),
+                elevated: Color32::from_rgb(13, 13, 15),
+                hover: Color32::from_rgb(22, 22, 26),
+                border: Color32::from_rgb(24, 24, 28),
+                control_border: Color32::from_rgb(44, 44, 50),
+                text: Color32::from_rgb(238, 238, 242),
+                secondary: Color32::from_rgb(176, 176, 184),
+                muted: Color32::from_rgb(132, 132, 142),
+                disabled: Color32::from_rgb(86, 86, 94),
+                accent: Color32::from_rgb(96, 152, 255),
+                accent_hover: Color32::from_rgb(136, 180, 255),
+                accent_bg: Color32::from_rgb(16, 26, 48),
                 success: Color32::from_rgb(126, 224, 176),
                 error: Color32::from_rgb(255, 140, 156),
                 warning: Color32::from_rgb(244, 202, 128),
                 syntax_string: Color32::from_rgb(140, 226, 192),
                 syntax_number: Color32::from_rgb(248, 180, 136),
-                caret: Color32::from_rgb(236, 236, 240),
-                selection: Color32::from_rgba_unmultiplied(160, 150, 255, 64),
+                caret: Color32::from_rgb(238, 238, 242),
+                selection: Color32::from_rgba_unmultiplied(59, 130, 246, 68),
             },
             // Plum-charcoal surfaces, ivory text, low-contrast hairlines and a lilac accent.
             Self::Nocturne => Palette {

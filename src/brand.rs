@@ -13,7 +13,7 @@ pub const DESCRIPTION: &str = "Native Rust IDE with multi-agent orchestration";
 /// increasing independently of the public release name.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Public release name shown to people. See docs/RELEASE.md.
-pub const RELEASE: &str = "Beta 0.8.8";
+pub const RELEASE: &str = "Beta 0.8.9";
 pub const USER_AGENT: &str = "COVALOS-Library-Studio";
 
 pub const APP_ICON_PNG: &[u8] = include_bytes!("../assets/brand/covalos-app-256.png");
