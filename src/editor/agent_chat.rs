@@ -739,7 +739,7 @@ fn connection_view(runtime: &Runtime, account: &Account) -> (egui::Color32, Stri
         return (colors().error, "Not installed".into());
     }
     match runtime.connection.get(&account.id) {
-        None | Some(Connection::Checking) => (colors().muted, "Checkingâ€¦".into()),
+        None | Some(Connection::Checking) => (colors().muted, "Checking…".into()),
         Some(Connection::SignedIn(_)) => (colors().success, "Authenticated".into()),
         Some(Connection::SignedOut(_)) => (colors().warning, "Signed out".into()),
         Some(Connection::GeminiMigrationRequired) => {
@@ -792,7 +792,7 @@ fn fact(ui: &mut Ui, text: impl Into<String>) {
 }
 
 fn separator_dot(ui: &mut Ui) {
-    ui.label(RichText::new("Â·").size(SMALL).color(colors().muted));
+    ui.label(RichText::new("·").size(SMALL).color(colors().muted));
 }
 
 /// Opaque reading surface used behind every chat block.
@@ -1510,7 +1510,7 @@ fn identity_line(ui: &mut Ui, runtime: &mut Runtime, session_index: usize) {
                                 .color(colors().secondary),
                         )
                         .on_hover_text(format!(
-                            "{} Â· {}",
+                            "{} · {}",
                             a.id,
                             tr(method_name(a.method))
                         ));
@@ -1541,7 +1541,7 @@ fn identity_line(ui: &mut Ui, runtime: &mut Runtime, session_index: usize) {
                         "{}{}",
                         tr(preset_name(meta.preset)),
                         if meta.worktree_branch.is_some() {
-                            " Â· worktree"
+                            " · worktree"
                         } else {
                             ""
                         }
@@ -1717,7 +1717,7 @@ fn timeline(ui: &mut Ui, session: &LiveSession, actions: &mut Vec<Action>) {
             seen.push(name);
             let n = tools.iter().filter(|t| *t == name).count();
             names.push(if n > 1 {
-                format!("{} Ã—{n}", tool_title(name))
+                format!("{} ×{n}", tool_title(name))
             } else {
                 tool_title(name).to_owned()
             });
@@ -1731,7 +1731,7 @@ fn timeline(ui: &mut Ui, session: &LiveSession, actions: &mut Vec<Action>) {
                 colors().muted,
                 13.0,
             );
-            ui.label(meta_text(names.join(" Â· ")));
+            ui.label(meta_text(names.join(" · ")));
         });
         tools.clear();
     };
@@ -2227,7 +2227,7 @@ fn git(dir: &std::path::Path, args: &[&str]) -> Result<String, String> {
 fn technical_log(ui: &mut Ui, runtime: &Runtime, session: &LiveSession) {
     let meta = &session.meta;
     egui::CollapsingHeader::new(meta_text(format!(
-        "{} Â· {} {}",
+        "{} · {} {}",
         tr("Technical log"),
         meta.log.len(),
         tr("events")
@@ -2237,12 +2237,12 @@ fn technical_log(ui: &mut Ui, runtime: &Runtime, session: &LiveSession) {
     .show(ui, |ui| {
         let base = meta.log.first().map_or(0, |l| l.at_ms);
         ui.label(meta_text(format!(
-            "{} turns Â· {} in Â· {} out{}",
+            "{} turns · {} in · {} out{}",
             meta.turns,
             meta.input_tokens,
             meta.output_tokens,
             if meta.cost_micros > 0 {
-                format!(" Â· US$ {:.4} reported", meta.cost_micros as f64 / 1e6)
+                format!(" · US$ {:.4} reported", meta.cost_micros as f64 / 1e6)
             } else {
                 String::new()
             }
@@ -2278,7 +2278,7 @@ fn technical_log(ui: &mut Ui, runtime: &Runtime, session: &LiveSession) {
             let allowed = entry["allow"] == true;
             ui.label(
                 RichText::new(format!(
-                    "gate {} {} {} â€” {}",
+                    "gate {} {} {} — {}",
                     if allowed { "ALLOW" } else { "DENY " },
                     entry["tool"].as_str().unwrap_or_default(),
                     entry["target"].as_str().unwrap_or_default(),
@@ -2368,7 +2368,7 @@ fn composer(
                     let text = if *attach {
                         format!("+ {name}")
                     } else {
-                        format!("â€“ {name}")
+                        format!("– {name}")
                     };
                     let width = (ui.available_width() / 3.0).clamp(32.0, 128.0);
                     if ui

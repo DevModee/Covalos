@@ -137,7 +137,7 @@ pub(crate) fn sanitize_status(text: &str) -> String {
         })
         .take(3)
         .collect::<Vec<_>>()
-        .join(" Â· ")
+        .join(" · ")
         .chars()
         .take(200)
         .collect()
@@ -1126,7 +1126,7 @@ impl Runtime {
             (new.root.clone(), None, None)
         };
         let title = if new.title.trim().is_empty() {
-            format!("{} Â· {}", spec.label, account.label)
+            format!("{} · {}", spec.label, account.label)
         } else {
             new.title.trim().to_owned()
         };
@@ -1162,7 +1162,7 @@ impl Runtime {
         );
         session.log(
             "created",
-            format!("{} Â· {} Â· {where_}", spec.label, account.label),
+            format!("{} · {} · {where_}", spec.label, account.label),
         );
         self.sessions.push(session);
         self.save_sessions();
@@ -2273,7 +2273,7 @@ fn apply_event(session: &mut LiveSession, event: AgentEvent) {
                     "started",
                     format!(
                         "Provider session {provider_session}{}",
-                        model.map(|m| format!(" Â· {m}")).unwrap_or_default()
+                        model.map(|m| format!(" · {m}")).unwrap_or_default()
                     ),
                 );
             }
@@ -2298,7 +2298,7 @@ fn apply_event(session: &mut LiveSession, event: AgentEvent) {
             session.log(
                 "usage",
                 format!(
-                    "{} in Â· {} out tokens",
+                    "{} in · {} out tokens",
                     usage.input_tokens, usage.output_tokens
                 ),
             );
@@ -3646,7 +3646,7 @@ input.on('line',line=>{
     #[test]
     fn signed_out_status_is_recognized() {
         assert!(signed_out(
-            "Login: Expired â€” log in again Â· Not logged in."
+            "Login: Expired — log in again · Not logged in."
         ));
         assert!(!signed_out("Logged in using ChatGPT"));
     }
@@ -3655,7 +3655,7 @@ input.on('line',line=>{
     fn status_text_drops_identifiers() {
         assert_eq!(
             sanitize_status("Login method: Claude account\nEmail: someone@example.com\nOrg: x"),
-            "Login method: Claude account Â· Org: x"
+            "Login method: Claude account · Org: x"
         );
     }
 
