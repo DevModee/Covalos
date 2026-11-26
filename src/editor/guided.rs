@@ -1509,14 +1509,15 @@ impl super::Editor {
                 egui::pos2(right, screen.bottom() - super::theme::STATUS_HEIGHT - 8.0),
             );
             let max_h = (safe_rect.height() - 48.0).max(220.0);
+            // No title bar: the lesson header already names the plan and holds the close
+            // button, so the code gets that height. The window drags from its background.
             egui::Window::new(tr("Guided Mode"))
                 .id(Id::new("covalos-guided-lyrics"))
-                .open(&mut open)
+                .title_bar(false)
                 .resizable(true)
-                .collapsible(true)
                 .constrain(true)
                 .constrain_to(safe_rect)
-                .default_width(500.0)
+                .default_width(560.0)
                 .min_width(360.0)
                 .max_height(max_h)
                 .pivot(pivot)
@@ -1525,8 +1526,8 @@ impl super::Editor {
                     Frame::new()
                         .fill(colors().surface)
                         .stroke(egui::Stroke::new(1.0_f32, colors().control_border))
-                        .corner_radius(16)
-                        .inner_margin(Margin::same(16))
+                        .corner_radius(14)
+                        .inner_margin(Margin::symmetric(14, 12))
                         .shadow(super::theme::floating_shadow(super::theme::active(), 28)),
                 )
                 .show(ctx, |ui| {
@@ -1539,6 +1540,9 @@ impl super::Editor {
                 });
         }
         self.guided.prompt_draft = draft;
+        if actions.close_now {
+            open = false;
+        }
 
         let prev_open = self.guided.open;
         self.guided.open = open;
@@ -1662,6 +1666,34 @@ struct GuidedUiActions {
     toggle_detached: bool,
     toggle_learn_hover: bool,
     font_delta: i32,
+    /// Close button in the header; the floating window has no title bar.
+    close_now: bool,
+}
+
+/// The header's close button, only for the floating window (a popped-out window has
+/// the system one).
+fn close_button(ui: &mut egui::Ui, view: &GuidedViewConfig, actions: &mut GuidedUiActions) {
+    if view.detached {
+        return;
+    }
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::click());
+    if response.hovered() {
+        ui.painter().rect_filled(rect, 6, colors().hover);
+    }
+    super::theme::draw_icon(
+        ui.painter(),
+        rect.center(),
+        super::theme::Icon::Close,
+        if response.hovered() {
+            colors().text
+        } else {
+            colors().muted
+        },
+    );
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close"));
+    if super::theme::pointer(response.on_hover_text(tr("Close"))).clicked() {
+        actions.close_now = true;
+    }
 }
 
 /// Guided Studio launcher, shown when no guided session is active yet:
@@ -1683,6 +1715,7 @@ fn render_guided_launcher(
         );
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
+            close_button(ui, view, actions);
             let detach_lbl = if view.detached {
                 tr("Dock ↙")
             } else {
@@ -1906,10 +1939,12 @@ fn render_guided_body(
     let next_step_path = session.plan.steps.get(step_idx + 1).map(|s| s.path.clone());
     let wide = ui.available_width() >= 680.0;
 
-    // One compact header row: title, step, XP and a menu with the secondary toggles.
+    // One compact header row: title, step, XP, a menu with the secondary toggles and,
+    // in the floating window, the close button.
     ui.horizontal(|ui| {
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
+            close_button(ui, view, actions);
             guided_options_menu(ui, view, actions);
             xp_badge(ui, view.xp, view.streak, view.recent_xp);
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
@@ -1942,9 +1977,9 @@ fn render_guided_body(
         });
     });
 
-    ui.add_space(6.0);
+    ui.add_space(4.0);
     let (prog_rect, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 4.0), egui::Sense::hover());
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 3.0), egui::Sense::hover());
     ui.painter().rect_filled(prog_rect, 2, colors().hover);
     let step_ratio = (done_steps as f32 / total_steps.max(1) as f32).clamp(0.0, 1.0);
     if step_ratio > 0.0 {
@@ -2180,19 +2215,19 @@ fn teleprompter_column(
         Frame::new()
             .fill(colors().elevated)
             .corner_radius(10)
-            .inner_margin(Margin::symmetric(12, 8))
+            .inner_margin(Margin::symmetric(14, 10))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.add(
                     egui::Label::new(
                         RichText::new(why)
-                            .size(SMALL * view.font_scale.min(1.25))
-                            .color(colors().secondary),
+                            .size(BODY * view.font_scale.min(1.25))
+                            .color(colors().text.gamma_multiply(0.88)),
                     )
                     .wrap(),
                 );
             });
-        ui.add_space(8.0);
+        ui.add_space(10.0);
     }
 
     // Lyrics-style synced code block with syntax colors & karaoke active line
@@ -2200,16 +2235,17 @@ fn teleprompter_column(
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("");
-    let context_before = if view.detached { 3 } else { 2 };
-    let context_after = if view.detached { 6 } else { 4 };
-    let code_small = (SMALL * view.font_scale).clamp(11.0, 22.0);
-    let code_active = ((BODY + 1.5) * view.font_scale).clamp(13.0, 27.0);
+    // The code is the lesson: more surrounding lines and a size that reads at a glance.
+    let context_before = if view.detached { 4 } else { 3 };
+    let context_after = if view.detached { 9 } else { 6 };
+    let code_small = ((SMALL + 1.0) * view.font_scale).clamp(12.0, 23.0);
+    let code_active = ((BODY + 3.0) * view.font_scale).clamp(15.0, 29.0);
 
     Frame::new()
         .fill(colors().inset)
-        .corner_radius(11)
+        .corner_radius(12)
         .stroke(egui::Stroke::new(1.0_f32, colors().border))
-        .inner_margin(Margin::symmetric(14, 12))
+        .inner_margin(Margin::symmetric(16, 14))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             let start = line_idx.saturating_sub(context_before);
@@ -2610,7 +2646,7 @@ fn detail_card(ui: &mut egui::Ui, step: &GuidedStep, line_idx: usize, complete: 
             colors().border.gamma_multiply(0.75),
         ))
         .corner_radius(12)
-        .inner_margin(Margin::symmetric(14, 11))
+        .inner_margin(Margin::symmetric(16, 14))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
@@ -2632,11 +2668,11 @@ fn detail_card(ui: &mut egui::Ui, step: &GuidedStep, line_idx: usize, complete: 
                 });
             });
             if !complete && line_idx < step.lines.len() {
-                ui.add_space(3.0);
+                ui.add_space(6.0);
                 ui.add(
                     egui::Label::new(
                         RichText::new(step.line_note(line_idx))
-                            .size(SMALL)
+                            .size(BODY)
                             .color(colors().text),
                     )
                     .wrap(),
@@ -2644,7 +2680,8 @@ fn detail_card(ui: &mut egui::Ui, step: &GuidedStep, line_idx: usize, complete: 
                 // Part by part: what each keyword, call and operator on the line does.
                 let pieces = line_pieces(&step.lines[line_idx]);
                 if !pieces.is_empty() {
-                    ui.add_space(5.0);
+                    ui.add_space(8.0);
+                    ui.spacing_mut().item_spacing.y = 5.0;
                     for (token, note) in &pieces {
                         let token: String = if token.chars().count() > 32 {
                             token.chars().take(30).chain(['…']).collect()
@@ -2666,15 +2703,16 @@ fn detail_card(ui: &mut egui::Ui, step: &GuidedStep, line_idx: usize, complete: 
                 }
             }
             if let Some(detail) = step.detail.as_deref().filter(|d| !d.trim().is_empty()) {
-                ui.add_space(7.0);
+                ui.add_space(12.0);
                 ui.label(
                     RichText::new(tr("This block"))
                         .size(SMALL)
                         .strong()
                         .color(colors().secondary),
                 );
+                ui.add_space(2.0);
                 ui.add(
-                    egui::Label::new(RichText::new(detail).size(SMALL).color(colors().text)).wrap(),
+                    egui::Label::new(RichText::new(detail).size(BODY).color(colors().text)).wrap(),
                 );
             }
             if !calls.is_empty() {
