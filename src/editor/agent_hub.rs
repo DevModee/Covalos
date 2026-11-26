@@ -291,6 +291,14 @@ fn provider_status(runtime: &Runtime, account: &Account) -> (egui::Color32, &'st
     if !account.enabled {
         return (colors().muted, "Disabled", String::new());
     }
+    if account.provider == ProviderKind::Gemini {
+        return (
+            colors().warning,
+            "Replaced by Antigravity",
+            tr("Google moved Gemini CLI to Antigravity. Add Antigravity and remove this account.")
+                .to_owned(),
+        );
+    }
     if runtime.program(&account.provider).is_none() {
         return (colors().error, "Not installed", String::new());
     }
@@ -721,10 +729,11 @@ fn provider_detail(
     });
 }
 
-const PROVIDERS: [(ProviderKind, &str); 5] = [
+/// Providers offered when adding an account. Gemini CLI is left out: Google moved it to
+/// Antigravity. Saved Gemini CLI accounts still load and are marked as replaced.
+const PROVIDERS: [(ProviderKind, &str); 4] = [
     (ProviderKind::ClaudeCode, "Claude Code"),
     (ProviderKind::Codex, "OpenAI Codex"),
-    (ProviderKind::Gemini, "Gemini CLI"),
     (ProviderKind::Antigravity, "Antigravity"),
     (ProviderKind::OpenCode, "OpenCode"),
 ];

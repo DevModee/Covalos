@@ -2454,6 +2454,12 @@ const SPANISH: &[(&str, &str)] = &[
         "The installer is open. Finish it, then restart Covalos.",
         "El instalador está abierto. Terminalo y después reiniciá Covalos.",
     ),
+    // Gemini CLI retirement
+    ("Replaced by Antigravity", "Reemplazado por Antigravity"),
+    (
+        "Google moved Gemini CLI to Antigravity. Add Antigravity and remove this account.",
+        "Google pasó Gemini CLI a Antigravity. Agregá Antigravity y quitá esta cuenta.",
+    ),
 ];
 
 #[cfg(test)]

@@ -723,7 +723,6 @@ pub(super) fn chat_accounts(runtime: &Runtime) -> Vec<Account> {
                     a.provider,
                     ProviderKind::ClaudeCode
                         | ProviderKind::Codex
-                        | ProviderKind::Gemini
                         | ProviderKind::Antigravity
                         | ProviderKind::OpenCode
                 )
