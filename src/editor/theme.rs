@@ -123,19 +123,31 @@ impl Theme {
                 caret: Color32::from_rgb(102, 174, 255),
                 selection: Color32::from_rgba_unmultiplied(59, 130, 246, 76),
             },
-            // Deep violet-black base: surfaces separated by value, hairline borders, a lilac
-            // accent and a luminous pink caret. Neutrals carry a slight violet cast.
-            // The code well stays pure black; the chrome, cards and floating surfaces step up
-            // in value so bars, islands and popups keep a readable edge on OLED panels.
+            // True black canvas with pure neutral grays stepping up by value. Borders and text
+            // carry no hue; the lilac accent is kept for focus, the active selection and the
+            // primary action only.
             Self::OledDark => Palette {
-                canvas: Color32::from_rgb(10, 9, 13),
-                inset: Color32::BLACK,
-                surface: Color32::from_rgb(17, 16, 22),
-                elevated: Color32::from_rgb(29, 27, 37),
-                hover: Color32::from_rgb(41, 38, 52),
-                border: Color32::from_rgb(52, 48, 64),
-                control_border: Color32::from_rgb(80, 74, 98),
-                ..Self::Nocturne.colors()
+                canvas: Color32::from_rgb(0, 0, 0),
+                inset: Color32::from_rgb(4, 4, 6),
+                surface: Color32::from_rgb(10, 10, 12),
+                elevated: Color32::from_rgb(17, 17, 20),
+                hover: Color32::from_rgb(28, 28, 32),
+                border: Color32::from_rgb(30, 30, 35),
+                control_border: Color32::from_rgb(52, 52, 58),
+                text: Color32::from_rgb(236, 236, 240),
+                secondary: Color32::from_rgb(178, 178, 186),
+                muted: Color32::from_rgb(140, 140, 150),
+                disabled: Color32::from_rgb(92, 92, 100),
+                accent: Color32::from_rgb(196, 176, 255),
+                accent_hover: Color32::from_rgb(220, 206, 255),
+                accent_bg: Color32::from_rgb(30, 28, 40),
+                success: Color32::from_rgb(126, 224, 176),
+                error: Color32::from_rgb(255, 140, 156),
+                warning: Color32::from_rgb(244, 202, 128),
+                syntax_string: Color32::from_rgb(140, 226, 192),
+                syntax_number: Color32::from_rgb(248, 180, 136),
+                caret: Color32::from_rgb(236, 236, 240),
+                selection: Color32::from_rgba_unmultiplied(160, 150, 255, 64),
             },
             // Plum-charcoal surfaces, ivory text, low-contrast hairlines and a lilac accent.
             Self::Nocturne => Palette {
@@ -1106,5 +1118,26 @@ mod tests {
             }
         }
         ACTIVE_THEME.with(|active| active.set(Theme::Dark));
+    }
+
+    #[test]
+    fn oled_dark_stays_black_and_neutral() {
+        let p = Theme::OledDark.colors();
+        assert_eq!(p.canvas, Color32::BLACK);
+        for c in [
+            p.inset,
+            p.surface,
+            p.elevated,
+            p.hover,
+            p.border,
+            p.control_border,
+            p.text,
+            p.secondary,
+            p.muted,
+        ] {
+            let spread = c.r().max(c.g()).max(c.b()) - c.r().min(c.g()).min(c.b());
+            assert!(spread <= 10, "tinted neutral {c:?}");
+        }
+        assert!(p.surface.r() < 16 && p.inset.r() < p.surface.r());
     }
 }
