@@ -110,9 +110,7 @@ impl SyntaxStyle {
                 Theme::Light => Self::Daylight,
                 Theme::Daylight => Self::Sunlight,
                 Theme::HighContrast => Self::HighContrast,
-                Theme::Obsidian | Theme::Dark | Theme::Midnight | Theme::OledDark => {
-                    Self::Graphite
-                }
+                Theme::Obsidian | Theme::Dark | Theme::Midnight | Theme::OledDark => Self::Graphite,
                 Theme::Nocturne | Theme::Violet => Self::Nocturne,
             },
             other => other,
