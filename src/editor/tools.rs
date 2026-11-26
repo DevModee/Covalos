@@ -1121,7 +1121,7 @@ impl Editor {
                             if selected {
                                 colors().text
                             } else {
-                                colors().secondary
+                                colors().muted
                             },
                         ))
                         .fill(if selected {
@@ -1129,12 +1129,9 @@ impl Editor {
                         } else {
                             egui::Color32::TRANSPARENT
                         })
-                        .stroke(if selected {
-                            egui::Stroke::new(1.0_f32, colors().border)
-                        } else {
-                            egui::Stroke::NONE
-                        })
-                        .corner_radius(10);
+                        .stroke(egui::Stroke::NONE)
+                        .corner_radius(8)
+                        .min_size(egui::vec2(0.0, 24.0));
                         if ui.add(btn).clicked() {
                             self.tools.tab = tab;
                         }

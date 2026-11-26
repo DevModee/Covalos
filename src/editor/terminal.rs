@@ -507,22 +507,20 @@ impl Editor {
                     term.title()
                 );
                 let selected = i == terms.active || Some(i) == terms.second;
+                // Soft pills: no outline, the active tab is a lighter fill.
                 let btn = egui::Button::new(RichText::new(text).size(SMALL).color(if selected {
                     colors().text
                 } else {
-                    colors().secondary
+                    colors().muted
                 }))
                 .fill(if selected {
                     colors().elevated
                 } else {
                     egui::Color32::TRANSPARENT
                 })
-                .stroke(if selected {
-                    egui::Stroke::new(1.0_f32, colors().border)
-                } else {
-                    egui::Stroke::NONE
-                })
-                .corner_radius(10);
+                .stroke(egui::Stroke::NONE)
+                .corner_radius(8)
+                .min_size(egui::vec2(0.0, 24.0));
                 let response = ui.add(btn).on_hover_text(term.cwd.display().to_string());
                 if response.clicked() {
                     terms.active = i;
@@ -570,8 +568,8 @@ impl Editor {
                                 .size(SMALL)
                                 .color(colors().accent),
                         )
-                        .fill(colors().elevated)
-                        .stroke(egui::Stroke::new(1.0_f32, colors().border))
+                        .fill(egui::Color32::TRANSPARENT)
+                        .stroke(egui::Stroke::NONE)
                         .corner_radius(8);
                         if ui
                             .add(preview_btn)
@@ -608,7 +606,7 @@ impl Editor {
             return;
         }
         let focus = std::mem::take(&mut terms.focus_input);
-        ui.add_space(4.0);
+        ui.add_space(6.0);
         let rect = ui.available_rect_before_wrap();
         let active = terms.active;
         match terms.second {
