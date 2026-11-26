@@ -12,8 +12,8 @@ mod cloud_sync;
 mod cloud_ui;
 mod companion;
 mod discord;
-mod dot_loader;
 mod dither;
+mod dot_loader;
 mod editing;
 mod files;
 mod ghost;
@@ -27,6 +27,7 @@ mod ligatures;
 mod lsp;
 mod luma_ui;
 mod mascot;
+mod modes;
 mod motion;
 mod navigation;
 mod panels;
@@ -37,12 +38,14 @@ mod sessions;
 mod shell;
 mod skills;
 mod student;
+mod student_host;
 mod studio;
 mod syntax;
 mod terminal;
 mod theme;
 mod tools;
 mod ui_icons;
+mod update_ui;
 
 use i18n::tr;
 use preferences::Preferences;
@@ -159,6 +162,8 @@ pub struct Editor {
     sidebar_open: bool,
     /// Live filename filter for the Explorer tree.
     explorer_filter: String,
+    /// Release checks, download and restart for auto-update.
+    updater: update_ui::Updater,
     notifications: Vec<shell::Notification>,
     notifications_open: bool,
     notifications_query: String,
@@ -167,6 +172,7 @@ pub struct Editor {
     /// COVALOS account, Cloud Config Sync and the phone bridge.
     cloud: cloud_ui::Cloud,
     guided: guided::GuidedController,
+    student: student::StudentMode,
     session_started: u64,
     splash_started: Option<std::time::Instant>,
     explorer_rect: Option<egui::Rect>,
@@ -264,6 +270,7 @@ impl Editor {
             sidebar_requested: false,
             sidebar_open: true,
             explorer_filter: String::new(),
+            updater: Default::default(),
             notifications: Vec::new(),
             notifications_open: false,
             notifications_query: String::new(),
@@ -271,6 +278,7 @@ impl Editor {
             discord: discord::Presence::default(),
             cloud: cloud_ui::Cloud::default(),
             guided: guided::GuidedController::default(),
+            student: student::StudentMode::default(),
             session_started: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs()),
@@ -952,8 +960,10 @@ impl Editor {
             &self.preferences.identity,
             self.preferences.reduce_motion,
             // The background only runs where it can be seen: Home (also when every
-            // file floats in Clean Code), the Agents area, or behind code if enabled.
+            // file floats in Clean Code), the Agents area, Student Mode, or behind code
+            // if enabled.
             self.hub_open
+                || self.student.open
                 || self.documents.is_empty()
                 || self.active.is_none()
                 || self.preferences.identity.behind_code,
@@ -964,6 +974,7 @@ impl Editor {
         }
         self.update_presence();
         self.tick_guided();
+        self.tick_updater(ctx);
         if ctx.input(|input| input.viewport().close_requested()) && !self.force_close {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.request(Pending::Exit, ctx);
@@ -986,6 +997,7 @@ impl Editor {
         );
         self.top_bar(ctx);
         self.status_bar(ctx);
+        self.update_notice(ctx);
         if self.studio_open && !self.hub_open {
             self.activity_rail(ctx);
             egui::CentralPanel::default()
@@ -995,6 +1007,12 @@ impl Editor {
             egui::CentralPanel::default()
                 .frame(theme::centre_island(egui::Margin::same(0)).fill(theme::colors().canvas))
                 .show(ctx, |ui| self.agent_hub(ui));
+        } else if self.student.open {
+            // Student Mode replaces the central view; tabs and sessions stay as they are.
+            self.activity_rail(ctx);
+            egui::CentralPanel::default()
+                .frame(theme::centre_island(egui::Margin::same(0)).fill(egui::Color32::BLACK))
+                .show(ctx, |ui| self.student_view(ui));
         } else {
             let focus = self.clean.focus;
             if self.preferences.tools_open && !focus {

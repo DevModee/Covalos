@@ -711,7 +711,7 @@ fn preset_name(preset: Preset) -> &'static str {
 }
 
 /// Accounts that can run a chat turn today.
-fn chat_accounts(runtime: &Runtime) -> Vec<Account> {
+pub(super) fn chat_accounts(runtime: &Runtime) -> Vec<Account> {
     runtime
         .profiles
         .accounts()

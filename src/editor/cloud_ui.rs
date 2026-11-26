@@ -106,7 +106,7 @@ impl Cloud {
         });
     }
 
-    fn signed_in(&self) -> Option<(&Endpoint, &Session)> {
+    pub(super) fn signed_in(&self) -> Option<(&Endpoint, &Session)> {
         Some((self.endpoint.as_ref()?, self.session.as_ref()?))
     }
 
@@ -656,7 +656,9 @@ impl Editor {
                     } else {
                         colors().muted
                     };
-                    ui.add(egui::Label::new(RichText::new(message).size(SMALL).color(color)).wrap());
+                    ui.add(
+                        egui::Label::new(RichText::new(message).size(SMALL).color(color)).wrap(),
+                    );
                 }
             });
         if !cloud::store_is_persistent() {
@@ -780,7 +782,7 @@ impl Editor {
                 )
                 .clicked();
             if busy {
-                ui.spinner();
+                super::theme::busy_indicator(ui);
             }
         });
         if upload {
