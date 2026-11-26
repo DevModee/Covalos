@@ -398,7 +398,7 @@ impl Editor {
                     |ui| {
                         ui.spacing_mut().item_spacing.x = 4.0;
                         if icon_button(ui, Icon::Close, "Close window", false).clicked() {
-                            self.request(Pending::Exit, ctx);
+                            self.close_window(ctx);
                         }
                         if icon_button(
                             ui,

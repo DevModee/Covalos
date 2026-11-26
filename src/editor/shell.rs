@@ -1711,6 +1711,7 @@ impl Editor {
                                             match active_tab {
                                 SettingsSection::General => {
                                     self.update_settings(ui);
+                                    self.tray_setting(ui);
                                     setting_row(
                                         ui,
                                         "Version",

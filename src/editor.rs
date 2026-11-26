@@ -44,6 +44,7 @@ mod syntax;
 mod terminal;
 mod theme;
 mod tools;
+mod tray;
 mod ui_icons;
 mod update_ui;
 
@@ -164,6 +165,9 @@ pub struct Editor {
     explorer_filter: String,
     /// Release checks, download and restart for auto-update.
     updater: update_ui::Updater,
+    /// Tray icon while the window is hidden, and the native window it restores.
+    tray: Option<tray::Tray>,
+    main_window: Option<isize>,
     notifications: Vec<shell::Notification>,
     notifications_open: bool,
     notifications_query: String,
@@ -271,6 +275,8 @@ impl Editor {
             sidebar_open: true,
             explorer_filter: String::new(),
             updater: Default::default(),
+            tray: None,
+            main_window: None,
             notifications: Vec::new(),
             notifications_open: false,
             notifications_query: String::new(),
@@ -975,9 +981,10 @@ impl Editor {
         self.update_presence();
         self.tick_guided();
         self.tick_updater(ctx);
+        self.tick_tray(ctx);
         if ctx.input(|input| input.viewport().close_requested()) && !self.force_close {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.request(Pending::Exit, ctx);
+            self.close_window(ctx);
         }
 
         if self.pending.is_none()
@@ -1210,6 +1217,7 @@ fn language_name(extension: &str) -> &'static str {
 
 impl eframe::App for Editor {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        self.main_window = tray::window_of(frame);
         self.render(ctx);
         self.sync_preview(ctx, frame);
         self.autosave_conversation(ctx);
