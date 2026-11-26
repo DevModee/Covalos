@@ -590,7 +590,7 @@ impl Editor {
         if let Some(i) = close.filter(|i| *i < terms.tabs.len()) {
             terms.tabs.remove(i);
             terms.second = None;
-            terms.active = terms.active.min(terms.tabs.len().saturating_sub(1));
+            terms.active = active_after_close(terms.active, i, terms.tabs.len());
         }
         if terms
             .second
@@ -910,9 +910,29 @@ impl Editor {
     }
 }
 
+/// The active tab index after tab `closed` is removed, `remaining` tabs left: the same
+/// shell stays active when another tab closes, and its neighbour when it closes itself.
+fn active_after_close(active: usize, closed: usize, remaining: usize) -> usize {
+    let active = if closed < active { active - 1 } else { active };
+    active.min(remaining.saturating_sub(1))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn closing_another_tab_keeps_the_same_shell_active() {
+        // [A, B, C] with B active: closing A keeps B, now at 0.
+        assert_eq!(active_after_close(1, 0, 2), 0);
+        // Closing C keeps B.
+        assert_eq!(active_after_close(1, 2, 2), 1);
+        // Closing the active last tab moves to the one before it.
+        assert_eq!(active_after_close(2, 2, 2), 1);
+        // Closing the active middle tab moves to the one that took its place.
+        assert_eq!(active_after_close(1, 1, 2), 1);
+        assert_eq!(active_after_close(0, 0, 0), 0);
+    }
 
     #[test]
     fn urls_and_ansi_are_parsed_from_dev_server_output() {
