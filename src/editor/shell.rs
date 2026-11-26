@@ -1710,6 +1710,7 @@ impl Editor {
                                             ui.add_space(12.0);
                                             match active_tab {
                                 SettingsSection::General => {
+                                    self.update_settings(ui);
                                     setting_row(
                                         ui,
                                         "Version",
