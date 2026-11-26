@@ -2454,6 +2454,16 @@ const SPANISH: &[(&str, &str)] = &[
         "The installer is open. Finish it, then restart Covalos.",
         "El instalador está abierto. Terminalo y después reiniciá Covalos.",
     ),
+    // Student Mode tutor accounts
+    ("Tutor", "Profesor"),
+    ("Checking AI accounts", "Verificando cuentas de IA"),
+    ("Connect an AI", "Conectar una IA"),
+    (
+        "Open Agents to sign in to Claude Code, Codex or Antigravity.",
+        "Abrí Agentes para iniciar sesión en Claude Code, Codex o Antigravity.",
+    ),
+    ("Connecting to your AI", "Conectando con tu IA"),
+    ("The tutor now runs on", "Ahora el profesor usa"),
     // Gemini CLI retirement
     ("Replaced by Antigravity", "Reemplazado por Antigravity"),
     (
