@@ -13,6 +13,7 @@ mod cloud_ui;
 mod companion;
 mod discord;
 mod dither;
+mod editing;
 mod files;
 mod ghost;
 mod git_gutter;
@@ -1324,6 +1325,44 @@ mod tests {
             "fn main() { }\n// Unicode: café\n"
         );
         Ok(())
+    }
+
+    #[test]
+    fn typing_in_the_editor_closes_pairs_and_indents() {
+        let folder = tempfile::tempdir().expect("temp dir");
+        let ctx = egui::Context::default();
+        let mut editor = Editor::new(&ctx, Some(folder.path().to_owned()), Preferences::default());
+        assert!(editor.create_file("main.rs"));
+        editor.documents[0].text = "fn main() ".into();
+        editor.focus_editor = true;
+        let screen = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1390.0, 860.0),
+        ));
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for events in [
+            vec![],
+            vec![egui::Event::Text("{".into())],
+            vec![key(egui::Key::Enter)],
+            vec![egui::Event::Text("x".into())],
+        ] {
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: screen,
+                    events,
+                    ..Default::default()
+                },
+                |ctx| editor.render(ctx),
+            );
+        }
+        assert_eq!(editor.documents[0].text, "fn main() {\n    x\n}");
+        assert!(editor.documents[0].dirty);
     }
 
     #[test]

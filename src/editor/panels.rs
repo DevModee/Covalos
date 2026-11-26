@@ -1157,6 +1157,8 @@ impl Editor {
                         let popup_open = self.lsp.popup_open(&doc.path);
                         self.ghost.keys(ui, id, &doc.path, caret_before, popup_open);
                     }
+                    // Pairs, smart Enter/Backspace, block indent, comments and line moves.
+                    let edited = super::editing::keys(ui, id, &mut doc.text, &language);
                     let output = TextEdit::multiline(&mut doc.text)
                         .id(id)
                         .code_editor()
@@ -1202,7 +1204,7 @@ impl Editor {
                     if focus {
                         output.response.request_focus();
                     }
-                    if output.response.changed() {
+                    if edited || output.response.changed() {
                         doc.update_dirty();
                         self.find_match = None;
                         self.find_empty = false;

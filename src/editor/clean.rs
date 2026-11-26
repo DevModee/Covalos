@@ -405,6 +405,7 @@ fn code_surface(
                     ui.fonts_mut(|fonts| fonts.layout_job(job))
                 };
                 let band = ui.painter().add(egui::Shape::Noop);
+                let edited = super::editing::keys(ui, id, &mut doc.text, &language);
                 let output = TextEdit::multiline(&mut doc.text)
                     .id(id)
                     .code_editor()
@@ -414,7 +415,7 @@ fn code_surface(
                     .desired_width(ui.available_width())
                     .layouter(&mut layouter)
                     .show(ui);
-                if output.response.changed() {
+                if edited || output.response.changed() {
                     doc.update_dirty();
                 }
                 has_focus = output.response.has_focus();
