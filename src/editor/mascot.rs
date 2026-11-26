@@ -223,7 +223,18 @@ pub(super) fn paint(painter: &Painter, rect: Rect, pose: Pose) {
             mesh.colored_vertex(center + vec2(nx * w, ny * h), c);
         }
     }
-    for ring_i in 0..rings {
+    // A raw mesh has hard, stair-stepped edges at avatar sizes: one more ring a physical pixel
+    // outside the silhouette, fully transparent, anti-aliases the outline.
+    let feather = 1.0 / painter.pixels_per_point();
+    for s in 0..=slices {
+        let a = s as f32 / slices as f32 * TAU;
+        let edge = squircle(Pos2::ZERO, 1.0, 1.0, a);
+        mesh.colored_vertex(
+            center + vec2(edge.x * (w + feather), edge.y * (h + feather)),
+            Color32::TRANSPARENT,
+        );
+    }
+    for ring_i in 0..=rings {
         for s in 0..slices {
             let a = (ring_i * (slices + 1) + s) as u32;
             let b = a + (slices + 1) as u32;
