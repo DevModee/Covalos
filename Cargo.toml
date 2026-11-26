@@ -1,6 +1,6 @@
 [package]
 name = "covalos"
-version = "0.8.9"
+version = "0.8.10"
 edition = "2024"
 description = "Native Rust IDE with multi-agent orchestration"
 publish = false

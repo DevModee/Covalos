@@ -4,6 +4,23 @@ Notable changes per published build. Versions follow the internal build number i
 `Cargo.toml` (see [`docs/RELEASE.md`](docs/RELEASE.md)); the public name is "Beta" plus that
 number. Builds before 0.8.4 are described only in the git history.
 
+## [0.8.10] - 2026-11-26
+
+### Added
+
+- "Close project" action in the workspace menu to return to the home screen cleanly.
+
+### Changed
+
+- Retired Gemini CLI in favor of Antigravity as the Google provider.
+- Redesigned the Terminal panel with softer padding and borderless pill tabs.
+- Gave Guided Mode more room for code and notes by removing its title bar.
+- Added padded text field styling across Settings and Student Mode, and turned the version label into a quiet badge.
+
+### Fixed
+
+- Student Mode now waits for and picks up already authenticated AI accounts (Claude Code, Codex, Antigravity).
+
 ## [0.8.9] - 2026-11-26
 
 ### Added
