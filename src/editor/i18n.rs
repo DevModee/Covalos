@@ -2249,6 +2249,211 @@ const SPANISH: &[(&str, &str)] = &[
         "Destructuring: takes named parts out of a module or object.",
         "Desestructuración: saca partes con nombre de un módulo u objeto.",
     ),
+    // Mode switcher
+    ("Guided", "Guiado"),
+    ("Student", "Estudiante"),
+    (
+        "Guided Mode: type code line by line from an agent's plan (Ctrl+Shift+G)",
+        "Modo Guiado: escribí el código línea por línea siguiendo el plan de un agente (Ctrl+Shift+G)",
+    ),
+    (
+        "Agents: sessions, providers and the side chat (Ctrl+Shift+H)",
+        "Agentes: sesiones, proveedores y el chat lateral (Ctrl+Shift+H)",
+    ),
+    (
+        "Student Mode: lessons, practice and progress (Ctrl+Shift+L)",
+        "Modo Estudiante: lecciones, práctica y progreso (Ctrl+Shift+L)",
+    ),
+    // Student Mode
+    ("Python from scratch", "Python desde cero"),
+    (
+        "Variables, types and conditionals",
+        "Variables, tipos y condicionales",
+    ),
+    (
+        "Lists, dictionaries and loops",
+        "Listas, diccionarios y bucles",
+    ),
+    (
+        "Functions, return values and errors",
+        "Funciones, valores de retorno y errores",
+    ),
+    ("Files, JSON and modules", "Archivos, JSON y módulos"),
+    ("Classes and objects", "Clases y objetos"),
+    ("SQLite with sqlite3", "SQLite con sqlite3"),
+    ("Guided project with tests", "Proyecto guiado con tests"),
+    ("Types and functions", "Tipos y funciones"),
+    ("Arrays and objects", "Arrays y objetos"),
+    ("Unions and error handling", "Uniones y manejo de errores"),
+    ("GROUP BY and aggregates", "GROUP BY y agregados"),
+    ("What do you want to learn?", "¿Qué querés aprender?"),
+    (
+        "Short lessons, your own code, real tests. The tutor guides; you write.",
+        "Lecciones cortas, tu propio código, tests reales. El profesor guía; vos escribís.",
+    ),
+    ("Choose a track", "Elegí una ruta"),
+    (
+        "Pick a track above to start",
+        "Elegí una ruta arriba para empezar",
+    ),
+    (
+        "Answer the tutor or ask a question",
+        "Respondé al profesor o hacé una pregunta",
+    ),
+    ("lessons", "lecciones"),
+    ("Day", "Día"),
+    ("day streak", "días de racha"),
+    ("Practice", "Práctica"),
+    ("Progress", "Progreso"),
+    ("Professional Git", "Git profesional"),
+    ("Technical English", "Inglés técnico"),
+    ("Code and correctness", "Código y correctitud"),
+    ("Autonomy", "Autonomía"),
+    ("Correctness", "Correctitud"),
+    ("Clarity", "Claridad"),
+    ("English", "Inglés"),
+    ("Average score", "Puntaje promedio"),
+    ("Longest streak", "Racha más larga"),
+    ("To review", "Para repasar"),
+    ("Sync progress now", "Sincronizar progreso ahora"),
+    ("Syncing progress", "Sincronizando progreso"),
+    ("Progress synced.", "Progreso sincronizado."),
+    (
+        "Sign in to a COVALOS account to sync.",
+        "Iniciá sesión en una cuenta COVALOS para sincronizar.",
+    ),
+    (
+        "Could not save progress.",
+        "No se pudo guardar el progreso.",
+    ),
+    ("Dismiss", "Descartar"),
+    ("Exercise", "Ejercicio"),
+    ("Bridge exercise", "Ejercicio puente"),
+    ("Run & Grade", "Ejecutar y evaluar"),
+    ("Explain this error", "Explicame este error"),
+    ("Show tip", "Ver tip"),
+    (
+        "Each hint lowers the autonomy score.",
+        "Cada pista baja el puntaje de autonomía.",
+    ),
+    ("Tests passed", "Tests aprobados"),
+    (
+        "Passed. Next lesson unlocked.",
+        "Aprobado. Siguiente lección desbloqueada.",
+    ),
+    (
+        "Bridge done. Back to the lesson exercise.",
+        "Puente listo. Volvemos al ejercicio de la lección.",
+    ),
+    ("A smaller step first.", "Primero, un paso más chico."),
+    (
+        "Under 70. Fix it and run again.",
+        "Menos de 70. Corregilo y volvé a ejecutar.",
+    ),
+    (
+        "The run took longer than 20 seconds and was stopped.",
+        "La ejecución tardó más de 20 segundos y se detuvo.",
+    ),
+    ("Branch", "Rama"),
+    ("Create branch", "Crear rama"),
+    ("Switched to", "Cambiaste a"),
+    ("Committed", "Commit creado"),
+    (
+        "Nothing to commit yet.",
+        "Todavía no hay cambios para commitear.",
+    ),
+    (
+        "Commit after each step that passes its tests.",
+        "Commiteá después de cada paso que pasa sus tests.",
+    ),
+    ("Send (Enter)", "Enviar (Enter)"),
+    ("Listening...", "Escuchando..."),
+    ("Stop listening", "Dejar de escuchar"),
+    (
+        "Microphone level (dictation is not available yet)",
+        "Nivel del micrófono (el dictado todavía no está disponible)",
+    ),
+    ("No microphone found", "No se encontró un micrófono"),
+    (
+        "Could not open the microphone",
+        "No se pudo abrir el micrófono",
+    ),
+    (
+        "Microphone input is only available on Windows for now",
+        "Por ahora el micrófono solo funciona en Windows",
+    ),
+    ("Tips", "Tips"),
+    ("Ask a quick question", "Hacé una pregunta rápida"),
+    (
+        "The tutor is unavailable.",
+        "El profesor no está disponible.",
+    ),
+    (
+        "Connect an AI in Agents to use the tutor.",
+        "Conectá una IA en Agentes para usar al profesor.",
+    ),
+    ("Student Mode tutor", "Profesor del Modo Estudiante"),
+    ("Student Mode turn", "Turno del Modo Estudiante"),
+    (
+        "The tutor session was closed.",
+        "La sesión del profesor se cerró.",
+    ),
+    (
+        "The tutor did not answer. Check the session in Agents.",
+        "El profesor no respondió. Revisá la sesión en Agentes.",
+    ),
+    ("Could not save file.", "No se pudo guardar el archivo."),
+    // Tray
+    (
+        "Keep running in the tray",
+        "Seguir en la bandeja del sistema",
+    ),
+    (
+        "Closing the window keeps COVALOS in the notification area so the phone bridge stays connected. Ending it from Task Manager takes it offline.",
+        "Al cerrar la ventana, COVALOS queda en el área de notificaciones y el puente con el celular sigue conectado. Si lo cerrás desde el Administrador de tareas, pasa a offline.",
+    ),
+    ("Available on Windows.", "Disponible en Windows."),
+    ("Open Covalos", "Abrir Covalos"),
+    ("Quit", "Salir"),
+    (
+        "COVALOS is running. The phone bridge stays connected.",
+        "COVALOS sigue abierto. El puente con el celular sigue conectado.",
+    ),
+    (
+        "Could not create the tray icon.",
+        "No se pudo crear el ícono de la bandeja.",
+    ),
+    // Updates
+    ("Check for updates", "Buscar actualizaciones"),
+    ("Checking for updates.", "Buscando actualizaciones."),
+    (
+        "Covalos checks for updates when it starts.",
+        "Covalos busca actualizaciones al iniciar.",
+    ),
+    ("You are up to date.", "Tenés la última versión."),
+    ("{version} is available.", "{version} está disponible."),
+    ("Downloading", "Descargando"),
+    ("Update ready", "Actualización lista"),
+    ("Updates", "Actualizaciones"),
+    ("Update", "Actualizar"),
+    (
+        "Update available: {version}",
+        "Actualización disponible: {version}",
+    ),
+    ("Downloading {percent}%", "Descargando {percent}%"),
+    ("Downloading {version}.", "Descargando {version}."),
+    ("Restart now", "Reiniciar ahora"),
+    ("Open installer", "Abrir instalador"),
+    ("Release notes", "Notas de la versión"),
+    ("Save your files first", "Guardá tus archivos primero"),
+    (
+        "No installer for this system.",
+        "No hay instalador para este sistema.",
+    ),
+    (
+        "The installer is open. Finish it, then restart Covalos.",
+        "El instalador está abierto. Terminalo y después reiniciá Covalos.",
+    ),
 ];
 
 #[cfg(test)]
@@ -2286,6 +2491,11 @@ mod tests {
             include_str!("guided.rs"),
             include_str!("luma_ui.rs"),
             include_str!("cloud_ui.rs"),
+            include_str!("modes.rs"),
+            include_str!("student/ui.rs"),
+            include_str!("student_host.rs"),
+            include_str!("tray.rs"),
+            include_str!("update_ui.rs"),
             include_str!("../editor.rs"),
         ];
         let table = spanish();
