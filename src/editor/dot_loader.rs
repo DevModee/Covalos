@@ -27,6 +27,7 @@ pub(super) enum LoaderPattern {
 }
 
 impl LoaderPattern {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(super) const ALL: [Self; 6] = [
         Self::Ring,
         Self::Diamond,

@@ -673,15 +673,15 @@ pub(super) fn checkbox(
     .inner
 }
 
+/// The dot-matrix loader; it draws a still frame itself when motion is off or the
+/// window is in the background.
 pub(super) fn busy_indicator(ui: &mut egui::Ui) -> egui::Response {
-    if ui.input(|input| input.focused) && ui.style().animation_time > 0.0 {
-        return ui.add(egui::Spinner::new().color(colors().accent).size(14.0));
-    }
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
-    ui.painter()
-        .circle_stroke(rect.center(), 4.0, Stroke::new(1.5_f32, colors().muted));
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, false, "Working"));
-    response
+    super::dot_loader::dot_glyph(
+        ui,
+        14.0,
+        super::dot_loader::LoaderPattern::Blocks,
+        colors().accent,
+    )
 }
 
 pub(super) fn section(ui: &mut egui::Ui, title: &str, description: &str) {
