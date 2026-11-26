@@ -429,6 +429,13 @@ impl Editor {
                     ui.close();
                     self.pick_new_project(ui.ctx());
                 }
+                if self.root.is_some() {
+                    ui.separator();
+                    if ui.button(tr("Close project")).clicked() {
+                        ui.close();
+                        self.request(Pending::CloseWorkspace, ui.ctx());
+                    }
+                }
             },
         );
     }

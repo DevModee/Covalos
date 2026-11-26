@@ -81,6 +81,7 @@ enum Sidebar {
 
 enum Pending {
     OpenWorkspace(PathBuf),
+    CloseWorkspace,
     CloseTab(usize),
     Exit,
 }
@@ -381,6 +382,39 @@ impl Editor {
         }
     }
 
+    /// Leaves the current project and returns to Home with no workspace. Open tabs
+    /// are remembered for the project, as when switching to another one.
+    fn close_workspace(&mut self) {
+        if self.root.is_none() || !self.save_conversation() {
+            return;
+        }
+        self.snapshot_workspace_state();
+        self.guided.save_to_disk(self.root.as_deref());
+        self.reset_chat();
+        self.hub.change_workspace(String::new(), Vec::new());
+        self.include_project_note = false;
+        self.guided.clear(None);
+        self.entry_draft = None;
+        self.root = None;
+        self.hub_open = false;
+        self.tools.workspace_changed();
+        self.terminals.workspace_changed(None);
+        self.directories.clear();
+        self.documents.clear();
+        self.clean = clean::Clean::default();
+        self.active = None;
+        self.cursor = 0;
+        self.selection = None;
+        self.sidebar = Sidebar::Files;
+        self.sidebar_requested = false;
+        self.explorer_filter.clear();
+        self.workspace_query.clear();
+        self.search_hits.clear();
+        self.search_job = None;
+        self.find_open = false;
+        self.notice = None;
+    }
+
     fn snapshot_workspace_state(&mut self) {
         if let Some(root) = self.root.clone() {
             let files: Vec<PathBuf> = self.documents.iter().map(|d| d.path.clone()).collect();
@@ -511,6 +545,12 @@ impl Editor {
                 }
                 self.documents.iter().any(|doc| doc.dirty)
             }
+            Pending::CloseWorkspace => {
+                if self.root.is_none() {
+                    return;
+                }
+                self.documents.iter().any(|doc| doc.dirty)
+            }
             Pending::Exit => self.documents.iter().any(|doc| doc.dirty),
         };
         if dirty {
@@ -523,6 +563,7 @@ impl Editor {
     fn perform(&mut self, action: Pending, ctx: &egui::Context) {
         match action {
             Pending::OpenWorkspace(path) => self.open_workspace(path),
+            Pending::CloseWorkspace => self.close_workspace(),
             Pending::CloseTab(index) => {
                 if self.active == Some(index) {
                     self.include_active_file = false;
@@ -1543,6 +1584,29 @@ mod tests {
                 }))
             }),
         )?;
+        Ok(())
+    }
+
+    #[test]
+    fn close_project_asks_to_save_then_returns_home() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let ctx = egui::Context::default();
+        let mut editor = Editor::new(&ctx, Some(dir.path().to_owned()), Preferences::default());
+        assert!(editor.create_file("main.rs"));
+        editor.documents[0].text = "fn main() {}".into();
+        editor.documents[0].update_dirty();
+        editor.request(Pending::CloseWorkspace, &ctx);
+        assert!(editor.pending.is_some(), "unsaved edits ask first");
+        assert!(editor.root.is_some());
+        editor.pending = None;
+        editor.save_all();
+        editor.request(Pending::CloseWorkspace, &ctx);
+        assert!(editor.pending.is_none());
+        assert!(editor.root.is_none());
+        assert!(editor.documents.is_empty() && editor.active.is_none());
+        // Closing again with no project does nothing.
+        editor.request(Pending::CloseWorkspace, &ctx);
+        assert!(editor.pending.is_none());
         Ok(())
     }
 

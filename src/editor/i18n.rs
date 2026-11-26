@@ -2454,6 +2454,7 @@ const SPANISH: &[(&str, &str)] = &[
         "The installer is open. Finish it, then restart Covalos.",
         "El instalador está abierto. Terminalo y después reiniciá Covalos.",
     ),
+    ("Close project", "Cerrar proyecto"),
     // Student Mode tutor accounts
     ("Tutor", "Profesor"),
     ("Checking AI accounts", "Verificando cuentas de IA"),
