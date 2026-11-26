@@ -475,7 +475,7 @@ impl Editor {
             planning = runtime.planning.is_some();
             for session in runtime.sessions.iter().take(40) {
                 let meta = &session.meta;
-                sessions.push(json!({
+                let mut entry = json!({
                     "id": meta.id.as_str(),
                     "title": agent_gate::redact(&meta.title).chars().take(120).collect::<String>(),
                     "status": meta.status.label(),
@@ -484,7 +484,11 @@ impl Editor {
                     "model": meta.model,
                     "turns": meta.turns,
                     "pinned": self.preferences.agent_pinned.contains(meta.id.as_str()),
-                }));
+                });
+                if let Some(usage) = remote_usage(meta.input_tokens, meta.output_tokens) {
+                    entry["usage"] = usage;
+                }
+                sessions.push(entry);
             }
             for request in runtime.approvals.iter().take(20) {
                 approvals.push(json!({
@@ -867,6 +871,18 @@ fn remote_may_answer(allow: bool, allow_remote: bool, sensitive: bool) -> Result
     Ok(())
 }
 
+/// A session's running token totals for the phone, in the shape the app parses
+/// (`usage.input_tokens` / `usage.output_tokens`). `None` until the provider has reported
+/// usage, so the phone shows "not reported" instead of a fake zero; older apps ignore it.
+fn remote_usage(input_tokens: u64, output_tokens: u64) -> Option<Value> {
+    (input_tokens > 0 || output_tokens > 0).then(|| {
+        json!({
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        })
+    })
+}
+
 /// What a gate request touches, without full paths.
 fn remote_action(action: &Action) -> String {
     let name = |path: &std::path::Path| {
@@ -896,6 +912,19 @@ mod tests {
             "curl -H 'Authorization: Bearer sk-ant-abcdefghijklmnopqrstuvwxyz0123'".into(),
         );
         assert!(!remote_action(&run).contains("sk-ant"));
+    }
+
+    #[test]
+    fn token_usage_is_sent_only_once_reported() {
+        assert_eq!(remote_usage(0, 0), None);
+        assert_eq!(
+            remote_usage(1200, 340),
+            Some(json!({"input_tokens": 1200, "output_tokens": 340}))
+        );
+        assert_eq!(
+            remote_usage(0, 5),
+            Some(json!({"input_tokens": 0, "output_tokens": 5}))
+        );
     }
 
     #[test]
