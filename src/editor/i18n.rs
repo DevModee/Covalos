@@ -1588,6 +1588,10 @@ const SPANISH: &[(&str, &str)] = &[
     ("Guided Mode", "Modo Guiado"),
     ("Open in Guided Mode", "Abrir en Modo Guiado"),
     (
+        "Could not read a valid guided plan from that reply.",
+        "No se pudo leer un plan guiado válido en esa respuesta.",
+    ),
+    (
         "Ask the AI for a step-by-step lyric code-along with dependency-safe file order.",
         "Pedile a la IA un plan paso a paso tipo lyrics sin imports rotos.",
     ),
