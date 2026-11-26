@@ -677,6 +677,7 @@ dependencies = [
  "libc",
  "png",
  "portable-pty",
+ "raw-window-handle",
  "regex",
  "rfd",
  "serde",

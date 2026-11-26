@@ -49,6 +49,8 @@ pub(super) struct Preferences {
     pub(super) compact: bool,
     pub(super) reduce_motion: bool,
     pub(super) quiet_notifications: bool,
+    /// Closing the window hides it in the tray so the phone bridge stays connected.
+    pub(super) close_to_tray: bool,
     pub(super) notification_interval: u64,
     pub(super) high_contrast: bool,
     pub(super) assistant_open: bool,
@@ -110,6 +112,7 @@ impl Default for Preferences {
             compact: false,
             reduce_motion: false,
             quiet_notifications: false,
+            close_to_tray: false,
             notification_interval: 15,
             high_contrast: false,
             assistant_open: true,
